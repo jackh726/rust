@@ -16,6 +16,7 @@ use crate::middle::stability;
 use crate::mir::interpret::{Allocation, ConstValue, Scalar};
 use crate::mir::{interpret, Body, Field, Local, Place, PlaceElem, ProjectionKind, Promoted};
 use crate::traits;
+use crate::traits::ChalkRustInterner;
 use crate::ty::query;
 use crate::ty::steal::Steal;
 use crate::ty::subst::{GenericArg, InternalSubsts, Subst, SubstsRef};
@@ -94,6 +95,8 @@ pub struct CtxtInterners<'tcx> {
     projs: InternedSet<'tcx, List<ProjectionKind>>,
     place_elems: InternedSet<'tcx, List<PlaceElem<'tcx>>>,
     const_: InternedSet<'tcx, Const<'tcx>>,
+
+    chalk_ty: InternedSet<'tcx, chalk_ir::TyData<ChalkRustInterner<'tcx>>>,
 }
 
 impl<'tcx> CtxtInterners<'tcx> {
@@ -110,6 +113,8 @@ impl<'tcx> CtxtInterners<'tcx> {
             projs: Default::default(),
             place_elems: Default::default(),
             const_: Default::default(),
+
+            chalk_ty: Default::default(),
         }
     }
 

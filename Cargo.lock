@@ -430,6 +430,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "chalk-derive"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d4620afad4d4d9e63f915cfa10c930b7a3c9c3ca5cd88dd771ff8e5bf04ea10"
+dependencies = [
+ "proc-macro2 1.0.3",
+ "quote 1.0.2",
+ "syn 1.0.11",
+ "synstructure 0.12.1",
+]
+
+[[package]]
+name = "chalk-engine"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ca6e5cef10197789da0b4ec310eda58da4c55530613b2323432642a97372735"
+dependencies = [
+ "chalk-macros",
+ "rustc-hash",
+]
+
+[[package]]
+name = "chalk-ir"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d45df5fb6328527f976e8a32c9e1c9970084d937ebe93d0d34f5bbf4231cb956"
+dependencies = [
+ "chalk-derive",
+ "chalk-engine",
+ "chalk-macros",
+]
+
+[[package]]
+name = "chalk-macros"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e4782d108e420a1fcf94d8a919cf248db33c5071678e87d9c2d4f20ed1feb32"
+dependencies = [
+ "lazy_static 1.4.0",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3981,6 +4023,7 @@ dependencies = [
  "backtrace",
  "bitflags",
  "byteorder",
+ "chalk-ir",
  "log",
  "measureme",
  "polonius-engine",

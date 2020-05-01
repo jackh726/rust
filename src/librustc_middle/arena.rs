@@ -76,6 +76,9 @@ macro_rules! arena_types {
             [few] hir_definitions: rustc_hir::definitions::Definitions,
             [] hir_owner: rustc_middle::hir::Owner<$tcx>,
             [] hir_owner_nodes: rustc_middle::hir::OwnerNodes<$tcx>,
+
+            // Chalk types
+            [] chalk_ty: chalk_ir::TyData<crate::traits::ChalkRustInterner<$tcx>>,
         ], $tcx);
     )
 }

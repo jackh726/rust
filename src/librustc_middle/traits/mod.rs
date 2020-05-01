@@ -2,6 +2,7 @@
 //!
 //! [rustc dev guide]: https://rustc-dev-guide.rust-lang.org/traits/resolution.html
 
+mod chalk;
 pub mod query;
 pub mod select;
 pub mod specialization_graph;
@@ -26,6 +27,11 @@ pub use self::select::{EvaluationCache, EvaluationResult, OverflowError, Selecti
 pub use self::ObligationCauseCode::*;
 pub use self::SelectionError::*;
 pub use self::Vtable::*;
+
+pub use self::chalk::{
+    RustDefId as ChalkRustDefId,
+    RustInterner as ChalkRustInterner,
+};
 
 /// Depending on the stage of compilation, we want projection to be
 /// more or less conservative.
