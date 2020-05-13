@@ -168,7 +168,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
                 });
                 return struct_datum;
             }
-            RustDefId::Ref(_) => {
+            RustDefId::Ref(_) | RustDefId::RawPtr => {
                 return Arc::new(chalk_rust_ir::StructDatum {
                     id: struct_id,
                     binders: chalk_ir::Binders::new(
@@ -208,7 +208,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
                 });
             }
 
-            _ => bug!("Used not struct variant when expecting struct variant."),
+            v => bug!("Used not struct variant ({:?}) when expecting struct variant.", v),
         }
     }
 
@@ -287,6 +287,17 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
             RustDefId::Trait(def_id) => def_id,
             _ => bug!("Did not use `Trait` variant when expecting trait."),
         };
+        // FIXME(chalk): this match can be removed when builtin types supported
+        match struct_id.0 {
+            RustDefId::Adt(_) => {},
+            RustDefId::Str => return false,
+            RustDefId::Never => return false,
+            RustDefId::Slice => return false,
+            RustDefId::Array => return false,
+            RustDefId::Ref(_) => return false,
+            RustDefId::RawPtr => return false,
+            _ => bug!("Did not use `Adt` variant when expecting adt."),
+        }
         let adt_def_id: DefId = match struct_id.0 {
             RustDefId::Adt(def_id) => def_id,
             _ => bug!("Did not use `Adt` variant when expecting adt."),
@@ -351,9 +362,24 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
 
     fn opaque_ty_data(
         &self,
-        _id: chalk_ir::OpaqueTyId<RustInterner<'tcx>>,
+        opaque_ty_id: chalk_ir::OpaqueTyId<RustInterner<'tcx>>,
     ) -> Arc<chalk_rust_ir::OpaqueTyDatum<RustInterner<'tcx>>> {
-        unimplemented!()
+        // FIXME(chalk): actually lower opaque ty
+        let hidden_ty = self.tcx.mk_ty(ty::Tuple(self.tcx.intern_substs(&[]))).lower_into(&self.interner);
+        let value = chalk_rust_ir::OpaqueTyDatumBound {
+            hidden_ty,
+            bounds: chalk_ir::Binders::new(
+                chalk_ir::ParameterKinds::new(&self.interner),
+                vec![],
+            ),
+        };
+        Arc::new(chalk_rust_ir::OpaqueTyDatum {
+            opaque_ty_id,
+            bound: chalk_ir::Binders::new(
+                chalk_ir::ParameterKinds::new(&self.interner),
+                value,
+            ),
+        })
     }
 
     /// Since Chalk can't handle all Rust types currently, we have to handle
@@ -390,7 +416,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
 
                             Str | Slice => Some(false),
 
-                            Trait(_) | Impl(_) | AssocTy(_) => panic!(),
+                            Trait(_) | Impl(_) | AssocTy(_) | Opaque(_) => panic!(),
                         }
                     }
                     _ => None,
@@ -420,7 +446,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
                                     }
                                 }
                             }
-                            Trait(_) | Impl(_) | AssocTy(_) => panic!(),
+                            Trait(_) | Impl(_) | AssocTy(_) | Opaque(_) => panic!(),
                         }
                     }
                     _ => None,

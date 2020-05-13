@@ -1957,6 +1957,9 @@ impl<'test> TestCx<'test> {
             Some(CompareMode::Polonius) => {
                 rustc.args(&["-Zpolonius", "-Zborrowck=mir"]);
             }
+            Some(CompareMode::Chalk) => {
+                rustc.args(&["-Zchalk"]);
+            }
             None => {}
         }
 
