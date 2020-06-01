@@ -234,7 +234,7 @@ impl TyKind<'tcx> {
 
 // `TyKind` is used a lot. Make sure it doesn't unintentionally get bigger.
 #[cfg(target_arch = "x86_64")]
-static_assert_size!(TyKind<'_>, 24);
+static_assert_size!(TyKind<'_>, 32);
 
 /// A closure can be modeled as a struct that looks like:
 ///
@@ -957,7 +957,7 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 /// type from `Binder<T>` to just `T` (see
 /// e.g., `liberate_late_bound_regions`).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
-pub struct Binder<T>(T);
+pub struct Binder<T>(T, u32);
 
 impl<T> Binder<T> {
     /// Wraps `value` in a binder, asserting that `value` does not
@@ -969,12 +969,12 @@ impl<T> Binder<T> {
         T: TypeFoldable<'tcx>,
     {
         debug_assert!(!value.has_escaping_bound_vars());
-        Binder(value)
+        Binder(value, 0)
     }
 
     /// Wraps `value` in a binder, binding higher-ranked vars (if any).
     pub fn bind(value: T) -> Binder<T> {
-        Binder(value)
+        Binder(value, 0)
     }
 
     /// Wraps `value` in a binder without actually binding any currently
@@ -1014,7 +1014,7 @@ impl<T> Binder<T> {
     }
 
     pub fn as_ref(&self) -> Binder<&T> {
-        Binder(&self.0)
+        Binder(&self.0, self.1)
     }
 
     pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<U>
@@ -1028,7 +1028,7 @@ impl<T> Binder<T> {
     where
         F: FnOnce(T) -> U,
     {
-        Binder(f(self.0))
+        Binder(f(self.0), self.1)
     }
 
     /// Wraps a `value` in a binder, using the same bound variables as the
@@ -1041,7 +1041,7 @@ impl<T> Binder<T> {
     /// because bound vars aren't allowed to change here, whereas they are
     /// in `bind`. This may be (debug) asserted in the future.
     pub fn rebind<U>(&self, value: U) -> Binder<U> {
-        Binder(value)
+        Binder(value, self.1)
     }
 
     /// Unwraps and returns the value within, but only if it contains
@@ -1072,7 +1072,7 @@ impl<T> Binder<T> {
     where
         F: FnOnce(T, U) -> R,
     {
-        Binder(f(self.0, u.0))
+        Binder(f(self.0, u.0), self.1)
     }
 
     /// Splits the contents into two things that share the same binder
@@ -1086,13 +1086,13 @@ impl<T> Binder<T> {
         F: FnOnce(T) -> (U, V),
     {
         let (u, v) = f(self.0);
-        (Binder(u), Binder(v))
+        (Binder(u, self.1), Binder(v, self.1))
     }
 }
 
 impl<T> Binder<Option<T>> {
     pub fn transpose(self) -> Option<Binder<T>> {
-        self.0.map(Binder)
+        self.0.map(|v| Binder(v, self.1))
     }
 }
 
