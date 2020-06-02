@@ -821,7 +821,8 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for Box<[T]> {
 
 impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for ty::Binder<T> {
     fn super_fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
-        self.map_bound_ref(|ty| ty.fold_with(folder))
+        let new_ty = self.as_ref().skip_binder().fold_with(folder);
+        ty::Binder::bind(new_ty)
     }
 
     fn fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
