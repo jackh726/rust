@@ -307,7 +307,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                     traits::Obligation::new(
                         cause.clone(),
                         param_env,
-                        ty::PredicateKind::WellFormed(arg).to_predicate(tcx),
+                        ty::PredicateKint::WellFormed(arg).to_predicate(tcx),
                     )
                 }),
         );
@@ -364,7 +364,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                             let obligations = self.nominal_obligations(def_id, substs);
                             self.out.extend(obligations);
 
-                            let predicate = ty::PredicateKind::ConstEvaluatable(def_id, substs)
+                            let predicate = ty::PredicateKint::ConstEvaluatable(def_id, substs)
                                 .to_predicate(self.tcx());
                             let cause = self.cause(traits::MiscObligation);
                             self.out.push(traits::Obligation::new(
