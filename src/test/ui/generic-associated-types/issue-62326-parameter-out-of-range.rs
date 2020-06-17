@@ -5,7 +5,7 @@
 
 trait Iterator {
     type Item<'a>: 'a;
-    //~^ ERROR the requirement `for<'a> <Self as Iterator>::Item<'a>: 'a` is not satisfied
+    //~^ ERROR the associated type `<Self as Iterator>::Item<'a>` may not live long enough
 }
 
 fn main() {}
