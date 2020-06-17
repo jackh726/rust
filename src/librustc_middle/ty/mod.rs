@@ -1181,6 +1181,8 @@ pub enum PredicateKint<'tcx> {
     ForAll(Binder<&'tcx PredicateKint<'tcx>>),
 }
 
+pub type PredicateKynd<'tcx> = PredicateKind<'tcx>;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
 #[derive(HashStable, TypeFoldable)]
 pub enum PredicateKind<'tcx> {
