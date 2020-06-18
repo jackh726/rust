@@ -531,12 +531,14 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
                 GenericArg<'tcx>,
                 ty::Region<'tcx>,
             >| match k1.unpack() {
-                GenericArgKind::Lifetime(r1) => self.tcx.intern_predicate_kint(
-                    ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r1, r2)),
-                ),
-                GenericArgKind::Type(t1) => self.tcx.intern_predicate_kint(
-                    ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(t1, r2)),
-                ),
+                GenericArgKind::Lifetime(r1) => {
+                    ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r1, r2))
+                        .to_predicate(self.tcx)
+                }
+                GenericArgKind::Type(t1) => {
+                    ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(t1, r2))
+                        .to_predicate(self.tcx)
+                }
                 GenericArgKind::Const(..) => {
                     // Consts cannot outlive one another, so we don't expect to
                     // ecounter this branch.

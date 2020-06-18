@@ -1055,6 +1055,23 @@ impl<'tcx> Predicate<'tcx> {
     pub fn kind(self) -> &'tcx PredicateKind<'tcx> {
         &self.inner.kind
     }
+
+    /// Skips `PredicateKind::ForAll`.
+    pub fn ignore_qualifiers(self) -> Binder<Predicate<'tcx>> {
+        match self.kind() {
+            &PredicateKind::ForAll(binder) => binder,
+            ty::PredicateKind::Projection(..)
+            | ty::PredicateKind::Trait(..)
+            | ty::PredicateKind::Subtype(..)
+            | ty::PredicateKind::WellFormed(..)
+            | ty::PredicateKind::ObjectSafe(..)
+            | ty::PredicateKind::ClosureKind(..)
+            | ty::PredicateKind::TypeOutlives(..)
+            | ty::PredicateKind::ConstEvaluatable(..)
+            | ty::PredicateKind::ConstEquate(..)
+            | ty::PredicateKind::RegionOutlives(..) => Binder::dummy(self),
+        }
+    }
 }
 
 impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
@@ -1069,69 +1086,6 @@ impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
         } = self.inner;
 
         kind.hash_stable(hcx, hasher);
-    }
-}
-
-impl<'tcx> Predicate<'tcx> {
-    pub fn kint(self, tcx: TyCtxt<'tcx>) -> &'tcx PredicateKind<'tcx> {
-        // I am efficient
-        tcx.intern_predicate_kint(match *self.kind() {
-            PredicateKind::Trait(binder, data) => {
-                if let Some(simpl) = binder.no_bound_vars() {
-                    PredicateKind::Trait(simpl, data)
-                } else {
-                    let inner = tcx
-                        .intern_predicate_kint(PredicateKind::Trait(*binder.skip_binder(), data));
-                    PredicateKind::ForAll(Binder::bind(inner))
-                }
-            }
-            PredicateKind::RegionOutlives(binder) => {
-                if let Some(simpl) = binder.no_bound_vars() {
-                    PredicateKind::RegionOutlives(simpl)
-                } else {
-                    let inner = tcx.intern_predicate_kint(PredicateKind::RegionOutlives(
-                        *binder.skip_binder(),
-                    ));
-                    PredicateKind::ForAll(Binder::bind(inner))
-                }
-            }
-            PredicateKind::TypeOutlives(binder) => {
-                if let Some(simpl) = binder.no_bound_vars() {
-                    PredicateKind::TypeOutlives(simpl)
-                } else {
-                    let inner = tcx
-                        .intern_predicate_kint(PredicateKind::TypeOutlives(*binder.skip_binder()));
-                    PredicateKind::ForAll(Binder::bind(inner))
-                }
-            }
-            PredicateKind::Projection(binder) => {
-                if let Some(simpl) = binder.no_bound_vars() {
-                    PredicateKind::Projection(simpl)
-                } else {
-                    let inner =
-                        tcx.intern_predicate_kint(PredicateKind::Projection(*binder.skip_binder()));
-                    PredicateKind::ForAll(Binder::bind(inner))
-                }
-            }
-            PredicateKind::WellFormed(arg) => PredicateKind::WellFormed(arg),
-            PredicateKind::ObjectSafe(def_id) => PredicateKind::ObjectSafe(def_id),
-            PredicateKind::ClosureKind(def_id, substs, kind) => {
-                PredicateKind::ClosureKind(def_id, substs, kind)
-            }
-            PredicateKind::Subtype(binder) => {
-                if let Some(simpl) = binder.no_bound_vars() {
-                    PredicateKind::Subtype(simpl)
-                } else {
-                    let inner =
-                        tcx.intern_predicate_kint(PredicateKind::Subtype(*binder.skip_binder()));
-                    PredicateKind::ForAll(Binder::bind(inner))
-                }
-            }
-            PredicateKind::ConstEvaluatable(def, substs) => {
-                PredicateKind::ConstEvaluatable(def, substs)
-            }
-            PredicateKind::ConstEquate(l, r) => PredicateKind::ConstEquate(l, r),
-        })
     }
 }
 
@@ -1178,17 +1132,7 @@ pub enum PredicateKind<'tcx> {
     ConstEquate(&'tcx Const<'tcx>, &'tcx Const<'tcx>),
 
     /// `for<'a>: ...`
-    ForAll(Binder<&'tcx PredicateKind<'tcx>>),
-}
-
-impl<'tcx> PredicateKind<'tcx> {
-    /// Skips `PredicateKind::ForAll`.
-    pub fn ignore_qualifiers(&'tcx self) -> Binder<&'tcx PredicateKind<'tcx>> {
-        match self {
-            &PredicateKind::ForAll(binder) => binder,
-            pred => Binder::dummy(pred),
-        }
-    }
+    ForAll(Binder<Predicate<'tcx>>),
 }
 
 /// The crate outlives map is computed during typeck and contains the
@@ -1277,20 +1221,23 @@ impl<'tcx> Predicate<'tcx> {
         // this trick achieves that).
 
         let substs = trait_ref.skip_binder().substs;
-        let kind = match self.kint(tcx) {
-            PredicateKind::ForAll(binder) => *binder.skip_binder(),
+        let kind = match self.kind() {
+            PredicateKind::ForAll(binder) => binder.skip_binder().kind(),
             kind => kind,
         };
 
         let new = kind.subst(tcx, substs);
 
-        let rebound = if new.has_escaping_bound_vars() {
-            PredicateKind::ForAll(Binder::bind(tcx.intern_predicate_kint(new)))
+        if new != *kind {
+            if new.has_escaping_bound_vars() {
+                PredicateKind::ForAll(Binder::bind(new.to_predicate(tcx)))
+            } else {
+                new
+            }
+            .to_predicate(tcx)
         } else {
-            new
-        };
-
-        if rebound != *kind { rebound.to_predicate(tcx) } else { self }
+            self
+        }
     }
 }
 
@@ -1415,76 +1362,6 @@ impl ToPredicate<'tcx> for PredicateKind<'tcx> {
     }
 }
 
-impl ToPredicate<'tcx> for PredicateKind<'tcx> {
-    #[inline(always)]
-    fn to_predicate(&self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        let (predicate, in_binder) = if let PredicateKind::ForAll(binder) = self {
-            (*binder.skip_binder(), true)
-        } else {
-            (self, false)
-        };
-
-        macro_rules! bind {
-            ($expr:expr) => {
-                match $expr {
-                    expr => {
-                        if in_binder {
-                            Binder::bind(expr)
-                        } else {
-                            Binder::dummy(expr)
-                        }
-                    }
-                }
-            };
-        }
-
-        match *predicate {
-            PredicateKind::ForAll(_) => bug!("unexpected PredicateKind: {:?}", self),
-            PredicateKind::Trait(data, ct) => PredicateKind::Trait(bind!(data), ct),
-            PredicateKind::RegionOutlives(data) => PredicateKind::RegionOutlives(bind!(data)),
-            PredicateKind::TypeOutlives(data) => PredicateKind::TypeOutlives(bind!(data)),
-            PredicateKind::Projection(data) => PredicateKind::Projection(bind!(data)),
-            PredicateKind::WellFormed(arg) => {
-                if in_binder {
-                    bug!("unexpected ForAll: {:?}", self)
-                } else {
-                    PredicateKind::WellFormed(arg)
-                }
-            }
-            PredicateKind::ObjectSafe(def_id) => {
-                if in_binder {
-                    bug!("unexpected ForAll: {:?}", self)
-                } else {
-                    PredicateKind::ObjectSafe(def_id)
-                }
-            }
-            PredicateKind::ClosureKind(def_id, substs, kind) => {
-                if in_binder {
-                    bug!("unexpected ForAll: {:?}", self)
-                } else {
-                    PredicateKind::ClosureKind(def_id, substs, kind)
-                }
-            }
-            PredicateKind::Subtype(data) => PredicateKind::Subtype(bind!(data)),
-            PredicateKind::ConstEvaluatable(def_id, substs) => {
-                if in_binder {
-                    bug!("unexpected ForAll: {:?}", self)
-                } else {
-                    PredicateKind::ConstEvaluatable(def_id, substs)
-                }
-            }
-            PredicateKind::ConstEquate(l, r) => {
-                if in_binder {
-                    bug!("unexpected ForAll: {:?}", self)
-                } else {
-                    PredicateKind::ConstEquate(l, r)
-                }
-            }
-        }
-        .to_predicate(tcx)
-    }
-}
-
 impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitRef<'tcx>> {
     fn to_predicate(&self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
         ty::PredicateKind::Trait(ty::TraitPredicate { trait_ref: self.value }, self.constness)
@@ -1498,10 +1375,8 @@ impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<PolyTraitRef<'tcx>> {
             ty::PredicateKind::Trait(ty::TraitPredicate { trait_ref }, self.constness)
         } else {
             ty::PredicateKind::ForAll(self.value.map_bound(|trait_ref| {
-                tcx.intern_predicate_kint(ty::PredicateKind::Trait(
-                    ty::TraitPredicate { trait_ref },
-                    self.constness,
-                ))
+                ty::PredicateKind::Trait(ty::TraitPredicate { trait_ref }, self.constness)
+                    .to_predicate(tcx)
             }))
         }
         .to_predicate(tcx)
@@ -1513,9 +1388,11 @@ impl<'tcx> ToPredicate<'tcx> for PolyRegionOutlivesPredicate<'tcx> {
         if let Some(outlives) = self.no_bound_vars() {
             PredicateKind::RegionOutlives(outlives)
         } else {
-            ty::PredicateKind::ForAll(self.map_bound(|outlives| {
-                tcx.intern_predicate_kint(PredicateKind::RegionOutlives(outlives))
-            }))
+            ty::PredicateKind::ForAll(
+                self.map_bound(|outlives| {
+                    PredicateKind::RegionOutlives(outlives).to_predicate(tcx)
+                }),
+            )
         }
         .to_predicate(tcx)
     }
@@ -1523,45 +1400,65 @@ impl<'tcx> ToPredicate<'tcx> for PolyRegionOutlivesPredicate<'tcx> {
 
 impl<'tcx> ToPredicate<'tcx> for PolyTypeOutlivesPredicate<'tcx> {
     fn to_predicate(&self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateKind::TypeOutlives(*self).to_predicate(tcx)
+        if let Some(outlives) = self.no_bound_vars() {
+            PredicateKind::TypeOutlives(outlives)
+        } else {
+            ty::PredicateKind::ForAll(
+                self.map_bound(|outlives| PredicateKind::TypeOutlives(outlives).to_predicate(tcx)),
+            )
+        }
+        .to_predicate(tcx)
     }
 }
 
 impl<'tcx> ToPredicate<'tcx> for PolyProjectionPredicate<'tcx> {
     fn to_predicate(&self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateKind::Projection(*self).to_predicate(tcx)
+        if let Some(proj) = self.no_bound_vars() {
+            PredicateKind::Projection(proj)
+        } else {
+            ty::PredicateKind::ForAll(
+                self.map_bound(|proj| PredicateKind::Projection(proj).to_predicate(tcx)),
+            )
+        }
+        .to_predicate(tcx)
     }
 }
 
 impl<'tcx> Predicate<'tcx> {
     pub fn to_opt_poly_trait_ref(self) -> Option<PolyTraitRef<'tcx>> {
-        match self.kind() {
-            &PredicateKind::Trait(ref t, _) => Some(t.to_poly_trait_ref()),
-            PredicateKind::Projection(..)
-            | PredicateKind::Subtype(..)
-            | PredicateKind::RegionOutlives(..)
-            | PredicateKind::WellFormed(..)
-            | PredicateKind::ObjectSafe(..)
-            | PredicateKind::ClosureKind(..)
-            | PredicateKind::TypeOutlives(..)
-            | PredicateKind::ConstEvaluatable(..)
-            | PredicateKind::ConstEquate(..) => None,
-        }
+        self.ignore_qualifiers()
+            .map_bound(|pred| match pred.kind() {
+                &PredicateKind::Trait(ref t, _) => Some(t.trait_ref),
+                PredicateKind::Projection(..)
+                | PredicateKind::Subtype(..)
+                | PredicateKind::RegionOutlives(..)
+                | PredicateKind::WellFormed(..)
+                | PredicateKind::ObjectSafe(..)
+                | PredicateKind::ClosureKind(..)
+                | PredicateKind::TypeOutlives(..)
+                | PredicateKind::ConstEvaluatable(..)
+                | PredicateKind::ConstEquate(..) => None,
+                PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", self),
+            })
+            .transpose()
     }
 
     pub fn to_opt_type_outlives(self) -> Option<PolyTypeOutlivesPredicate<'tcx>> {
-        match self.kind() {
-            &PredicateKind::TypeOutlives(data) => Some(data),
-            PredicateKind::Trait(..)
-            | PredicateKind::Projection(..)
-            | PredicateKind::Subtype(..)
-            | PredicateKind::RegionOutlives(..)
-            | PredicateKind::WellFormed(..)
-            | PredicateKind::ObjectSafe(..)
-            | PredicateKind::ClosureKind(..)
-            | PredicateKind::ConstEvaluatable(..)
-            | PredicateKind::ConstEquate(..) => None,
-        }
+        self.ignore_qualifiers()
+            .map_bound(|pred| match pred.kind() {
+                &PredicateKind::TypeOutlives(data) => Some(data),
+                PredicateKind::Trait(..)
+                | PredicateKind::Projection(..)
+                | PredicateKind::Subtype(..)
+                | PredicateKind::RegionOutlives(..)
+                | PredicateKind::WellFormed(..)
+                | PredicateKind::ObjectSafe(..)
+                | PredicateKind::ClosureKind(..)
+                | PredicateKind::ConstEvaluatable(..)
+                | PredicateKind::ConstEquate(..) => None,
+                PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", self),
+            })
+            .transpose()
     }
 }
 
