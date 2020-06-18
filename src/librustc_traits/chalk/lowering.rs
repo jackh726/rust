@@ -77,10 +77,13 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
     ) -> chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'tcx>>> {
         let clauses = self.environment.into_iter().filter_map(|clause| match clause {
             ChalkEnvironmentClause::Predicate(predicate) => {
-                match predicate.kind() {
-                    ty::PredicateKind::Trait(predicate, _) => {
+                // FIXME(chalk): forall
+                match predicate.ignore_qualifiers().skip_binder().kind() {
+                    ty::PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", predicate),
+                    &ty::PredicateKind::Trait(predicate, _) => {
+                        let predicate = ty::Binder::bind(predicate);
                         let (predicate, binders, _named_regions) =
-                            collect_bound_vars(interner, interner.tcx, predicate);
+                            collect_bound_vars(interner, interner.tcx, &predicate);
 
                         Some(
                             chalk_ir::ProgramClauseData::ForAll(chalk_ir::Binders::new(
@@ -101,9 +104,10 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
                     // FIXME(chalk): need to add RegionOutlives/TypeOutlives
                     ty::PredicateKind::RegionOutlives(_) => None,
                     ty::PredicateKind::TypeOutlives(_) => None,
-                    ty::PredicateKind::Projection(predicate) => {
+                    &ty::PredicateKind::Projection(predicate) => {
+                        let predicate = ty::Binder::bind(predicate);
                         let (predicate, binders, _named_regions) =
-                            collect_bound_vars(interner, interner.tcx, predicate);
+                            collect_bound_vars(interner, interner.tcx, &predicate);
 
                         Some(
                             chalk_ir::ProgramClauseData::ForAll(chalk_ir::Binders::new(
@@ -155,8 +159,12 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
 
 impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predicate<'tcx> {
     fn lower_into(self, interner: &RustInterner<'tcx>) -> chalk_ir::GoalData<RustInterner<'tcx>> {
-        match self.kind() {
-            ty::PredicateKind::Trait(predicate, _) => predicate.lower_into(interner),
+        // FIXME(chalk): forall
+        match self.ignore_qualifiers().skip_binder().kind() {
+            ty::PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", self),
+            &ty::PredicateKind::Trait(predicate, _) => {
+                ty::Binder::bind(predicate).lower_into(interner)
+            }
             // FIXME(chalk): we need to register constraints.
             ty::PredicateKind::RegionOutlives(_predicate) => {
                 chalk_ir::GoalData::All(chalk_ir::Goals::new(interner))
@@ -164,7 +172,9 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predi
             ty::PredicateKind::TypeOutlives(_predicate) => {
                 chalk_ir::GoalData::All(chalk_ir::Goals::new(interner))
             }
-            ty::PredicateKind::Projection(predicate) => predicate.lower_into(interner),
+            &ty::PredicateKind::Projection(predicate) => {
+                ty::Binder::bind(predicate).lower_into(interner)
+            }
             ty::PredicateKind::WellFormed(arg) => match arg.unpack() {
                 GenericArgKind::Type(ty) => match ty.kind {
                     // These types are always WF.
@@ -448,8 +458,11 @@ impl<'tcx> LowerInto<'tcx, Option<chalk_ir::QuantifiedWhereClause<RustInterner<'
         self,
         interner: &RustInterner<'tcx>,
     ) -> Option<chalk_ir::QuantifiedWhereClause<RustInterner<'tcx>>> {
-        match &self.kind() {
-            ty::PredicateKind::Trait(predicate, _) => {
+        // FIXME(chalk): forall
+        match self.ignore_qualifiers().skip_binder().kind() {
+            ty::PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", self),
+            &ty::PredicateKind::Trait(predicate, _) => {
+                let predicate = &ty::Binder::bind(predicate);
                 let (predicate, binders, _named_regions) =
                     collect_bound_vars(interner, interner.tcx, predicate);
 

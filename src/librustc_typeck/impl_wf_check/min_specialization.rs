@@ -198,9 +198,12 @@ fn unconstrained_parent_impl_substs<'tcx>(
     // the functions in `cgp` add the constrained parameters to a list of
     // unconstrained parameters.
     for (predicate, _) in impl_generic_predicates.predicates.iter() {
-        if let ty::PredicateKind::Projection(proj) = predicate.kind() {
-            let projection_ty = proj.skip_binder().projection_ty;
-            let projected_ty = proj.skip_binder().ty;
+        // TODO: forall (do we need ignore_qualifiers here)
+        if let ty::PredicateKind::Projection(proj) =
+            predicate.ignore_qualifiers().skip_binder().kind()
+        {
+            let projection_ty = proj.projection_ty;
+            let projected_ty = proj.ty;
 
             let unbound_trait_ref = projection_ty.trait_ref(tcx);
             if Some(unbound_trait_ref) == impl_trait_ref {
@@ -393,6 +396,7 @@ fn trait_predicate_kind<'tcx>(
     predicate: ty::Predicate<'tcx>,
 ) -> Option<TraitSpecializationKind> {
     match predicate.kind() {
+        ty::PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", predicate),
         ty::PredicateKind::Trait(pred, hir::Constness::NotConst) => {
             Some(tcx.trait_def(pred.def_id()).specialization_kind)
         }
