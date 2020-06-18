@@ -10,7 +10,7 @@ pub fn anonymize_predicate<'tcx>(
     tcx: TyCtxt<'tcx>,
     pred: ty::Predicate<'tcx>,
 ) -> ty::Predicate<'tcx> {
-    let kind = pred.kint(tcx);
+    let kind = pred.kind();
     let new = match kind {
         ty::PredicateKind::ForAll(binder) => {
             ty::PredicateKind::ForAll(tcx.anonymize_late_bound_regions(binder))
@@ -149,10 +149,10 @@ impl Elaborator<'tcx> {
 
     fn elaborate(&mut self, obligation: &PredicateObligation<'tcx>) {
         let tcx = self.visited.tcx;
-        let pred = match obligation.predicate.kint(tcx) {
-            // We have to be careful and rebind this whenever
+        let pred = match obligation.predicate.kind() {
+            // We have to be careful and rebind this when
             // dealing with a predicate further down.
-            ty::PredicateKind::ForAll(binder) => binder.skip_binder(),
+            ty::PredicateKind::ForAll(binder) => binder.skip_binder().kind(),
             pred => pred,
         };
 

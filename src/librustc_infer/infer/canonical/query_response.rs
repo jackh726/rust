@@ -547,7 +547,7 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
             };
 
             let predicate = if let Some(constraint) = constraint.no_bound_vars() {
-                to_predicate(constraint).to_predicate(self.tcx)
+                to_predicate(constraint)
             } else {
                 ty::PredicateKind::ForAll(constraint.map_bound(to_predicate)).to_predicate(self.tcx)
             };

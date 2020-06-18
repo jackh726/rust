@@ -6,7 +6,7 @@ use rustc_errors::ErrorReported;
 use rustc_infer::traits::{PolyTraitObligation, TraitEngine, TraitEngineExt as _};
 use rustc_middle::mir::interpret::ErrorHandled;
 use rustc_middle::ty::error::ExpectedFound;
-use rustc_middle::ty::{self, Binder, Const, ToPredicate, Ty, TypeFoldable};
+use rustc_middle::ty::{self, Binder, Const, Ty, TypeFoldable};
 use std::marker::PhantomData;
 
 use super::project;
@@ -318,12 +318,12 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
 
         let infcx = self.selcx.infcx();
 
-        match obligation.predicate.kint(infcx.tcx) {
-            ty::PredicateKind::ForAll(binder) => match binder.skip_binder() {
+        match obligation.predicate.kind() {
+            ty::PredicateKind::ForAll(binder) => match binder.skip_binder().kind() {
                 // Evaluation will discard candidates using the leak check.
                 // This means we need to pass it the bound version of our
                 // predicate.
-                rustc_middle::ty::PredicateKind::Trait(trait_ref, _constness) => {
+                ty::PredicateKind::Trait(trait_ref, _constness) => {
                     let trait_obligation = obligation.with(Binder::bind(*trait_ref));
 
                     self.process_trait_obligation(
@@ -332,7 +332,7 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
                         &mut pending_obligation.stalled_on,
                     )
                 }
-                rustc_middle::ty::PredicateKind::Projection(projection) => {
+                ty::PredicateKind::Projection(projection) => {
                     let project_obligation = obligation.with(Binder::bind(*projection));
 
                     self.process_projection_obligation(
@@ -340,19 +340,17 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
                         &mut pending_obligation.stalled_on,
                     )
                 }
-                rustc_middle::ty::PredicateKind::RegionOutlives(_)
-                | rustc_middle::ty::PredicateKind::TypeOutlives(_)
-                | rustc_middle::ty::PredicateKind::WellFormed(_)
-                | rustc_middle::ty::PredicateKind::ObjectSafe(_)
-                | rustc_middle::ty::PredicateKind::ClosureKind(..)
-                | rustc_middle::ty::PredicateKind::Subtype(_)
-                | rustc_middle::ty::PredicateKind::ConstEvaluatable(..)
-                | rustc_middle::ty::PredicateKind::ConstEquate(..)
-                | rustc_middle::ty::PredicateKind::ForAll(_) => {
+                ty::PredicateKind::RegionOutlives(_)
+                | ty::PredicateKind::TypeOutlives(_)
+                | ty::PredicateKind::WellFormed(_)
+                | ty::PredicateKind::ObjectSafe(_)
+                | ty::PredicateKind::ClosureKind(..)
+                | ty::PredicateKind::Subtype(_)
+                | ty::PredicateKind::ConstEvaluatable(..)
+                | ty::PredicateKind::ConstEquate(..)
+                | ty::PredicateKind::ForAll(_) => {
                     let (pred, _) = infcx.replace_bound_vars_with_placeholders(binder);
-                    ProcessResult::Changed(mk_pending(vec![
-                        obligation.with(pred.to_predicate(infcx.tcx)),
-                    ]))
+                    ProcessResult::Changed(mk_pending(vec![obligation.with(pred)]))
                 }
             },
             ty::PredicateKind::Trait(ref data, _) => {

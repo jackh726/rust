@@ -88,15 +88,15 @@ pub fn predicate_obligations<'a, 'tcx>(
     infcx: &InferCtxt<'a, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     body_id: hir::HirId,
-    predicate: &'tcx ty::PredicateKind<'tcx>,
+    predicate: &'tcx ty::Predicate<'tcx>,
     span: Span,
 ) -> Vec<traits::PredicateObligation<'tcx>> {
     let mut wf = WfPredicates { infcx, param_env, body_id, span, out: vec![], item: None };
 
-    match predicate {
+    match predicate.kind() {
         ty::PredicateKind::ForAll(binder) => {
             // It's ok to skip the binder here because wf code is prepared for it
-            return predicate_obligations(infcx, param_env, body_id, *binder.skip_binder(), span);
+            return predicate_obligations(infcx, param_env, body_id, binder.skip_binder(), span);
         }
         ty::PredicateKind::Trait(t, _) => {
             wf.compute_trait_ref(&t.trait_ref, Elaborate::None);
@@ -194,15 +194,16 @@ fn extend_cause_with_original_assoc_item_obligation<'tcx>(
             hir::ImplItemKind::Const(ty, _) | hir::ImplItemKind::TyAlias(ty) => ty.span,
             _ => impl_item_ref.span,
         };
-    match pred.kind() {
+
+    // It is fine to skip the binder as we don't care about regions here.
+    match pred.ignore_qualifiers().skip_binder().kind() {
         ty::PredicateKind::Projection(proj) => {
             // The obligation comes not from the current `impl` nor the `trait` being implemented,
             // but rather from a "second order" obligation, where an associated type has a
             // projection coming from another associated type. See
             // `src/test/ui/associated-types/point-at-type-on-obligation-failure.rs` and
             // `traits-assoc-type-in-supertrait-bad.rs`.
-            let kind = &proj.ty().skip_binder().kind;
-            if let ty::Projection(projection_ty) = kind {
+            if let ty::Projection(projection_ty) = proj.ty.kind {
                 let trait_assoc_item = tcx.associated_item(projection_ty.item_def_id);
                 if let Some(impl_item_span) =
                     items.iter().find(|item| item.ident == trait_assoc_item.ident).map(fix_span)
@@ -215,11 +216,9 @@ fn extend_cause_with_original_assoc_item_obligation<'tcx>(
             // An associated item obligation born out of the `trait` failed to be met. An example
             // can be seen in `ui/associated-types/point-at-type-on-obligation-failure-2.rs`.
             debug!("extended_cause_with_original_assoc_item_obligation trait proj {:?}", pred);
-            if let ty::Projection(ty::ProjectionTy { item_def_id, .. }) =
-                &pred.skip_binder().self_ty().kind
-            {
+            if let ty::Projection(ty::ProjectionTy { item_def_id, .. }) = pred.self_ty().kind {
                 if let Some(impl_item_span) = trait_assoc_items
-                    .find(|i| i.def_id == *item_def_id)
+                    .find(|i| i.def_id == item_def_id)
                     .and_then(|trait_assoc_item| {
                         items.iter().find(|i| i.ident == trait_assoc_item.ident).map(fix_span)
                     })
