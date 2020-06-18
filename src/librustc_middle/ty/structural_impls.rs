@@ -1018,14 +1018,14 @@ impl<T: TypeVisitor<'tcx>> PredicateVisitor<'tcx> for T {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::PredicateKint<'tcx> {
+impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::PredicateKind<'tcx> {
     fn super_fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
-        let new = ty::PredicateKint::super_fold_with(self, folder);
+        let new = ty::PredicateKind::super_fold_with(self, folder);
         folder.tcx().intern_predicate_kint(new)
     }
 
     fn super_visit_with<V: TypeVisitor<'tcx>>(&self, visitor: &mut V) -> bool {
-        ty::PredicateKint::super_visit_with(self, visitor)
+        ty::PredicateKind::super_visit_with(self, visitor)
     }
 }
 
