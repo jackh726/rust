@@ -1057,7 +1057,7 @@ impl<'tcx> Predicate<'tcx> {
     }
 
     /// Skips `PredicateKind::ForAll`.
-    pub fn ignore_qualifiers(self) -> Binder<Predicate<'tcx>> {
+    pub fn ignore_qualifiers(self, tcx: TyCtxt<'tcx>) -> Binder<Predicate<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             ty::PredicateKind::Projection(..)
@@ -1069,12 +1069,7 @@ impl<'tcx> Predicate<'tcx> {
             | ty::PredicateKind::TypeOutlives(..)
             | ty::PredicateKind::ConstEvaluatable(..)
             | ty::PredicateKind::ConstEquate(..)
-            | ty::PredicateKind::RegionOutlives(..) => {
-                // We can't use `Binder::dummy` here, as predicates can
-                // contain unbound variables in rare cases, for example when
-                // dealing with opaque types.
-                Binder::bind(self)
-            }
+            | ty::PredicateKind::RegionOutlives(..) => Binder::wrap_nonbinding(tcx, self),
         }
     }
 
@@ -1449,8 +1444,8 @@ impl<'tcx> ToPredicate<'tcx> for PolyProjectionPredicate<'tcx> {
 }
 
 impl<'tcx> Predicate<'tcx> {
-    pub fn to_opt_poly_trait_ref(self) -> Option<PolyTraitRef<'tcx>> {
-        self.ignore_qualifiers()
+    pub fn to_opt_poly_trait_ref(self, tcx: TyCtxt<'tcx>) -> Option<PolyTraitRef<'tcx>> {
+        self.ignore_qualifiers(tcx)
             .map_bound(|pred| match pred.kind() {
                 &PredicateKind::Trait(ref t, _) => Some(t.trait_ref),
                 PredicateKind::Projection(..)
@@ -1467,8 +1462,11 @@ impl<'tcx> Predicate<'tcx> {
             .transpose()
     }
 
-    pub fn to_opt_type_outlives(self) -> Option<PolyTypeOutlivesPredicate<'tcx>> {
-        self.ignore_qualifiers()
+    pub fn to_opt_type_outlives(
+        self,
+        tcx: TyCtxt<'tcx>,
+    ) -> Option<PolyTypeOutlivesPredicate<'tcx>> {
+        self.ignore_qualifiers(tcx)
             .map_bound(|pred| match pred.kind() {
                 &PredicateKind::TypeOutlives(data) => Some(data),
                 PredicateKind::Trait(..)
