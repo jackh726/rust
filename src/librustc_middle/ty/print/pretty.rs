@@ -2057,7 +2057,7 @@ define_print_and_forward_display! {
                    write("`"))
             }
             ty::PredicateKind::ForAll(binder) => {
-                p!(write("forall "), print(binder))
+                p!(print(binder))
             }
         }
     }
