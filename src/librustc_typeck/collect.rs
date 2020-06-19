@@ -1927,11 +1927,10 @@ fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicat
 
                         &hir::GenericBound::Outlives(ref lifetime) => {
                             let region = AstConv::ast_region_to_region(&icx, lifetime, None);
-                            let pred =
-                                ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(ty, region))
-                                    .to_predicate(tcx);
                             predicates.push((
-                                ty::PredicateKind::ForAll(ty::Binder::bind(pred)).to_predicate(tcx),
+                                ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(ty, region))
+                                    .to_predicate(tcx)
+                                    .potentially_qualified(tcx, ty::PredicateKind::ForAll),
                                 lifetime.span,
                             ))
                         }
@@ -1951,7 +1950,7 @@ fn explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicat
                     let pred = ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r1, r2))
                         .to_predicate(icx.tcx);
 
-                    (ty::PredicateKind::ForAll(ty::Binder::bind(pred)).to_predicate(icx.tcx), span)
+                    (pred.potentially_qualified(icx.tcx, ty::PredicateKind::ForAll), span)
                 }))
             }
 
@@ -2122,11 +2121,9 @@ fn predicates_from_bound<'tcx>(
         hir::GenericBound::Outlives(ref lifetime) => {
             let region = astconv.ast_region_to_region(lifetime, None);
             let pred = ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(param_ty, region))
-                .to_predicate(astconv.tcx());
-            vec![(
-                ty::PredicateKind::ForAll(ty::Binder::bind(pred)).to_predicate(astconv.tcx()),
-                lifetime.span,
-            )]
+                .to_predicate(astconv.tcx())
+                .potentially_qualified(astconv.tcx(), ty::PredicateKind::ForAll);
+            vec![(pred, lifetime.span)]
         }
     }
 }

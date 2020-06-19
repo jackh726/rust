@@ -158,7 +158,7 @@ impl Elaborator<'tcx> {
 
         match pred {
             ty::PredicateKind::ForAll(_) => bug!("unexpected predicate: {:?}", pred),
-            ty::PredicateKind::Trait(ref data, _) => {
+            ty::PredicateKind::Trait(data, _) => {
                 // Get predicates declared on the trait.
                 let predicates = tcx.super_predicates_of(data.def_id());
 

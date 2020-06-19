@@ -1072,6 +1072,21 @@ impl<'tcx> Predicate<'tcx> {
             | ty::PredicateKind::RegionOutlives(..) => Binder::dummy(self),
         }
     }
+
+    /// Wraps `self` with the given qualifier if this predicate has any unbound variables.
+    pub fn potentially_qualified(
+        self,
+        tcx: TyCtxt<'tcx>,
+        qualifier: impl FnOnce(Binder<Predicate<'tcx>>) -> PredicateKind<'tcx>,
+    ) -> Predicate<'tcx> {
+        if self.has_escaping_bound_vars() {
+            let qualified = qualifier(Binder::bind(self)).to_predicate(tcx);
+            debug_assert!(!qualified.has_escaping_bound_vars());
+            qualified
+        } else {
+            self
+        }
+    }
 }
 
 impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
@@ -1229,12 +1244,7 @@ impl<'tcx> Predicate<'tcx> {
         let new = kind.subst(tcx, substs);
 
         if new != *kind {
-            if new.has_escaping_bound_vars() {
-                PredicateKind::ForAll(Binder::bind(new.to_predicate(tcx)))
-            } else {
-                new
-            }
-            .to_predicate(tcx)
+            new.to_predicate(tcx).potentially_qualified(tcx, PredicateKind::ForAll)
         } else {
             self
         }

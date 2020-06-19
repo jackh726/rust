@@ -5324,15 +5324,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     item_def_id,
                 };
 
-                // TODO: forall ?
-                let predicate = ty::PredicateKind::ForAll(ty::Binder::bind(
-                    ty::PredicateKind::Projection(ty::ProjectionPredicate {
-                        projection_ty,
-                        ty: expected,
-                    })
-                    .to_predicate(self.tcx),
-                ))
-                .to_predicate(self.tcx);
+                let predicate = ty::PredicateKind::Projection(ty::ProjectionPredicate {
+                    projection_ty,
+                    ty: expected,
+                })
+                .to_predicate(self.tcx)
+                .potentially_qualified(self.tcx, ty::PredicateKind::ForAll);
                 let obligation = traits::Obligation::new(self.misc(sp), self.param_env, predicate);
 
                 debug!("suggest_missing_await: trying obligation {:?}", obligation);

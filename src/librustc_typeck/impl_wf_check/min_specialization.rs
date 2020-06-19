@@ -198,7 +198,6 @@ fn unconstrained_parent_impl_substs<'tcx>(
     // the functions in `cgp` add the constrained parameters to a list of
     // unconstrained parameters.
     for (predicate, _) in impl_generic_predicates.predicates.iter() {
-        // TODO: forall (do we need ignore_qualifiers here)
         if let ty::PredicateKind::Projection(proj) =
             predicate.ignore_qualifiers().skip_binder().kind()
         {
