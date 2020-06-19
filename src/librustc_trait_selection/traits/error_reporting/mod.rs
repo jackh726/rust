@@ -1712,15 +1712,16 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
     ) {
         if let (
             ty::PredicateKind::Trait(pred, _),
-            ObligationCauseCode::BindingObligation(item_def_id, span),
-        ) = (obligation.predicate.kind(), &obligation.cause.code)
+            &ObligationCauseCode::BindingObligation(item_def_id, span),
+        ) =
+            (obligation.predicate.ignore_qualifiers().skip_binder().kind(), &obligation.cause.code)
         {
             if let (Some(generics), true) = (
-                self.tcx.hir().get_if_local(*item_def_id).as_ref().and_then(|n| n.generics()),
+                self.tcx.hir().get_if_local(item_def_id).as_ref().and_then(|n| n.generics()),
                 Some(pred.def_id()) == self.tcx.lang_items().sized_trait(),
             ) {
                 for param in generics.params {
-                    if param.span == *span
+                    if param.span == span
                         && !param.bounds.iter().any(|bound| {
                             bound.trait_ref().and_then(|trait_ref| trait_ref.trait_def_id())
                                 == self.tcx.lang_items().sized_trait()
