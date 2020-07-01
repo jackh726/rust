@@ -45,7 +45,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7021ce4924a3f25f802b2cccd1af585e39ea1a363a1aa2e72afe54b67a3a7a7"
 dependencies = [
- "ansi_term",
+ "ansi_term 0.11.0",
 ]
 
 [[package]]
@@ -59,6 +59,15 @@ name = "ansi_term"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee49baf6cb617b853aa8d93bf420db2383fab46d314482ca2803b40d5fde979b"
+dependencies = [
+ "winapi 0.3.8",
+]
+
+[[package]]
+name = "ansi_term"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
 dependencies = [
  "winapi 0.3.8",
 ]
@@ -424,8 +433,8 @@ dependencies = [
 
 [[package]]
 name = "chalk-derive"
-version = "0.15.0-dev.0"
-source = "git+https://github.com/rust-lang/chalk.git?rev=57037a53f7decc965d25972606c3ea930e9cb39f#57037a53f7decc965d25972606c3ea930e9cb39f"
+version = "0.16.0-dev.0"
+source = "git+https://github.com/rust-lang/chalk.git?rev=2bd06ea1cac18cc83958667122d3d4488f6a9835#2bd06ea1cac18cc83958667122d3d4488f6a9835"
 dependencies = [
  "proc-macro2 1.0.3",
  "quote 1.0.2",
@@ -435,8 +444,8 @@ dependencies = [
 
 [[package]]
 name = "chalk-engine"
-version = "0.15.0-dev.0"
-source = "git+https://github.com/rust-lang/chalk.git?rev=57037a53f7decc965d25972606c3ea930e9cb39f#57037a53f7decc965d25972606c3ea930e9cb39f"
+version = "0.16.0-dev.0"
+source = "git+https://github.com/rust-lang/chalk.git?rev=2bd06ea1cac18cc83958667122d3d4488f6a9835#2bd06ea1cac18cc83958667122d3d4488f6a9835"
 dependencies = [
  "chalk-derive",
  "chalk-ir",
@@ -446,8 +455,8 @@ dependencies = [
 
 [[package]]
 name = "chalk-ir"
-version = "0.15.0-dev.0"
-source = "git+https://github.com/rust-lang/chalk.git?rev=57037a53f7decc965d25972606c3ea930e9cb39f#57037a53f7decc965d25972606c3ea930e9cb39f"
+version = "0.16.0-dev.0"
+source = "git+https://github.com/rust-lang/chalk.git?rev=2bd06ea1cac18cc83958667122d3d4488f6a9835#2bd06ea1cac18cc83958667122d3d4488f6a9835"
 dependencies = [
  "chalk-derive",
  "lazy_static",
@@ -455,8 +464,8 @@ dependencies = [
 
 [[package]]
 name = "chalk-solve"
-version = "0.15.0-dev.0"
-source = "git+https://github.com/rust-lang/chalk.git?rev=57037a53f7decc965d25972606c3ea930e9cb39f#57037a53f7decc965d25972606c3ea930e9cb39f"
+version = "0.16.0-dev.0"
+source = "git+https://github.com/rust-lang/chalk.git?rev=2bd06ea1cac18cc83958667122d3d4488f6a9835#2bd06ea1cac18cc83958667122d3d4488f6a9835"
 dependencies = [
  "chalk-derive",
  "chalk-engine",
@@ -467,13 +476,14 @@ dependencies = [
  "rustc-hash",
  "tracing",
  "tracing-subscriber",
+ "tracing-tree",
 ]
 
 [[package]]
 name = "chrono"
-version = "0.4.6"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45912881121cb26fad7c38c17ba7daa18764771836b34fab7d3fbd93ed633878"
+checksum = "80094f509cf8b5ae86a4966a39b3ff66cd7e2a3e594accec3743ff3fabeab5b2"
 dependencies = [
  "num-integer",
  "num-traits",
@@ -486,7 +496,7 @@ version = "2.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5067f5bb2d80ef5d68b4c87db81601f0b75bca627bc2ef76b141d7b846a3c6d9"
 dependencies = [
- "ansi_term",
+ "ansi_term 0.11.0",
  "atty",
  "bitflags",
  "strsim",
@@ -2281,7 +2291,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f81e1644e1b54f5a68959a29aa86cde704219254669da328ecfdf6a1f09d427"
 dependencies = [
- "ansi_term",
+ "ansi_term 0.11.0",
  "ctor",
  "difference",
  "output_vt100",
@@ -2377,6 +2387,16 @@ name = "punycode"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ddd112cca70a4d30883b2d21568a1d376ff8be4758649f64f973c6845128ad3"
+
+[[package]]
+name = "quanta"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4f7a1905379198075914bc93d32a5465c40474f90a078bb13439cb00c547bcc"
+dependencies = [
+ "libc",
+ "winapi 0.3.8",
+]
 
 [[package]]
 name = "quick-error"
@@ -4551,11 +4571,11 @@ dependencies = [
 
 [[package]]
 name = "termcolor"
-version = "1.0.4"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4096add70612622289f2fdcdbd5086dc81c1e2675e6ae58d6c4f62a16c6d7f2f"
+checksum = "bb6bfa289a4d7c5766392812c0a1f4c1ba45afa1ad47803c11e1f407d846d75f"
 dependencies = [
- "wincolor",
+ "winapi-util",
 ]
 
 [[package]]
@@ -4959,7 +4979,7 @@ version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04a11b459109e38ff6e1b580bafef4142a11d44889f5d07424cbce2fd2a2a119"
 dependencies = [
- "ansi_term",
+ "ansi_term 0.11.0",
  "chrono",
  "lazy_static",
  "matchers",
@@ -4971,6 +4991,21 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-tree"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de2e9d8af3b86f89e4cc934b20132ea3577bdf06b745808e2e8666d2418ee4c4"
+dependencies = [
+ "ansi_term 0.12.1",
+ "atty",
+ "chrono",
+ "quanta",
+ "termcolor",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5223,9 +5258,9 @@ checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 
 [[package]]
 name = "winapi-util"
-version = "0.1.2"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7168bab6e1daee33b4557efd0e95d5ca70a03706d39fa5f3fe7a236f584b03c9"
+checksum = "70ec6ce85bb158151cae5e5c87f95a8e97d2c0c4b001223f33a334e3ce5de178"
 dependencies = [
  "winapi 0.3.8",
 ]
@@ -5235,16 +5270,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "wincolor"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "561ed901ae465d6185fa7864d63fbd5720d0ef718366c9a4dc83cf6170d7e9ba"
-dependencies = [
- "winapi 0.3.8",
- "winapi-util",
-]
 
 [[package]]
 name = "ws2_32-sys"

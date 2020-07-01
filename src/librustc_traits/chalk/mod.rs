@@ -94,7 +94,7 @@ crate fn evaluate_goal<'tcx>(
     // `Ambig(Definite)`. This really isn't right.
     let make_solution = |_subst: chalk_ir::Substitution<_>| {
         let mut var_values: IndexVec<BoundVar, GenericArg<'tcx>> = IndexVec::new();
-        _subst.parameters(&interner).iter().for_each(|p| {
+        _subst.as_slice(&interner).iter().for_each(|p| {
             // FIXME(chalk): we should move this elsewhere, since this is
             // essentially inverse of lowering a `GenericArg`.
             let _data = p.data(&interner);

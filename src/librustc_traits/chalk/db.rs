@@ -177,7 +177,10 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         return struct_datum;
     }
 
-    fn adt_repr(&self, adt_id: chalk_ir::AdtId<RustInterner<'tcx>>) -> chalk_solve::rust_ir::AdtRepr {
+    fn adt_repr(
+        &self,
+        adt_id: chalk_ir::AdtId<RustInterner<'tcx>>,
+    ) -> chalk_solve::rust_ir::AdtRepr {
         let adt_def = adt_id.0;
 
         chalk_solve::rust_ir::AdtRepr {
@@ -368,7 +371,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         };
         Arc::new(chalk_solve::rust_ir::OpaqueTyDatum {
             opaque_ty_id,
-            bound: chalk_ir::Binders::new(chalk_ir::VariableKinds::new(&self.interner), value),
+            bound: chalk_ir::Binders::empty(&self.interner, value),
         })
     }
 
@@ -469,7 +472,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         _closure_id: chalk_ir::ClosureId<RustInterner<'tcx>>,
         substs: &chalk_ir::Substitution<RustInterner<'tcx>>,
     ) -> chalk_solve::rust_ir::ClosureKind {
-        let kind = &substs.parameters(&self.interner)[substs.len(&self.interner) - 3];
+        let kind = &substs.as_slice(&self.interner)[substs.len(&self.interner) - 3];
         match kind.assert_ty_ref(&self.interner).data(&self.interner) {
             chalk_ir::TyData::Apply(apply) => match apply.name {
                 chalk_ir::TypeName::Scalar(scalar) => match scalar {
@@ -493,10 +496,10 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         substs: &chalk_ir::Substitution<RustInterner<'tcx>>,
     ) -> chalk_ir::Binders<chalk_solve::rust_ir::FnDefInputsAndOutputDatum<RustInterner<'tcx>>>
     {
-        let sig = &substs.parameters(&self.interner)[substs.len(&self.interner) - 2];
+        let sig = &substs.as_slice(&self.interner)[substs.len(&self.interner) - 2];
         match sig.assert_ty_ref(&self.interner).data(&self.interner) {
             chalk_ir::TyData::Function(f) => {
-                let substitution = f.substitution.parameters(&self.interner);
+                let substitution = f.substitution.as_slice(&self.interner);
                 let return_type =
                     substitution.last().unwrap().assert_ty_ref(&self.interner).clone();
                 // Closure arguments are tupled
@@ -532,7 +535,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         substs: &chalk_ir::Substitution<RustInterner<'tcx>>,
     ) -> chalk_ir::Binders<chalk_ir::Ty<RustInterner<'tcx>>> {
         let inputs_and_output = self.closure_inputs_and_output(_closure_id, substs);
-        let tuple = substs.parameters(&self.interner).last().unwrap().assert_ty_ref(&self.interner);
+        let tuple = substs.as_slice(&self.interner).last().unwrap().assert_ty_ref(&self.interner);
         inputs_and_output.map_ref(|_| tuple.clone())
     }
 
@@ -541,8 +544,24 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         _closure_id: chalk_ir::ClosureId<RustInterner<'tcx>>,
         substs: &chalk_ir::Substitution<RustInterner<'tcx>>,
     ) -> chalk_ir::Substitution<RustInterner<'tcx>> {
-        let substitution = &substs.parameters(&self.interner)[0..substs.len(&self.interner) - 3];
+        let substitution = &substs.as_slice(&self.interner)[0..substs.len(&self.interner) - 3];
         chalk_ir::Substitution::from(&self.interner, substitution)
+    }
+
+    fn trait_name(&self, id: chalk_ir::TraitId<RustInterner<'tcx>>) -> String {
+        self.tcx.def_path_str(id.0)
+    }
+    fn adt_name(&self, id: chalk_ir::AdtId<RustInterner<'tcx>>) -> String {
+        self.tcx.def_path_str(id.0.did)
+    }
+    fn assoc_type_name(&self, id: chalk_ir::AssocTypeId<RustInterner<'tcx>>) -> String {
+        self.tcx.def_path_str(id.0)
+    }
+    fn opaque_type_name(&self, id: chalk_ir::OpaqueTyId<RustInterner<'tcx>>) -> String {
+        self.tcx.def_path_str(id.0)
+    }
+    fn fn_def_name(&self, id: chalk_ir::FnDefId<RustInterner<'tcx>>) -> String {
+        self.tcx.def_path_str(id.0)
     }
 }
 

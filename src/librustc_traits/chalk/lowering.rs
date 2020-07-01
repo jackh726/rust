@@ -92,7 +92,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
                                             predicate.trait_ref.lower_into(interner),
                                         ),
                                     ),
-                                    conditions: chalk_ir::Goals::new(interner),
+                                    conditions: chalk_ir::Goals::empty(interner),
                                     priority: chalk_ir::ClausePriority::High,
                                 },
                             ))
@@ -115,7 +115,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
                                             },
                                         ),
                                     ),
-                                    conditions: chalk_ir::Goals::new(interner),
+                                    conditions: chalk_ir::Goals::empty(interner),
                                     priority: chalk_ir::ClausePriority::High,
                                 },
                             ))
@@ -137,7 +137,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
                                             predicate.lower_into(interner),
                                         ),
                                     ),
-                                    conditions: chalk_ir::Goals::new(interner),
+                                    conditions: chalk_ir::Goals::empty(interner),
                                     priority: chalk_ir::ClausePriority::High,
                                 },
                             ))
@@ -156,12 +156,12 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
             }
             ChalkEnvironmentClause::TypeFromEnv(ty) => Some(
                 chalk_ir::ProgramClauseData(chalk_ir::Binders::new(
-                    chalk_ir::VariableKinds::new(interner),
+                    chalk_ir::VariableKinds::empty(interner),
                     chalk_ir::ProgramClauseImplication {
                         consequence: chalk_ir::DomainGoal::FromEnv(chalk_ir::FromEnv::Ty(
                             ty.lower_into(interner).shifted_in(interner),
                         )),
-                        conditions: chalk_ir::Goals::new(interner),
+                        conditions: chalk_ir::Goals::empty(interner),
                         priority: chalk_ir::ClausePriority::High,
                     },
                 ))
@@ -203,7 +203,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predi
             }
             // FIXME(chalk): TypeOutlives
             ty::PredicateKind::TypeOutlives(_predicate) => {
-                chalk_ir::GoalData::All(chalk_ir::Goals::new(interner))
+                chalk_ir::GoalData::All(chalk_ir::Goals::empty(interner))
             }
             ty::PredicateKind::Projection(predicate) => predicate.lower_into(interner),
             ty::PredicateKind::WellFormed(arg) => match arg.unpack() {
@@ -211,7 +211,9 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predi
                     // FIXME(chalk): In Chalk, a placeholder is WellFormed if it
                     // `FromEnv`. However, when we "lower" Params, we don't update
                     // the environment.
-                    ty::Placeholder(..) => chalk_ir::GoalData::All(chalk_ir::Goals::new(interner)),
+                    ty::Placeholder(..) => {
+                        chalk_ir::GoalData::All(chalk_ir::Goals::empty(interner))
+                    }
 
                     _ => chalk_ir::GoalData::DomainGoal(chalk_ir::DomainGoal::WellFormed(
                         chalk_ir::WellFormed::Ty(ty.lower_into(interner)),
@@ -219,7 +221,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predi
                 },
                 // FIXME(chalk): handle well formed consts
                 GenericArgKind::Const(..) => {
-                    chalk_ir::GoalData::All(chalk_ir::Goals::new(interner))
+                    chalk_ir::GoalData::All(chalk_ir::Goals::empty(interner))
                 }
                 GenericArgKind::Lifetime(lt) => bug!("unexpect well formed predicate: {:?}", lt),
             },
@@ -236,7 +238,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predi
             | ty::PredicateKind::Subtype(..)
             | ty::PredicateKind::ConstEvaluatable(..)
             | ty::PredicateKind::ConstEquate(..) => {
-                chalk_ir::GoalData::All(chalk_ir::Goals::new(interner))
+                chalk_ir::GoalData::All(chalk_ir::Goals::empty(interner))
             }
         }
     }
@@ -579,7 +581,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Binders<chalk_ir::QuantifiedWhereClauses<Ru
         let where_clauses = predicates.into_iter().map(|predicate| match predicate {
             ty::ExistentialPredicate::Trait(ty::ExistentialTraitRef { def_id, substs }) => {
                 chalk_ir::Binders::new(
-                    chalk_ir::VariableKinds::new(interner),
+                    chalk_ir::VariableKinds::empty(interner),
                     chalk_ir::WhereClause::Implemented(chalk_ir::TraitRef {
                         trait_id: chalk_ir::TraitId(def_id),
                         substitution: substs.lower_into(interner),
@@ -588,7 +590,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Binders<chalk_ir::QuantifiedWhereClauses<Ru
             }
             ty::ExistentialPredicate::Projection(_predicate) => unimplemented!(),
             ty::ExistentialPredicate::AutoTrait(def_id) => chalk_ir::Binders::new(
-                chalk_ir::VariableKinds::new(interner),
+                chalk_ir::VariableKinds::empty(interner),
                 chalk_ir::WhereClause::Implemented(chalk_ir::TraitRef {
                     trait_id: chalk_ir::TraitId(def_id),
                     substitution: chalk_ir::Substitution::empty(interner),
