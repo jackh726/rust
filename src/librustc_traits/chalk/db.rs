@@ -177,6 +177,15 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         return struct_datum;
     }
 
+    fn adt_repr(&self, adt_id: chalk_ir::AdtId<RustInterner<'tcx>>) -> chalk_solve::rust_ir::AdtRepr {
+        let adt_def = adt_id.0;
+
+        chalk_solve::rust_ir::AdtRepr {
+            repr_c: adt_def.repr.c(),
+            repr_packed: adt_def.repr.packed(),
+        }
+    }
+
     fn fn_def_datum(
         &self,
         fn_def_id: chalk_ir::FnDefId<RustInterner<'tcx>>,
