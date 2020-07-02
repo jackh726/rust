@@ -30,6 +30,19 @@ impl fmt::Debug for RustIrDatabase<'_> {
     }
 }
 
+impl<'tcx> chalk_ir::UnificationDatabase<RustInterner<'tcx>> for RustIrDatabase<'tcx> {
+    fn fn_def_variance(
+        &self,
+        fn_def_id: chalk_ir::FnDefId<RustInterner<'tcx>>,
+    ) -> Vec<chalk_ir::Variance> {
+        self.tcx.variances_of(fn_def_id.0).iter().map(|v| v.lower_into(&self.interner)).collect()
+    }
+
+    fn adt_variance(&self, adt_id: chalk_ir::AdtId<RustInterner<'tcx>>) -> Vec<chalk_ir::Variance> {
+        self.tcx.variances_of(adt_id.0.did).iter().map(|v| v.lower_into(&self.interner)).collect()
+    }
+}
+
 impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'tcx> {
     fn interner(&self) -> &RustInterner<'tcx> {
         &self.interner
@@ -108,6 +121,8 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
                 Some(chalk_solve::rust_ir::WellKnownTrait::FnOnce)
             } else if self.tcx.lang_items().fn_mut_trait().map(|t| def_id == t).unwrap_or(false) {
                 Some(chalk_solve::rust_ir::WellKnownTrait::FnMut)
+            } else if self.tcx.lang_items().unsize_trait().map(|t| def_id == t).unwrap_or(false) {
+                Some(chalk_solve::rust_ir::WellKnownTrait::Unsize)
             } else {
                 None
             };
@@ -205,6 +220,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
 
         let sig = self.tcx.fn_sig(def_id);
         let inputs_and_output = sig.inputs_and_output();
+        let inputs_and_output = inputs_and_output.subst(self.tcx, bound_vars);
         let (inputs_and_output, iobinders, _) = crate::chalk::lowering::collect_bound_vars(
             &self.interner,
             self.tcx,
@@ -285,7 +301,11 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
             let self_ty = self_ty.subst(self.tcx, bound_vars);
             let lowered_ty = self_ty.lower_into(&self.interner);
 
-            parameters[0].assert_ty_ref(&self.interner).could_match(&self.interner, &lowered_ty)
+            parameters[0].assert_ty_ref(&self.interner).could_match(
+                &self.interner,
+                self.unification_database(),
+                &lowered_ty,
+            )
         });
 
         let impls = matched_impls.map(|matched_impl| chalk_ir::ImplId(matched_impl)).collect();
@@ -499,7 +519,7 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         let sig = &substs.as_slice(&self.interner)[substs.len(&self.interner) - 2];
         match sig.assert_ty_ref(&self.interner).data(&self.interner) {
             chalk_ir::TyData::Function(f) => {
-                let substitution = f.substitution.as_slice(&self.interner);
+                let substitution = f.substitution.0.as_slice(&self.interner);
                 let return_type =
                     substitution.last().unwrap().assert_ty_ref(&self.interner).clone();
                 // Closure arguments are tupled
@@ -546,6 +566,10 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
     ) -> chalk_ir::Substitution<RustInterner<'tcx>> {
         let substitution = &substs.as_slice(&self.interner)[0..substs.len(&self.interner) - 3];
         chalk_ir::Substitution::from(&self.interner, substitution)
+    }
+
+    fn unification_database(&self) -> &dyn chalk_ir::UnificationDatabase<RustInterner<'tcx>> {
+        self
     }
 
     fn trait_name(&self, id: chalk_ir::TraitId<RustInterner<'tcx>>) -> String {

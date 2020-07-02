@@ -51,12 +51,29 @@ crate trait LowerInto<'tcx, T> {
     fn lower_into(self, interner: &RustInterner<'tcx>) -> T;
 }
 
+impl<'tcx> LowerInto<'tcx, chalk_ir::Variance> for ty::Variance {
+    fn lower_into(self, _interner: &RustInterner<'tcx>) -> chalk_ir::Variance {
+        match self {
+            ty::Variance::Invariant => chalk_ir::Variance::Invariant,
+            ty::Variance::Covariant => chalk_ir::Variance::Covariant,
+            ty::Variance::Contravariant => chalk_ir::Variance::Contravariant,
+            ty::Variance::Bivariant => unimplemented!(),
+        }
+    }
+}
+
 impl<'tcx> LowerInto<'tcx, chalk_ir::Substitution<RustInterner<'tcx>>> for SubstsRef<'tcx> {
     fn lower_into(
         self,
         interner: &RustInterner<'tcx>,
     ) -> chalk_ir::Substitution<RustInterner<'tcx>> {
         chalk_ir::Substitution::from(interner, self.iter().map(|s| s.lower_into(interner)))
+    }
+}
+
+impl<'tcx> LowerInto<'tcx, SubstsRef<'tcx>> for &chalk_ir::Substitution<RustInterner<'tcx>> {
+    fn lower_into(self, interner: &RustInterner<'tcx>) -> SubstsRef<'tcx> {
+        interner.tcx.mk_substs(self.iter(interner).map(|subst| subst.lower_into(interner)))
     }
 }
 
@@ -230,12 +247,29 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GoalData<RustInterner<'tcx>>> for ty::Predi
                 chalk_ir::DomainGoal::ObjectSafe(chalk_ir::TraitId(*t)),
             ),
 
+            ty::PredicateKind::Subtype(predicate) => {
+                let (predicate, binders, _named_regions) =
+                    collect_bound_vars(interner, interner.tcx, predicate);
+
+                use chalk_ir::cast::Cast;
+                chalk_ir::GoalData::Quantified(
+                    chalk_ir::QuantifierKind::ForAll,
+                    chalk_ir::Binders::new(
+                        binders,
+                        chalk_ir::GoalData::SubtypeGoal(chalk_ir::SubtypeGoal {
+                            a: predicate.a.lower_into(interner).cast(interner),
+                            b: predicate.b.lower_into(interner).cast(interner),
+                        })
+                        .intern(interner),
+                    ),
+                )
+            }
+
             // FIXME(chalk): other predicates
             //
             // We can defer this, but ultimately we'll want to express
             // some of these in terms of chalk operations.
             ty::PredicateKind::ClosureKind(..)
-            | ty::PredicateKind::Subtype(..)
             | ty::PredicateKind::ConstEvaluatable(..)
             | ty::PredicateKind::ConstEquate(..) => {
                 chalk_ir::GoalData::All(chalk_ir::Goals::empty(interner))
@@ -344,7 +378,8 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
                 ast::FloatTy::F64 => float(chalk_ir::FloatTy::F64),
             },
             Adt(def, substs) => apply(struct_ty(def.did), substs.lower_into(interner)),
-            Foreign(_def_id) => unimplemented!(),
+            // FIXME(chalk): lower Foreign
+            Foreign(def_id) => apply(chalk_ir::TypeName::FnDef(chalk_ir::FnDefId(def_id)), empty()),
             Str => apply(chalk_ir::TypeName::Str, empty()),
             Array(ty, len) => {
                 let value = match len.val {
@@ -414,12 +449,12 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
                     collect_bound_vars(interner, interner.tcx, &sig.inputs_and_output());
                 TyData::Function(chalk_ir::Fn {
                     num_binders: binders.len(interner),
-                    substitution: chalk_ir::Substitution::from(
+                    substitution: chalk_ir::FnSubst(chalk_ir::Substitution::from(
                         interner,
                         inputs_and_outputs.iter().map(|ty| {
                             chalk_ir::GenericArgData::Ty(ty.lower_into(interner)).intern(interner)
                         }),
-                    ),
+                    )),
                 })
                 .intern(interner)
             }
@@ -465,6 +500,72 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
     }
 }
 
+impl<'tcx> LowerInto<'tcx, Ty<'tcx>> for &chalk_ir::Ty<RustInterner<'tcx>> {
+    fn lower_into(self, interner: &RustInterner<'tcx>) -> Ty<'tcx> {
+        use chalk_ir::TyData;
+        use rustc_ast::ast;
+
+        let kind = match self.data(interner) {
+            TyData::Apply(application_ty) => match application_ty.name {
+                chalk_ir::TypeName::Adt(struct_id) => {
+                    ty::Adt(struct_id.0, application_ty.substitution.lower_into(interner))
+                }
+                chalk_ir::TypeName::Scalar(scalar) => match scalar {
+                    chalk_ir::Scalar::Bool => ty::Bool,
+                    chalk_ir::Scalar::Char => ty::Char,
+                    chalk_ir::Scalar::Int(int_ty) => match int_ty {
+                        chalk_ir::IntTy::Isize => ty::Int(ast::IntTy::Isize),
+                        chalk_ir::IntTy::I8 => ty::Int(ast::IntTy::I8),
+                        chalk_ir::IntTy::I16 => ty::Int(ast::IntTy::I16),
+                        chalk_ir::IntTy::I32 => ty::Int(ast::IntTy::I32),
+                        chalk_ir::IntTy::I64 => ty::Int(ast::IntTy::I64),
+                        chalk_ir::IntTy::I128 => ty::Int(ast::IntTy::I128),
+                    },
+                    chalk_ir::Scalar::Uint(int_ty) => match int_ty {
+                        chalk_ir::UintTy::Usize => ty::Uint(ast::UintTy::Usize),
+                        chalk_ir::UintTy::U8 => ty::Uint(ast::UintTy::U8),
+                        chalk_ir::UintTy::U16 => ty::Uint(ast::UintTy::U16),
+                        chalk_ir::UintTy::U32 => ty::Uint(ast::UintTy::U32),
+                        chalk_ir::UintTy::U64 => ty::Uint(ast::UintTy::U64),
+                        chalk_ir::UintTy::U128 => ty::Uint(ast::UintTy::U128),
+                    },
+                    chalk_ir::Scalar::Float(float_ty) => match float_ty {
+                        chalk_ir::FloatTy::F32 => ty::Float(ast::FloatTy::F32),
+                        chalk_ir::FloatTy::F64 => ty::Float(ast::FloatTy::F64),
+                    },
+                },
+                chalk_ir::TypeName::Array => unimplemented!(),
+                chalk_ir::TypeName::FnDef(_) => unimplemented!(),
+                chalk_ir::TypeName::Closure(_) => unimplemented!(),
+                chalk_ir::TypeName::Never => unimplemented!(),
+                chalk_ir::TypeName::Tuple(_size) => unimplemented!(),
+                chalk_ir::TypeName::Slice => unimplemented!(),
+                chalk_ir::TypeName::Raw(_) => unimplemented!(),
+                chalk_ir::TypeName::Ref(_) => unimplemented!(),
+                chalk_ir::TypeName::Str => unimplemented!(),
+                chalk_ir::TypeName::OpaqueType(_ty) => unimplemented!(),
+                chalk_ir::TypeName::AssociatedType(_assoc_ty) => unimplemented!(),
+                chalk_ir::TypeName::Error => unimplemented!(),
+            },
+            TyData::Placeholder(_placeholder) => {
+                unimplemented!();
+            }
+            TyData::Alias(_alias_ty) => unimplemented!(),
+            TyData::Function(_quantified_ty) => unimplemented!(),
+            TyData::BoundVar(_bound) => ty::Bound(
+                ty::DebruijnIndex::from_usize(_bound.debruijn.depth() as usize),
+                ty::BoundTy {
+                    var: ty::BoundVar::from_usize(_bound.index),
+                    kind: ty::BoundTyKind::Anon,
+                },
+            ),
+            TyData::InferenceVar(_, _) => unimplemented!(),
+            TyData::Dyn(_) => unimplemented!(),
+        };
+        interner.tcx.mk_ty(kind)
+    }
+}
+
 impl<'tcx> LowerInto<'tcx, chalk_ir::Lifetime<RustInterner<'tcx>>> for Region<'tcx> {
     fn lower_into(self, interner: &RustInterner<'tcx>) -> chalk_ir::Lifetime<RustInterner<'tcx>> {
         use rustc_middle::ty::RegionKind::*;
@@ -502,6 +603,54 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Lifetime<RustInterner<'tcx>>> for Region<'t
     }
 }
 
+impl<'tcx> LowerInto<'tcx, Region<'tcx>> for &chalk_ir::Lifetime<RustInterner<'tcx>> {
+    fn lower_into(self, interner: &RustInterner<'tcx>) -> Region<'tcx> {
+        let kind = match self.data(interner) {
+            chalk_ir::LifetimeData::BoundVar(var) => ty::RegionKind::ReLateBound(
+                ty::DebruijnIndex::from_u32(var.debruijn.depth()),
+                ty::BoundRegion::BrAnon(var.index as u32),
+            ),
+            chalk_ir::LifetimeData::InferenceVar(_var) => unimplemented!(),
+            chalk_ir::LifetimeData::Placeholder(_p) => unimplemented!(),
+            chalk_ir::LifetimeData::Phantom(_, _) => unimplemented!(),
+        };
+        interner.tcx.mk_region(kind)
+    }
+}
+
+impl<'tcx> LowerInto<'tcx, chalk_ir::Const<RustInterner<'tcx>>> for ty::Const<'tcx> {
+    fn lower_into(self, interner: &RustInterner<'tcx>) -> chalk_ir::Const<RustInterner<'tcx>> {
+        let ty = self.ty.lower_into(interner);
+        let value = match self.val {
+            ty::ConstKind::Value(val) => {
+                chalk_ir::ConstValue::Concrete(chalk_ir::ConcreteConst { interned: val })
+            }
+            ty::ConstKind::Bound(db, bound) => chalk_ir::ConstValue::BoundVar(
+                chalk_ir::BoundVar::new(chalk_ir::DebruijnIndex::new(db.as_u32()), bound.index()),
+            ),
+            _ => unimplemented!("Const not implemented. {:?}", self),
+        };
+        chalk_ir::ConstData { ty, value }.intern(interner)
+    }
+}
+
+impl<'tcx> LowerInto<'tcx, ty::Const<'tcx>> for &chalk_ir::Const<RustInterner<'tcx>> {
+    fn lower_into(self, interner: &RustInterner<'tcx>) -> ty::Const<'tcx> {
+        let data = self.data(interner);
+        let ty = data.ty.lower_into(interner);
+        let val = match data.value {
+            chalk_ir::ConstValue::BoundVar(var) => ty::ConstKind::Bound(
+                ty::DebruijnIndex::from_u32(var.debruijn.depth()),
+                ty::BoundVar::from_u32(var.index as u32),
+            ),
+            chalk_ir::ConstValue::InferenceVar(_var) => unimplemented!(),
+            chalk_ir::ConstValue::Placeholder(_p) => unimplemented!(),
+            chalk_ir::ConstValue::Concrete(c) => ty::ConstKind::Value(c.interned),
+        };
+        ty::Const { ty, val }
+    }
+}
+
 impl<'tcx> LowerInto<'tcx, chalk_ir::GenericArg<RustInterner<'tcx>>> for GenericArg<'tcx> {
     fn lower_into(self, interner: &RustInterner<'tcx>) -> chalk_ir::GenericArg<RustInterner<'tcx>> {
         match self.unpack() {
@@ -520,6 +669,27 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::GenericArg<RustInterner<'tcx>>> for Generic
             ),
         }
         .intern(interner)
+    }
+}
+
+impl<'tcx> LowerInto<'tcx, ty::subst::GenericArg<'tcx>>
+    for &chalk_ir::GenericArg<RustInterner<'tcx>>
+{
+    fn lower_into(self, interner: &RustInterner<'tcx>) -> ty::subst::GenericArg<'tcx> {
+        match self.data(interner) {
+            chalk_ir::GenericArgData::Ty(ty) => {
+                let t: Ty<'tcx> = ty.lower_into(interner);
+                t.into()
+            }
+            chalk_ir::GenericArgData::Lifetime(lifetime) => {
+                let r: Region<'tcx> = lifetime.lower_into(interner);
+                r.into()
+            }
+            chalk_ir::GenericArgData::Const(c) => {
+                let c: ty::Const<'tcx> = c.lower_into(interner);
+                interner.tcx.mk_const(c).into()
+            }
+        }
     }
 }
 
@@ -709,6 +879,7 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
             },
 
             ty::ReEarlyBound(_re) => {
+                dbg!(&_re);
                 // FIXME(chalk): jackh726 - I think we should always have already
                 // substituted away `ReEarlyBound`s for `ReLateBound`s, but need to confirm.
                 unimplemented!();
