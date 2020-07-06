@@ -434,7 +434,7 @@ dependencies = [
 [[package]]
 name = "chalk-derive"
 version = "0.16.0-dev.0"
-source = "git+https://github.com/jackh726/chalk.git?rev=5364e3349c789325a259f3fe8c316fd69568db38#5364e3349c789325a259f3fe8c316fd69568db38"
+source = "git+https://github.com/jackh726/chalk.git?rev=07f58e62dc050a32bdfb778a63ec7502c1df6653#07f58e62dc050a32bdfb778a63ec7502c1df6653"
 dependencies = [
  "proc-macro2 1.0.3",
  "quote 1.0.2",
@@ -445,7 +445,7 @@ dependencies = [
 [[package]]
 name = "chalk-engine"
 version = "0.16.0-dev.0"
-source = "git+https://github.com/jackh726/chalk.git?rev=5364e3349c789325a259f3fe8c316fd69568db38#5364e3349c789325a259f3fe8c316fd69568db38"
+source = "git+https://github.com/jackh726/chalk.git?rev=07f58e62dc050a32bdfb778a63ec7502c1df6653#07f58e62dc050a32bdfb778a63ec7502c1df6653"
 dependencies = [
  "chalk-derive",
  "chalk-ir",
@@ -456,7 +456,7 @@ dependencies = [
 [[package]]
 name = "chalk-ir"
 version = "0.16.0-dev.0"
-source = "git+https://github.com/jackh726/chalk.git?rev=5364e3349c789325a259f3fe8c316fd69568db38#5364e3349c789325a259f3fe8c316fd69568db38"
+source = "git+https://github.com/jackh726/chalk.git?rev=07f58e62dc050a32bdfb778a63ec7502c1df6653#07f58e62dc050a32bdfb778a63ec7502c1df6653"
 dependencies = [
  "chalk-derive",
  "lazy_static",
@@ -465,7 +465,7 @@ dependencies = [
 [[package]]
 name = "chalk-solve"
 version = "0.16.0-dev.0"
-source = "git+https://github.com/jackh726/chalk.git?rev=5364e3349c789325a259f3fe8c316fd69568db38#5364e3349c789325a259f3fe8c316fd69568db38"
+source = "git+https://github.com/jackh726/chalk.git?rev=07f58e62dc050a32bdfb778a63ec7502c1df6653#07f58e62dc050a32bdfb778a63ec7502c1df6653"
 dependencies = [
  "chalk-derive",
  "chalk-engine",

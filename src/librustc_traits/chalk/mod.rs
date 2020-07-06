@@ -23,7 +23,9 @@ use rustc_infer::infer::canonical::{
 use rustc_infer::traits::{self, ChalkCanonicalGoal};
 
 use crate::chalk::db::RustIrDatabase as ChalkRustIrDatabase;
-use crate::chalk::lowering::{LowerInto, ParamsSubstitutor};
+use crate::chalk::lowering::{
+    LowerInto, ParamsSubstitutor, PlaceholdersCollector, RegionsSubstitutor,
+};
 
 use chalk_solve::Solution;
 
@@ -38,9 +40,27 @@ crate fn evaluate_goal<'tcx>(
     let interner = ChalkRustInterner { tcx };
 
     // Chalk doesn't have a notion of `Params`, so instead we use placeholders.
-    let mut params_substitutor = ParamsSubstitutor::new(tcx);
+    let mut placeholders_collector = PlaceholdersCollector::new();
+    obligation.visit_with(&mut placeholders_collector);
+
+    let restatic_placeholder = tcx.mk_region(ty::RegionKind::RePlaceholder(ty::Placeholder {
+        universe: ty::UniverseIndex::ROOT,
+        name: ty::BoundRegion::BrAnon(placeholders_collector.next_anon_region_placeholder),
+    }));
+    let reempty_placeholder = tcx.mk_region(ty::RegionKind::RePlaceholder(ty::Placeholder {
+        universe: ty::UniverseIndex::ROOT,
+        name: ty::BoundRegion::BrAnon(placeholders_collector.next_anon_region_placeholder + 1),
+    }));
+
+    let mut params_substitutor =
+        ParamsSubstitutor::new(tcx, placeholders_collector.next_ty_placehoder);
     let obligation = obligation.fold_with(&mut params_substitutor);
     let _params: FxHashMap<usize, ParamTy> = params_substitutor.params;
+
+    let mut regions_substitutor =
+        RegionsSubstitutor::new(tcx, restatic_placeholder, reempty_placeholder);
+    let obligation = obligation.fold_with(&mut regions_substitutor);
+
     let max_universe = obligation.max_universe.index();
 
     let _lowered_goal: chalk_ir::UCanonical<
@@ -50,7 +70,10 @@ crate fn evaluate_goal<'tcx>(
             binders: chalk_ir::CanonicalVarKinds::from(
                 &interner,
                 obligation.variables.iter().map(|v| match v.kind {
-                    CanonicalVarKind::PlaceholderTy(_ty) => unimplemented!(),
+                    CanonicalVarKind::PlaceholderTy(_ty) => chalk_ir::WithKind::new(
+                        chalk_ir::VariableKind::Ty(chalk_ir::TyKind::General),
+                        chalk_ir::UniverseIndex { counter: 0 },
+                    ),
                     CanonicalVarKind::PlaceholderRegion(_ui) => unimplemented!(),
                     CanonicalVarKind::Ty(ty) => match ty {
                         CanonicalTyVarKind::General(ui) => chalk_ir::WithKind::new(
@@ -82,7 +105,7 @@ crate fn evaluate_goal<'tcx>(
     let solver_choice = chalk_solve::SolverChoice::SLG { max_size: 32, expected_answers: None };
     let mut solver = solver_choice.into_solver::<ChalkRustInterner<'tcx>>();
 
-    let db = ChalkRustIrDatabase { tcx, interner };
+    let db = ChalkRustIrDatabase { tcx, interner, restatic_placeholder, reempty_placeholder };
     let solution = chalk_solve::logging::with_tracing_logs(|| solver.solve(&db, &_lowered_goal));
 
     // Ideally, the code to convert *back* to rustc types would live close to
@@ -105,7 +128,7 @@ crate fn evaluate_goal<'tcx>(
                 value: (),
             },
         };
-        &*tcx.arena.alloc(sol)
+        tcx.arena.alloc(sol)
     };
     solution
         .map(|s| match s {
