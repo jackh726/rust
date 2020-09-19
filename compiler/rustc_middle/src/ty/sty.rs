@@ -746,7 +746,7 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
             ExistentialPredicate::Trait(tr) => {
-                self.rebind(tr).with_self_ty(tcx, self_ty).without_const().to_predicate(tcx)
+                self.rebind(tr).with_self_ty(tcx, self_ty).to_poly_trait_predicate().without_const().to_predicate(tcx)
             }
             ExistentialPredicate::Projection(p) => {
                 self.rebind(p.with_self_ty(tcx, self_ty)).to_predicate(tcx)
@@ -756,7 +756,7 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
                     def_id: did,
                     substs: tcx.mk_substs_trait(self_ty, &[]),
                 });
-                trait_ref.without_const().to_predicate(tcx)
+                trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx)
             }
         }
     }
@@ -831,7 +831,7 @@ impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
     pub fn projection_bounds<'a>(
         &'a self,
     ) -> impl Iterator<Item = PolyExistentialProjection<'tcx>> + 'a {
-        self.skip_binder().projection_bounds().map(Binder::bind)
+        self.skip_binder().projection_bounds().map(move |p| self.rebind(p))
     }
 
     #[inline]
@@ -842,7 +842,9 @@ impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
     pub fn iter<'a>(
         &'a self,
     ) -> impl DoubleEndedIterator<Item = Binder<ExistentialPredicate<'tcx>>> + 'tcx {
-        self.skip_binder().iter().map(Binder::bind)
+        // Have to specifically rebind since self is a ref
+        let binders = self.rebind(());
+        self.skip_binder().iter().map(move |p| binders.rebind(p))
     }
 }
 
@@ -888,6 +890,10 @@ impl<'tcx> TraitRef<'tcx> {
         let defs = tcx.generics_of(trait_id);
 
         ty::TraitRef { def_id: trait_id, substs: tcx.intern_substs(&substs[..defs.params.len()]) }
+    }
+
+    pub fn to_trait_predicate(self) -> ty::TraitPredicate<'tcx> {
+        ty::TraitPredicate { trait_ref: self }
     }
 }
 
