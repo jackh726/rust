@@ -56,7 +56,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             span,
                             self.body_id,
                             self.param_env,
-                            trait_ref.without_const().to_predicate(tcx),
+                            trait_ref.to_trait_predicate().without_const().to_predicate(tcx),
                         );
                         self.predicate_may_hold(&obligation)
                     })

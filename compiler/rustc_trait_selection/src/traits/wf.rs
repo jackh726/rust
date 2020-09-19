@@ -408,7 +408,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                 cause,
                 self.recursion_depth,
                 self.param_env,
-                trait_ref.without_const().to_predicate(self.infcx.tcx),
+                trait_ref.to_trait_predicate().without_const().to_predicate(self.infcx.tcx),
             ));
         }
     }

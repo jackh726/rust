@@ -539,8 +539,13 @@ fn type_param_predicates(
                     // Implied `Self: Trait` and supertrait bounds.
                     if param_id == item_hir_id {
                         let identity_trait_ref = ty::TraitRef::identity(tcx, item_def_id);
-                        extend =
-                            Some((identity_trait_ref.without_const().to_predicate(tcx), item.span));
+                        extend = Some((
+                            identity_trait_ref
+                                .to_trait_predicate()
+                                .without_const()
+                                .to_predicate(tcx),
+                            item.span,
+                        ));
                     }
                     generics
                 }
@@ -1721,11 +1726,15 @@ fn predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericPredicates<'_> {
         // used, and adding the predicate into this list ensures
         // that this is done.
         let span = tcx.sess.source_map().guess_head_span(tcx.def_span(def_id));
-        result.predicates =
-            tcx.arena.alloc_from_iter(result.predicates.iter().copied().chain(std::iter::once((
-                ty::TraitRef::identity(tcx, def_id).without_const().to_predicate(tcx),
+        result.predicates = tcx.arena.alloc_from_iter(
+            result.predicates.iter().copied().chain(std::iter::once((
+                ty::TraitRef::identity(tcx, def_id)
+                    .to_trait_predicate()
+                    .without_const()
+                    .to_predicate(tcx),
                 span,
-            ))));
+            ))),
+        );
     }
     debug!("predicates_of(def_id={:?}) = {:?}", def_id, result);
     result
@@ -1844,7 +1853,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
     // set of defaults that can be incorporated into another impl.
     if let Some(trait_ref) = is_default_impl_trait {
         predicates.insert((
-            trait_ref.without_const().to_predicate(tcx),
+            trait_ref.to_trait_predicate().without_const().to_predicate(tcx),
             tcx.def_span(def_id),
         ));
     }
