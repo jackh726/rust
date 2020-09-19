@@ -4,7 +4,7 @@ use rustc_data_structures::captures::Captures;
 use rustc_data_structures::sso::SsoHashSet;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, Subst};
-use rustc_middle::ty::{self, Ty, TyCtxt};
+use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable};
 
 /// The `TypeOutlives` struct has the job of "lowering" a `T: 'a`
 /// obligation into a series of `'a: 'b` constraints and "verifys", as
@@ -332,7 +332,7 @@ impl<'cx, 'tcx> VerifyBoundCx<'cx, 'tcx> {
         bounds
             .into_iter()
             .filter_map(|p| p.to_opt_type_outlives())
-            .filter_map(|p| p.no_bound_vars())
+            .filter(|p| !p.has_escaping_bound_vars())
             .map(|b| b.1)
     }
 
@@ -349,7 +349,7 @@ impl<'cx, 'tcx> VerifyBoundCx<'cx, 'tcx> {
     ) -> impl Iterator<Item = ty::OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>> {
         predicates
             .filter_map(|p| p.to_opt_type_outlives())
-            .filter_map(|p| p.no_bound_vars())
+            .filter(|p| !p.has_escaping_bound_vars())
             .filter(move |p| compare_ty(p.0))
     }
 }
