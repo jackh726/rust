@@ -1385,20 +1385,9 @@ impl ToPredicate<'tcx> for PredicateAtom<'tcx> {
     }
 }
 
-impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitRef<'tcx>> {
+impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitPredicate<'tcx>> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateAtom::Trait(ty::TraitPredicate { trait_ref: self.value }, self.constness)
-            .to_predicate(tcx)
-    }
-}
-
-impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<PolyTraitRef<'tcx>> {
-    fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        ConstnessAnd {
-            value: self.value.map_bound(|trait_ref| ty::TraitPredicate { trait_ref }),
-            constness: self.constness,
-        }
-        .to_predicate(tcx)
+        PredicateAtom::Trait(self.value, self.constness).to_predicate(tcx)
     }
 }
 
@@ -1432,8 +1421,11 @@ impl<'tcx> ToPredicate<'tcx> for PolyProjectionPredicate<'tcx> {
 
 impl<'tcx> Predicate<'tcx> {
     pub fn to_opt_poly_trait_ref(self) -> Option<PolyTraitRef<'tcx>> {
-        match self.skip_binders() {
-            PredicateAtom::Trait(t, _) => Some(ty::Binder::bind(t.trait_ref)),
+        let predicate = self.bound_atom();
+        match predicate.skip_binder() {
+            PredicateAtom::Trait(t, _) => {
+                Some(predicate.rebind(t.trait_ref))
+            }
             PredicateAtom::Projection(..)
             | PredicateAtom::Subtype(..)
             | PredicateAtom::RegionOutlives(..)
@@ -1447,9 +1439,9 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    pub fn to_opt_type_outlives(self) -> Option<PolyTypeOutlivesPredicate<'tcx>> {
+    pub fn to_opt_type_outlives(self) -> Option<TypeOutlivesPredicate<'tcx>> {
         match self.skip_binders() {
-            PredicateAtom::TypeOutlives(data) => Some(ty::Binder::bind(data)),
+            PredicateAtom::TypeOutlives(data) => Some(data),
             PredicateAtom::Trait(..)
             | PredicateAtom::Projection(..)
             | PredicateAtom::Subtype(..)
