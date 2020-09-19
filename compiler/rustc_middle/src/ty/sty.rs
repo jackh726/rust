@@ -874,6 +874,10 @@ impl<'tcx> TraitRef<'tcx> {
 
         ty::TraitRef { def_id: trait_id, substs: tcx.intern_substs(&substs[..defs.params.len()]) }
     }
+
+    pub fn to_trait_predicate(self) -> ty::TraitPredicate<'tcx> {
+        ty::TraitPredicate { trait_ref: self }
+    }
 }
 
 pub type PolyTraitRef<'tcx> = Binder<TraitRef<'tcx>>;
@@ -1129,7 +1133,8 @@ impl<T> Binder<T> {
 
 impl<T> Binder<Option<T>> {
     pub fn transpose(self) -> Option<Binder<T>> {
-        self.0.map(|v| Binder(v, self.1))
+        let bound_vars = self.1;
+        self.0.map(|v| Binder(v, bound_vars))
     }
 }
 

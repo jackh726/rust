@@ -1411,11 +1411,11 @@ impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitRef<'tcx>> {
 
 impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<PolyTraitRef<'tcx>> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        ConstnessAnd {
-            value: self.value.map_bound(|trait_ref| ty::TraitPredicate { trait_ref }),
-            constness: self.constness,
-        }
-        .to_predicate(tcx)
+        self.value
+            .map_bound(|trait_ref| {
+                PredicateAtom::Trait(ty::TraitPredicate { trait_ref }, self.constness)
+            })
+            .potentially_quantified(tcx, PredicateKind::ForAll)
     }
 }
 
