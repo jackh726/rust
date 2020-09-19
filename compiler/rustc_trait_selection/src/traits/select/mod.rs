@@ -1254,7 +1254,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     pub(super) fn match_projection_projections(
         &mut self,
         obligation: &ProjectionTyObligation<'tcx>,
-        obligation_trait_ref: &ty::TraitRef<'tcx>,
+        obligation_trait_ref: &ty::PolyTraitRef<'tcx>,
         data: &PolyProjectionPredicate<'tcx>,
         potentially_unnormalized_candidates: bool,
     ) -> bool {
@@ -1276,10 +1276,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         // FIXME(generic_associated_types): Compare the whole projections
         let data_poly_trait_ref = projection_ty.map_bound(|proj| proj.trait_ref(self.tcx()));
-        let obligation_poly_trait_ref = obligation_trait_ref.to_poly_trait_ref();
         self.infcx
             .at(&obligation.cause, obligation.param_env)
-            .sup(obligation_poly_trait_ref, data_poly_trait_ref)
+            .sup(*obligation_trait_ref, data_poly_trait_ref)
             .map_or(false, |InferOk { obligations, value: () }| {
                 self.evaluate_predicates_recursively(
                     TraitObligationStackList::empty(&ProvisionalEvaluationCache::default()),
@@ -1737,11 +1736,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // 2. Produce something like `&'0 i32 : Copy`
         // 3. Re-bind the regions back to `for<'a> &'a i32 : Copy`
 
+        let binders = types.rebind(());
         types
             .skip_binder() // binder moved -\
             .iter()
             .flat_map(|ty| {
-                let ty: ty::Binder<Ty<'tcx>> = ty::Binder::bind(ty); // <----/
+                let ty: ty::Binder<Ty<'tcx>> = binders.rebind(ty); // <----/
 
                 self.infcx.commit_unconditionally(|_| {
                     let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(ty);

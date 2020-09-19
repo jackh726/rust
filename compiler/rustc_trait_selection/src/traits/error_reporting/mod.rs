@@ -314,7 +314,10 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                             "{}",
                             message.unwrap_or_else(|| format!(
                                 "the trait bound `{}` is not satisfied{}",
-                                trait_ref.without_const().to_predicate(tcx),
+                                trait_ref
+                                    .to_poly_trait_predicate()
+                                    .without_const()
+                                    .to_predicate(tcx),
                                 post_message,
                             ))
                         );
@@ -1438,7 +1441,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
         Obligation::new(
             ObligationCause::dummy(),
             param_env,
-            trait_ref.without_const().to_predicate(self.tcx),
+            trait_ref.to_poly_trait_predicate().without_const().to_predicate(self.tcx),
         )
     }
 
@@ -1691,7 +1694,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
             let obligation = Obligation::new(
                 ObligationCause::dummy(),
                 param_env,
-                cleaned_pred.without_const().to_predicate(selcx.tcx()),
+                cleaned_pred.to_poly_trait_predicate().without_const().to_predicate(selcx.tcx()),
             );
 
             self.predicate_may_hold(&obligation)

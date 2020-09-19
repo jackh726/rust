@@ -63,6 +63,7 @@ fn sized_constraint_for_ty<'tcx>(
                 def_id: sized_trait,
                 substs: tcx.mk_substs_trait(ty, &[]),
             })
+            .to_poly_trait_predicate()
             .without_const()
             .to_predicate(tcx);
             let predicates = tcx.predicates_of(adtdef.did).predicates;

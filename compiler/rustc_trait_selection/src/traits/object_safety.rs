@@ -676,6 +676,7 @@ fn receiver_is_dispatchable<'tcx>(
             def_id: unsize_did,
             substs: tcx.mk_substs_trait(tcx.types.self_param, &[unsized_self_ty.into()]),
         }
+        .to_trait_predicate()
         .without_const()
         .to_predicate(tcx);
 
@@ -690,7 +691,10 @@ fn receiver_is_dispatchable<'tcx>(
                     }
                 });
 
-            ty::TraitRef { def_id: unsize_did, substs }.without_const().to_predicate(tcx)
+            ty::TraitRef { def_id: unsize_did, substs }
+                .to_trait_predicate()
+                .without_const()
+                .to_predicate(tcx)
         };
 
         let caller_bounds: Vec<Predicate<'tcx>> = param_env
@@ -708,6 +712,7 @@ fn receiver_is_dispatchable<'tcx>(
             def_id: dispatch_from_dyn_did,
             substs: tcx.mk_substs_trait(receiver_ty, &[unsized_receiver_ty.into()]),
         }
+        .to_trait_predicate()
         .without_const()
         .to_predicate(tcx);
 
