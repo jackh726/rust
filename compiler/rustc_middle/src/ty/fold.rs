@@ -934,7 +934,7 @@ impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
         match t.kind {
             ty::Bound(debruijn, ty) if debruijn >= self.outer_index => {
                 self.bound_tys.insert(ty);
-                false
+                true
             }
             _ => t.super_visit_with(self),
         }
@@ -944,9 +944,9 @@ impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
         match r {
             ty::ReLateBound(debruijn, re) if *debruijn == self.outer_index => {
                 self.bound_regions.insert(*re);
-                false
+                true
             }
-            _ => false,
+            _ => r.super_visit_with(self),
         }
     }
 
@@ -954,7 +954,7 @@ impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
         match ct.val {
             ty::ConstKind::Bound(debruijn, c) if debruijn >= self.outer_index => {
                 self.bound_consts.insert(c);
-                false
+                true
             }
             _ => ct.super_visit_with(self),
         }
