@@ -796,6 +796,8 @@ fn project_type<'cx, 'tcx>(
         return Ok(ProjectedTy::Progress(Progress::error(selcx.tcx())));
     }
 
+    let obligation_trait_ref = obligation_trait_ref.to_poly_trait_ref();
+
     let mut candidates = ProjectionTyCandidateSet::None;
 
     // Make sure that the following procedures are kept in order. ParamEnv
@@ -839,7 +841,7 @@ fn project_type<'cx, 'tcx>(
 fn assemble_candidates_from_param_env<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
-    obligation_trait_ref: &ty::TraitRef<'tcx>,
+    obligation_trait_ref: &ty::PolyTraitRef<'tcx>,
     candidate_set: &mut ProjectionTyCandidateSet<'tcx>,
 ) {
     debug!("assemble_candidates_from_param_env(..)");
@@ -867,7 +869,7 @@ fn assemble_candidates_from_param_env<'cx, 'tcx>(
 fn assemble_candidates_from_trait_def<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
-    obligation_trait_ref: &ty::TraitRef<'tcx>,
+    obligation_trait_ref: &ty::PolyTraitRef<'tcx>,
     candidate_set: &mut ProjectionTyCandidateSet<'tcx>,
 ) {
     debug!("assemble_candidates_from_trait_def(..)");
@@ -875,7 +877,7 @@ fn assemble_candidates_from_trait_def<'cx, 'tcx>(
     let tcx = selcx.tcx();
     // Check whether the self-type is itself a projection.
     // If so, extract what we know from the trait and try to come up with a good answer.
-    let bounds = match *obligation_trait_ref.self_ty().kind() {
+    let bounds = match *obligation_trait_ref.self_ty().skip_binder().kind() {
         ty::Projection(ref data) => tcx.item_bounds(data.item_def_id).subst(tcx, data.substs),
         ty::Opaque(def_id, substs) => tcx.item_bounds(def_id).subst(tcx, substs),
         ty::Infer(ty::TyVar(_)) => {
@@ -910,14 +912,14 @@ fn assemble_candidates_from_trait_def<'cx, 'tcx>(
 fn assemble_candidates_from_object_ty<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
-    obligation_trait_ref: &ty::TraitRef<'tcx>,
+    obligation_trait_ref: &ty::PolyTraitRef<'tcx>,
     candidate_set: &mut ProjectionTyCandidateSet<'tcx>,
 ) {
     debug!("assemble_candidates_from_object_ty(..)");
 
     let tcx = selcx.tcx();
 
-    let self_ty = obligation_trait_ref.self_ty();
+    let self_ty = obligation_trait_ref.skip_binder().self_ty();
     let object_ty = selcx.infcx().shallow_resolve(self_ty);
     let data = match object_ty.kind() {
         ty::Dynamic(data, ..) => data,
@@ -948,7 +950,7 @@ fn assemble_candidates_from_object_ty<'cx, 'tcx>(
 fn assemble_candidates_from_predicates<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
-    obligation_trait_ref: &ty::TraitRef<'tcx>,
+    obligation_trait_ref: &ty::PolyTraitRef<'tcx>,
     candidate_set: &mut ProjectionTyCandidateSet<'tcx>,
     ctor: fn(ty::PolyProjectionPredicate<'tcx>) -> ProjectionTyCandidate<'tcx>,
     env_predicates: impl Iterator<Item = ty::Predicate<'tcx>>,
@@ -997,13 +999,12 @@ fn assemble_candidates_from_predicates<'cx, 'tcx>(
 fn assemble_candidates_from_impls<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
-    obligation_trait_ref: &ty::TraitRef<'tcx>,
+    obligation_trait_ref: &ty::PolyTraitRef<'tcx>,
     candidate_set: &mut ProjectionTyCandidateSet<'tcx>,
 ) {
     // If we are resolving `<T as TraitRef<...>>::Item == Type`,
     // start out by selecting the predicate `T as TraitRef<...>`:
-    let poly_trait_ref = obligation_trait_ref.to_poly_trait_ref();
-    let trait_obligation = obligation.with(poly_trait_ref.to_poly_trait_predicate());
+    let trait_obligation = obligation.with(obligation_trait_ref.to_poly_trait_predicate());
     let _ = selcx.infcx().commit_if_ok(|_| {
         let impl_source = match selcx.select(&trait_obligation) {
             Ok(Some(impl_source)) => impl_source,
@@ -1065,7 +1066,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                         // NOTE(eddyb) inference variables can resolve to parameters, so
                         // assume `poly_trait_ref` isn't monomorphic, if it contains any.
                         let poly_trait_ref =
-                            selcx.infcx().resolve_vars_if_possible(&poly_trait_ref);
+                            selcx.infcx().resolve_vars_if_possible(obligation_trait_ref);
                         !poly_trait_ref.still_further_specializable()
                     } else {
                         debug!(
