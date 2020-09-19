@@ -840,7 +840,7 @@ impl<'tcx> TraitRef<'tcx> {
         ty::TraitRef { def_id: trait_id, substs: tcx.intern_substs(&substs[..defs.params.len()]) }
     }
 
-    pub fn into_trait_predicate(self) -> ty::TraitPredicate<'tcx> {
+    pub fn to_trait_predicate(self) -> ty::TraitPredicate<'tcx> {
         ty::TraitPredicate { trait_ref: self }
     }
 }

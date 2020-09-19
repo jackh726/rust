@@ -249,7 +249,7 @@ pub fn predicate_for_trait_ref<'tcx>(
         cause,
         param_env,
         recursion_depth,
-        predicate: trait_ref.without_const().to_predicate(tcx),
+        predicate: trait_ref.to_trait_predicate().without_const().to_predicate(tcx),
     }
 }
 

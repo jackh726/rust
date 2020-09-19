@@ -139,7 +139,7 @@ pub fn type_known_to_meet_bound_modulo_regions<'a, 'tcx>(
         param_env,
         cause: ObligationCause::misc(span, hir::CRATE_HIR_ID),
         recursion_depth: 0,
-        predicate: trait_ref.without_const().to_predicate(infcx.tcx),
+        predicate: trait_ref.to_trait_predicate().without_const().to_predicate(infcx.tcx),
     };
 
     let result = infcx.predicate_must_hold_modulo_regions(&obligation);
@@ -536,7 +536,7 @@ fn type_implements_trait<'tcx>(
         cause: ObligationCause::dummy(),
         param_env,
         recursion_depth: 0,
-        predicate: trait_ref.without_const().to_predicate(tcx),
+        predicate: trait_ref.to_trait_predicate().without_const().to_predicate(tcx),
     };
     tcx.infer_ctxt().enter(|infcx| infcx.predicate_must_hold_modulo_regions(&obligation))
 }
