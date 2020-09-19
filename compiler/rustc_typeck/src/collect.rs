@@ -40,7 +40,7 @@ use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::subst::InternalSubsts;
 use rustc_middle::ty::util::Discr;
 use rustc_middle::ty::util::IntTypeExt;
-use rustc_middle::ty::{self, AdtKind, Const, ToPolyTraitRef, Ty, TyCtxt};
+use rustc_middle::ty::{self, AdtKind, Const, Ty, TyCtxt};
 use rustc_middle::ty::{ReprOptions, ToPredicate, WithConstness};
 use rustc_session::config::SanitizerSet;
 use rustc_session::lint;
@@ -1844,7 +1844,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
     // set of defaults that can be incorporated into another impl.
     if let Some(trait_ref) = is_default_impl_trait {
         predicates.insert((
-            trait_ref.to_poly_trait_ref().without_const().to_predicate(tcx),
+            trait_ref.without_const().to_predicate(tcx),
             tcx.def_span(def_id),
         ));
     }
