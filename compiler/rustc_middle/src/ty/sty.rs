@@ -694,9 +694,10 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
     pub fn with_self_ty(&self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> ty::Predicate<'tcx> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
-            ExistentialPredicate::Trait(tr) => {
-                Binder::bind(tr.with_self_ty(tcx, self_ty)).without_const().to_predicate(tcx)
-            }
+            ExistentialPredicate::Trait(tr) => Binder::bind(tr.with_self_ty(tcx, self_ty))
+                .to_poly_trait_predicate()
+                .without_const()
+                .to_predicate(tcx),
             ExistentialPredicate::Projection(p) => {
                 Binder::bind(p.with_self_ty(tcx, self_ty)).to_predicate(tcx)
             }
@@ -705,7 +706,7 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
                     def_id: did,
                     substs: tcx.mk_substs_trait(self_ty, &[]),
                 });
-                trait_ref.without_const().to_predicate(tcx)
+                trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx)
             }
         }
     }
@@ -838,6 +839,10 @@ impl<'tcx> TraitRef<'tcx> {
 
         ty::TraitRef { def_id: trait_id, substs: tcx.intern_substs(&substs[..defs.params.len()]) }
     }
+
+    pub fn into_trait_predicate(self) -> ty::TraitPredicate<'tcx> {
+        ty::TraitPredicate { trait_ref: self }
+    }
 }
 
 pub type PolyTraitRef<'tcx> = Binder<TraitRef<'tcx>>;
@@ -852,8 +857,7 @@ impl<'tcx> PolyTraitRef<'tcx> {
     }
 
     pub fn to_poly_trait_predicate(&self) -> ty::PolyTraitPredicate<'tcx> {
-        // Note that we preserve binding levels
-        Binder(ty::TraitPredicate { trait_ref: self.skip_binder() }, self.1)
+        self.map_bound(|trait_ref| ty::TraitPredicate { trait_ref })
     }
 }
 
