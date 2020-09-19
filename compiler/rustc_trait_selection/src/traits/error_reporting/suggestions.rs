@@ -251,7 +251,8 @@ fn suggest_restriction(
 
         // FIXME: modify the `trait_ref` instead of string shenanigans.
         // Turn `<impl Trait as Foo>::Bar: Qux` into `<T as Foo>::Bar: Qux`.
-        let pred = trait_ref.without_const().to_predicate(tcx).to_string();
+        let pred =
+            trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx).to_string();
         let pred = pred.replace(&impl_trait_str, &type_param_name);
         let mut sugg = vec![
             match generics
@@ -295,7 +296,7 @@ fn suggest_restriction(
         let (sp, suggestion) = match super_traits {
             None => predicate_constraint(
                 generics,
-                trait_ref.without_const().to_predicate(tcx).to_string(),
+                trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx).to_string(),
             ),
             Some((ident, bounds)) => match bounds {
                 [.., bound] => (
@@ -673,7 +674,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             let new_obligation = Obligation::new(
                 ObligationCause::dummy(),
                 param_env,
-                new_trait_ref.without_const().to_predicate(self.tcx),
+                new_trait_ref.to_trait_predicate().without_const().to_predicate(self.tcx),
             );
 
             if self.predicate_must_hold_modulo_regions(&new_obligation) {
@@ -2042,7 +2043,8 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
 
                 obligated_types.push(ty);
 
-                let parent_predicate = parent_trait_ref.without_const().to_predicate(tcx);
+                let parent_predicate =
+                    parent_trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx);
                 if !self.is_recursive_obligation(obligated_types, &data.parent_code) {
                     // #74711: avoid a stack overflow
                     ensure_sufficient_stack(|| {
@@ -2065,7 +2067,8 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     parent_trait_ref.skip_binder().self_ty()
                 ));
 
-                let mut parent_predicate = parent_trait_ref.without_const().to_predicate(tcx);
+                let mut parent_predicate =
+                    parent_trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx);
                 let mut data = data;
                 let mut count = 0;
                 seen_requirements.insert(parent_def_id);
@@ -2078,7 +2081,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     }
                     count += 1;
                     data = child;
-                    parent_predicate = child_trait_ref.without_const().to_predicate(tcx);
+                    parent_predicate = child_trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx);
                     parent_trait_ref = child_trait_ref;
                 }
                 if count > 0 {
@@ -2102,7 +2105,8 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             }
             ObligationCauseCode::DerivedObligation(ref data) => {
                 let parent_trait_ref = self.resolve_vars_if_possible(data.parent_trait_ref);
-                let parent_predicate = parent_trait_ref.without_const().to_predicate(tcx);
+                let parent_predicate =
+                    parent_trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx);
                 // #74711: avoid a stack overflow
                 ensure_sufficient_stack(|| {
                     self.note_obligation_cause_code(

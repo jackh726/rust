@@ -26,7 +26,7 @@ use rustc_hir::lang_items::LangItem;
 use rustc_infer::infer::resolve::OpportunisticRegionResolver;
 use rustc_middle::ty::fold::{TypeFoldable, TypeFolder};
 use rustc_middle::ty::subst::Subst;
-use rustc_middle::ty::{self, ToPolyTraitRef, ToPredicate, Ty, TyCtxt, WithConstness};
+use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, WithConstness};
 use rustc_span::symbol::sym;
 
 pub use rustc_middle::traits::Reveal;
@@ -677,12 +677,15 @@ fn normalize_to_error<'a, 'tcx>(
     cause: ObligationCause<'tcx>,
     depth: usize,
 ) -> NormalizedTy<'tcx> {
-    let trait_ref = projection_ty.trait_ref(selcx.tcx()).to_poly_trait_ref();
     let trait_obligation = Obligation {
         cause,
         recursion_depth: depth,
         param_env,
-        predicate: trait_ref.without_const().to_predicate(selcx.tcx()),
+        predicate: projection_ty
+            .trait_ref(selcx.tcx())
+            .to_trait_predicate()
+            .without_const()
+            .to_predicate(selcx.tcx()),
     };
     let tcx = selcx.infcx().tcx;
     let def_id = projection_ty.item_def_id;
@@ -1013,7 +1016,8 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     if obligation.param_env.reveal() == Reveal::All {
                         // NOTE(eddyb) inference variables can resolve to parameters, so
                         // assume `poly_trait_ref` isn't monomorphic, if it contains any.
-                        let poly_trait_ref = selcx.infcx().resolve_vars_if_possible(poly_trait_ref);
+                        let poly_trait_ref =
+                            selcx.infcx().resolve_vars_if_possible(*obligation_trait_ref);
                         !poly_trait_ref.still_further_specializable()
                     } else {
                         debug!(
