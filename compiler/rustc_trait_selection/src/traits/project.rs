@@ -737,7 +737,11 @@ fn get_paranoid_cache_value_obligation<'a, 'tcx>(
         cause,
         recursion_depth: depth,
         param_env,
-        predicate: projection_ty.trait_ref(infcx.tcx).without_const().to_predicate(infcx.tcx),
+        predicate: projection_ty
+            .trait_ref(infcx.tcx)
+            .to_trait_predicate()
+            .without_const()
+            .to_predicate(infcx.tcx),
     }
 }
 
@@ -771,7 +775,11 @@ fn normalize_to_error<'a, 'tcx>(
         cause,
         recursion_depth: depth,
         param_env,
-        predicate: projection_ty.trait_ref(selcx.tcx()).without_const().to_predicate(selcx.tcx()),
+        predicate: projection_ty
+            .trait_ref(selcx.tcx())
+            .to_trait_predicate()
+            .without_const()
+            .to_predicate(selcx.tcx()),
     };
     let tcx = selcx.infcx().tcx;
     let def_id = projection_ty.item_def_id;

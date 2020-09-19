@@ -1398,13 +1398,6 @@ impl ToPredicate<'tcx> for PredicateAtom<'tcx> {
     }
 }
 
-impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitRef<'tcx>> {
-    fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateAtom::Trait(ty::TraitPredicate { trait_ref: self.value }, self.constness)
-            .to_predicate(tcx)
-    }
-}
-
 impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitPredicate<'tcx>> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
         PredicateAtom::Trait(self.value, self.constness).to_predicate(tcx)
