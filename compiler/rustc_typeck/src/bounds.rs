@@ -61,7 +61,7 @@ impl<'tcx> Bounds<'tcx> {
                     def_id: sized,
                     substs: tcx.mk_substs_trait(param_ty, &[]),
                 });
-                (trait_ref.without_const().to_predicate(tcx), span)
+                (trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx), span)
             })
         });
 
@@ -76,7 +76,10 @@ impl<'tcx> Bounds<'tcx> {
                 )
             }))
             .chain(self.trait_bounds.iter().map(|&(bound_trait_ref, span, constness)| {
-                let predicate = bound_trait_ref.with_constness(constness).to_predicate(tcx);
+                let predicate = bound_trait_ref
+                    .to_poly_trait_predicate()
+                    .with_constness(constness)
+                    .to_predicate(tcx);
                 (predicate, span)
             }))
             .chain(

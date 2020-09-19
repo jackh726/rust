@@ -14,9 +14,7 @@ use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKi
 use rustc_middle::hir::map as hir_map;
 use rustc_middle::ty::fast_reject::simplify_type;
 use rustc_middle::ty::print::with_crate_prefix;
-use rustc_middle::ty::{
-    self, ToPolyTraitRef, ToPredicate, Ty, TyCtxt, TypeFoldable, WithConstness,
-};
+use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable, WithConstness};
 use rustc_span::lev_distance;
 use rustc_span::symbol::{kw, sym, Ident};
 use rustc_span::{source_map, FileName, Span};
@@ -54,12 +52,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 .into()],
                         );
                         let trait_ref = ty::TraitRef::new(fn_once, fn_once_substs);
-                        let poly_trait_ref = trait_ref.to_poly_trait_ref();
                         let obligation = Obligation::misc(
                             span,
                             self.body_id,
                             self.param_env,
-                            poly_trait_ref.without_const().to_predicate(tcx),
+                            trait_ref.to_trait_predicate().without_const().to_predicate(tcx),
                         );
                         self.predicate_may_hold(&obligation)
                     })

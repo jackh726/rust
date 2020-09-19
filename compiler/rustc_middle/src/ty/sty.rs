@@ -746,7 +746,7 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
             ExistentialPredicate::Trait(tr) => {
-                self.rebind(tr).with_self_ty(tcx, self_ty).without_const().to_predicate(tcx)
+                self.rebind(tr).with_self_ty(tcx, self_ty).to_poly_trait_predicate().without_const().to_predicate(tcx)
             }
             ExistentialPredicate::Projection(p) => {
                 self.rebind(p.with_self_ty(tcx, self_ty)).to_predicate(tcx)
@@ -756,7 +756,7 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
                     def_id: did,
                     substs: tcx.mk_substs_trait(self_ty, &[]),
                 });
-                trait_ref.without_const().to_predicate(tcx)
+                trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx)
             }
         }
     }
@@ -866,6 +866,10 @@ impl<'tcx> TraitRef<'tcx> {
         let defs = tcx.generics_of(trait_id);
 
         ty::TraitRef { def_id: trait_id, substs: tcx.intern_substs(&substs[..defs.params.len()]) }
+    }
+
+    pub fn to_trait_predicate(self) -> ty::TraitPredicate<'tcx> {
+        ty::TraitPredicate { trait_ref: self }
     }
 }
 
@@ -1122,7 +1126,8 @@ impl<T> Binder<T> {
 
 impl<T> Binder<Option<T>> {
     pub fn transpose(self) -> Option<Binder<T>> {
-        self.0.map(|v| Binder(v, self.1))
+        let bound_vars = self.1;
+        self.0.map(|v| Binder(v, bound_vars))
     }
 }
 

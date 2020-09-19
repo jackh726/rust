@@ -2019,6 +2019,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                                         ),
                                         tcx.mk_substs_trait(ty, &[]),
                                     ))
+                                    .to_poly_trait_predicate()
                                     .without_const()
                                     .to_predicate(self.tcx()),
                                 ),

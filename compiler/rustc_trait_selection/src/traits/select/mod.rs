@@ -1254,7 +1254,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     pub(super) fn match_projection_projections(
         &mut self,
         obligation: &ProjectionTyObligation<'tcx>,
-        obligation_trait_ref: &ty::TraitRef<'tcx>,
+        obligation_trait_ref: &ty:: TraitRef<'tcx>,
         data: &PolyProjectionPredicate<'tcx>,
         potentially_unnormalized_candidates: bool,
     ) -> bool {
