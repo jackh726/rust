@@ -1591,8 +1591,7 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
                 self.emit_inference_failure_err(body_id, span, a.into(), ErrorCode::E0282)
             }
             ty::PredicateAtom::Projection(data) => {
-                let trait_ref = ty::Binder::bind(data).to_poly_trait_ref(self.tcx);
-                let self_ty = trait_ref.skip_binder().self_ty();
+                let self_ty = data.projection_ty.trait_ref(self.tcx).self_ty();
                 let ty = data.ty;
                 if predicate.references_error() {
                     return;

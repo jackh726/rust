@@ -1337,6 +1337,13 @@ pub struct ProjectionPredicate<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
+impl<'tcx> ProjectionPredicate<'tcx> {
+    #[inline]
+    pub fn to_trait_ref(&self, tcx: TyCtxt<'tcx>) -> TraitRef<'tcx> {
+        self.projection_ty.trait_ref(tcx)
+    }
+}
+
 pub type PolyProjectionPredicate<'tcx> = Binder<ProjectionPredicate<'tcx>>;
 
 impl<'tcx> PolyProjectionPredicate<'tcx> {
@@ -1352,7 +1359,7 @@ impl<'tcx> PolyProjectionPredicate<'tcx> {
         // This is because here `self` has a `Binder` and so does our
         // return value, so we are preserving the number of binding
         // levels.
-        self.map_bound(|predicate| predicate.projection_ty.trait_ref(tcx))
+        self.map_bound(|predicate| predicate.to_trait_ref(tcx))
     }
 
     pub fn ty(&self) -> Binder<Ty<'tcx>> {
