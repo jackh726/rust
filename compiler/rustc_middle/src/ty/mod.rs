@@ -1465,9 +1465,9 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    pub fn to_opt_type_outlives(self) -> Option<PolyTypeOutlivesPredicate<'tcx>> {
+    pub fn to_opt_type_outlives(self) -> Option<TypeOutlivesPredicate<'tcx>> {
         match self.skip_binders() {
-            PredicateAtom::TypeOutlives(data) => Some(ty::Binder::bind(data)),
+            PredicateAtom::TypeOutlives(data) => Some(data),
             PredicateAtom::Trait(..)
             | PredicateAtom::Projection(..)
             | PredicateAtom::Subtype(..)
