@@ -343,12 +343,13 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     ) -> Result<(), SelectionError<'tcx>> {
         debug!("assemble_candidates_from_caller_bounds({:?})", stack.obligation);
 
+        let tcx = self.infcx.tcx;
         let all_bounds = stack
             .obligation
             .param_env
             .caller_bounds()
             .iter()
-            .filter_map(|o| o.to_opt_poly_trait_ref());
+            .filter_map(|o| o.to_opt_poly_trait_ref(tcx));
 
         // Micro-optimization: filter out predicates relating to different traits.
         let matching_bounds =

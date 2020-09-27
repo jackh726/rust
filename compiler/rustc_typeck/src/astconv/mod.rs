@@ -1301,7 +1301,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             || {
                 traits::transitive_bounds(
                     tcx,
-                    predicates.iter().filter_map(|(p, _)| p.to_opt_poly_trait_ref()),
+                    predicates.iter().filter_map(|(p, _)| p.to_opt_poly_trait_ref(tcx)),
                 )
             },
             || param_name.to_string(),

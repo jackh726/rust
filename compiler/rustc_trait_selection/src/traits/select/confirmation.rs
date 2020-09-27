@@ -137,7 +137,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
             let candidate_predicate = tcx.item_bounds(def_id)[idx].subst(tcx, substs);
             let candidate = candidate_predicate
-                .to_opt_poly_trait_ref()
+                .to_opt_poly_trait_ref(tcx)
                 .expect("projection candidate is not a trait predicate");
             let mut obligations = Vec::new();
             let candidate = normalize_with_depth_to(
