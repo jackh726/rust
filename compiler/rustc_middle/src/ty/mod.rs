@@ -1446,9 +1446,12 @@ impl<'tcx> ToPredicate<'tcx> for PolyProjectionPredicate<'tcx> {
 }
 
 impl<'tcx> Predicate<'tcx> {
-    pub fn to_opt_poly_trait_ref(self) -> Option<PolyTraitRef<'tcx>> {
-        match self.skip_binders() {
-            PredicateAtom::Trait(t, _) => Some(ty::Binder::bind(t.trait_ref)),
+    pub fn to_opt_poly_trait_ref(self, tcx: TyCtxt<'tcx>) -> Option<PolyTraitRef<'tcx>> {
+        let predicate = self.bound_atom(tcx);
+        match predicate.skip_binder() {
+            PredicateAtom::Trait(t, _) => {
+                Some(ty::Binder::rebind(t.trait_ref, predicate.bound_vars()))
+            }
             PredicateAtom::Projection(..)
             | PredicateAtom::Subtype(..)
             | PredicateAtom::RegionOutlives(..)
