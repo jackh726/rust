@@ -642,7 +642,9 @@ impl AutoTraitFinder<'tcx> {
             // We check this by calling is_of_param on the relevant types
             // from the various possible predicates
 
-            match predicate.skip_binders() {
+            let tcx = self.tcx;
+            let bound_predicate = predicate.bound_atom(tcx);
+            match bound_predicate.skip_binder() {
                 ty::PredicateAtom::Trait(p, _) => {
                     if self.is_param_no_infer(p.trait_ref.substs)
                         && !only_projections
@@ -650,10 +652,10 @@ impl AutoTraitFinder<'tcx> {
                     {
                         self.add_user_pred(computed_preds, predicate);
                     }
-                    predicates.push_back(ty::Binder::bind(p));
+                    predicates.push_back(ty::Binder::rebind(p, bound_predicate.bound_vars()));
                 }
                 ty::PredicateAtom::Projection(p) => {
-                    let p = ty::Binder::bind(p);
+                    let p = ty::Binder::rebind(p, bound_predicate.bound_vars());
                     debug!(
                         "evaluate_nested_obligations: examining projection predicate {:?}",
                         predicate
@@ -783,13 +785,13 @@ impl AutoTraitFinder<'tcx> {
                     }
                 }
                 ty::PredicateAtom::RegionOutlives(binder) => {
-                    let binder = ty::Binder::bind(binder);
+                    let binder = ty::Binder::rebind(binder, bound_predicate.bound_vars());
                     if select.infcx().region_outlives_predicate(&dummy_cause, binder).is_err() {
                         return false;
                     }
                 }
                 ty::PredicateAtom::TypeOutlives(binder) => {
-                    let binder = ty::Binder::bind(binder);
+                    let binder = ty::Binder::rebind(binder, bound_predicate.bound_vars());
                     match (
                         binder.no_bound_vars(),
                         binder.map_bound_ref(|pred| pred.0).no_bound_vars(),

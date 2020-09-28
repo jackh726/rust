@@ -694,18 +694,20 @@ impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
     pub fn with_self_ty(&self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> ty::Predicate<'tcx> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
-            ExistentialPredicate::Trait(tr) => Binder::bind(tr.with_self_ty(tcx, self_ty))
-                .to_poly_trait_predicate()
-                .without_const()
-                .to_predicate(tcx),
+            ExistentialPredicate::Trait(tr) => {
+                Binder::rebind(tr.with_self_ty(tcx, self_ty), self.bound_vars())
+                    .to_poly_trait_predicate()
+                    .without_const()
+                    .to_predicate(tcx)
+            }
             ExistentialPredicate::Projection(p) => {
-                Binder::bind(p.with_self_ty(tcx, self_ty)).to_predicate(tcx)
+                Binder::rebind(p.with_self_ty(tcx, self_ty), self.bound_vars()).to_predicate(tcx)
             }
             ExistentialPredicate::AutoTrait(did) => {
-                let trait_ref = Binder::bind(ty::TraitRef {
-                    def_id: did,
-                    substs: tcx.mk_substs_trait(self_ty, &[]),
-                });
+                let trait_ref = Binder::rebind(
+                    ty::TraitRef { def_id: did, substs: tcx.mk_substs_trait(self_ty, &[]) },
+                    self.bound_vars(),
+                );
                 trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx)
             }
         }
@@ -770,7 +772,8 @@ impl<'tcx> List<ExistentialPredicate<'tcx>> {
 
 impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
     pub fn principal(&self) -> Option<ty::Binder<ExistentialTraitRef<'tcx>>> {
-        self.skip_binder().principal().map(Binder::bind)
+        let bound_vars = self.bound_vars();
+        self.skip_binder().principal().map(move |p| Binder::rebind(p, bound_vars))
     }
 
     pub fn principal_def_id(&self) -> Option<DefId> {
@@ -781,7 +784,8 @@ impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
     pub fn projection_bounds<'a>(
         &'a self,
     ) -> impl Iterator<Item = PolyExistentialProjection<'tcx>> + 'a {
-        self.skip_binder().projection_bounds().map(Binder::bind)
+        let bound_vars = self.bound_vars();
+        self.skip_binder().projection_bounds().map(move |p| Binder::rebind(p, bound_vars))
     }
 
     #[inline]
@@ -792,7 +796,8 @@ impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
     pub fn iter<'a>(
         &'a self,
     ) -> impl DoubleEndedIterator<Item = Binder<ExistentialPredicate<'tcx>>> + 'tcx {
-        self.skip_binder().iter().map(Binder::bind)
+        let bound_vars = self.bound_vars();
+        self.skip_binder().iter().map(move |p| Binder::rebind(p, bound_vars))
     }
 }
 
