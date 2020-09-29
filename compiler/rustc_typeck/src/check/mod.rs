@@ -2418,7 +2418,8 @@ fn bounds_from_generic_predicates<'tcx>(
     let mut projections = vec![];
     for (predicate, _) in predicates.predicates {
         debug!("predicate {:?}", predicate);
-        match predicate.skip_binders() {
+        let bound_predicate = predicate.bound_atom(tcx);
+        match bound_predicate.skip_binder() {
             ty::PredicateAtom::Trait(trait_predicate, _) => {
                 let entry = types.entry(trait_predicate.self_ty()).or_default();
                 let def_id = trait_predicate.def_id();
@@ -2429,7 +2430,7 @@ fn bounds_from_generic_predicates<'tcx>(
                 }
             }
             ty::PredicateAtom::Projection(projection_pred) => {
-                projections.push(ty::Binder::bind(projection_pred));
+                projections.push(ty::Binder::rebind(projection_pred, bound_predicate.bound_vars()));
             }
             _ => {}
         }
@@ -3908,18 +3909,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             self.fulfillment_cx.borrow().pending_obligations()
         );
 
+        let tcx = self.tcx;
         self.fulfillment_cx
             .borrow()
             .pending_obligations()
             .into_iter()
             .filter_map(move |obligation| {
-                match obligation.predicate.skip_binders() {
-                    ty::PredicateAtom::Projection(data) => {
-                        Some((ty::Binder::bind(data).to_poly_trait_ref(self.tcx), obligation))
-                    }
-                    ty::PredicateAtom::Trait(data, _) => {
-                        Some((ty::Binder::bind(data).to_poly_trait_ref(), obligation))
-                    }
+                let bound_predicate = obligation.predicate.bound_atom(tcx);
+                match bound_predicate.skip_binder() {
+                    ty::PredicateAtom::Projection(data) => Some((
+                        ty::Binder::rebind(data, bound_predicate.bound_vars())
+                            .to_poly_trait_ref(self.tcx),
+                        obligation,
+                    )),
+                    ty::PredicateAtom::Trait(data, _) => Some((
+                        ty::Binder::rebind(data, bound_predicate.bound_vars()).to_poly_trait_ref(),
+                        obligation,
+                    )),
                     ty::PredicateAtom::Subtype(..) => None,
                     ty::PredicateAtom::RegionOutlives(..) => None,
                     ty::PredicateAtom::TypeOutlives(..) => None,

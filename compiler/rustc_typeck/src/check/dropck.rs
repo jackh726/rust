@@ -226,13 +226,21 @@ fn ensure_drop_predicates_are_implied_by_item_defn<'tcx>(
         // could be extended easily also to the other `Predicate`.
         let predicate_matches_closure = |p: Predicate<'tcx>| {
             let mut relator: SimpleEqRelation<'tcx> = SimpleEqRelation::new(tcx, self_param_env);
-            match (predicate.skip_binders(), p.skip_binders()) {
-                (ty::PredicateAtom::Trait(a, _), ty::PredicateAtom::Trait(b, _)) => {
-                    relator.relate(ty::Binder::bind(a), ty::Binder::bind(b)).is_ok()
-                }
-                (ty::PredicateAtom::Projection(a), ty::PredicateAtom::Projection(b)) => {
-                    relator.relate(ty::Binder::bind(a), ty::Binder::bind(b)).is_ok()
-                }
+            let a_bound = predicate.bound_atom(tcx);
+            let b_bound = p.bound_atom(tcx);
+            match (a_bound.skip_binder(), b_bound.skip_binder()) {
+                (ty::PredicateAtom::Trait(a, _), ty::PredicateAtom::Trait(b, _)) => relator
+                    .relate(
+                        ty::Binder::rebind(a, a_bound.bound_vars()),
+                        ty::Binder::rebind(b, b_bound.bound_vars()),
+                    )
+                    .is_ok(),
+                (ty::PredicateAtom::Projection(a), ty::PredicateAtom::Projection(b)) => relator
+                    .relate(
+                        ty::Binder::rebind(a, a_bound.bound_vars()),
+                        ty::Binder::rebind(b, b_bound.bound_vars()),
+                    )
+                    .is_ok(),
                 _ => predicate == p,
             }
         };
