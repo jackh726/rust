@@ -326,7 +326,8 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
                 // This means we need to pass it the bound version of our
                 // predicate.
                 ty::PredicateAtom::Trait(trait_ref, _constness) => {
-                    let trait_obligation = obligation.with(Binder::bind(trait_ref));
+                    let trait_obligation =
+                        obligation.with(Binder::rebind(trait_ref, binder.bound_vars()));
 
                     self.process_trait_obligation(
                         obligation,
@@ -335,7 +336,8 @@ impl<'a, 'b, 'tcx> ObligationProcessor for FulfillProcessor<'a, 'b, 'tcx> {
                     )
                 }
                 ty::PredicateAtom::Projection(data) => {
-                    let project_obligation = obligation.with(Binder::bind(data));
+                    let project_obligation =
+                        obligation.with(Binder::rebind(data, binder.bound_vars()));
 
                     self.process_projection_obligation(
                         project_obligation,

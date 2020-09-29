@@ -201,14 +201,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     obligation.predicate
                 );
 
-                if let ty::PredicateAtom::Projection(proj_predicate) =
-                    obligation.predicate.skip_binders()
+                let bound_predicate = obligation.predicate.bound_atom(self.tcx);
+                if let ty::PredicateAtom::Projection(proj_predicate) = bound_predicate.skip_binder()
                 {
                     // Given a Projection predicate, we can potentially infer
                     // the complete signature.
                     self.deduce_sig_from_projection(
                         Some(obligation.cause.span),
-                        ty::Binder::bind(proj_predicate),
+                        ty::Binder::rebind(proj_predicate, bound_predicate.bound_vars()),
                     )
                 } else {
                     None
@@ -626,12 +626,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // where R is the return type we are expecting. This type `T`
         // will be our output.
         let output_ty = self.obligations_for_self_ty(ret_vid).find_map(|(_, obligation)| {
-            if let ty::PredicateAtom::Projection(proj_predicate) =
-                obligation.predicate.skip_binders()
-            {
+            let bound_predicate = obligation.predicate.bound_atom(self.tcx);
+            if let ty::PredicateAtom::Projection(proj_predicate) = bound_predicate.skip_binder() {
                 self.deduce_future_output_from_projection(
                     obligation.cause.span,
-                    ty::Binder::bind(proj_predicate),
+                    ty::Binder::rebind(proj_predicate, bound_predicate.bound_vars()),
                 )
             } else {
                 None

@@ -1081,9 +1081,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     obligation.predicate
                 );
 
-                match obligation.predicate.skip_binders() {
+                let bound_predicate = obligation.predicate.bound_atom(tcx);
+                match bound_predicate.skip_binder() {
                     ty::PredicateAtom::Trait(pred, _) => {
-                        let pred = ty::Binder::bind(pred);
+                        let pred = ty::Binder::rebind(pred, bound_predicate.bound_vars());
                         associated_types.entry(span).or_default().extend(
                             tcx.associated_items(pred.def_id())
                                 .in_definition_order()
@@ -1092,7 +1093,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         );
                     }
                     ty::PredicateAtom::Projection(pred) => {
-                        let pred = ty::Binder::bind(pred);
+                        let pred = ty::Binder::rebind(pred, bound_predicate.bound_vars());
                         // A `Self` within the original bound will be substituted with a
                         // `trait_object_dummy_self`, so check for that.
                         let references_self =
