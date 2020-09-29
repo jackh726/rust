@@ -455,9 +455,10 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         }
 
         ensure_sufficient_stack(|| {
-            match obligation.predicate.skip_binders() {
+            let bound_predicate = obligation.predicate.bound_atom(self.tcx());
+            match bound_predicate.skip_binder() {
                 ty::PredicateAtom::Trait(t, _) => {
-                    let t = ty::Binder::bind(t);
+                    let t = ty::Binder::rebind(t, bound_predicate.bound_vars());
                     debug_assert!(!t.has_escaping_bound_vars());
                     let obligation = obligation.with(t);
                     self.evaluate_trait_predicate_recursively(previous_stack, obligation)
@@ -508,7 +509,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 }
 
                 ty::PredicateAtom::Projection(data) => {
-                    let data = ty::Binder::bind(data);
+                    let data = ty::Binder::rebind(data, bound_predicate.bound_vars());
                     let project_obligation = obligation.with(data);
                     match project::poly_project_and_unify_type(self, &project_obligation) {
                         Ok(Ok(Some(mut subobligations))) => {
@@ -1201,8 +1202,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             .iter()
             .enumerate()
             .filter_map(|(idx, bound)| {
-                if let ty::PredicateAtom::Trait(pred, _) = bound.skip_binders() {
-                    let bound = ty::Binder::bind(pred.trait_ref);
+                let bound_predicate = bound.bound_atom(tcx);
+                if let ty::PredicateAtom::Trait(pred, _) = bound_predicate.skip_binder() {
+                    let bound = ty::Binder::rebind(pred.trait_ref, bound_predicate.bound_vars());
                     if self.infcx.probe(|_| {
                         match self.match_projection(
                             obligation,
@@ -1559,15 +1561,17 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
             ty::Str | ty::Slice(_) | ty::Dynamic(..) | ty::Foreign(..) => None,
 
-            ty::Tuple(tys) => {
-                Where(ty::Binder::bind(tys.last().into_iter().map(|k| k.expect_ty()).collect()))
-            }
+            ty::Tuple(tys) => Where(ty::Binder::rebind(
+                tys.last().into_iter().map(|k| k.expect_ty()).collect(),
+                obligation.predicate.bound_vars(),
+            )),
 
             ty::Adt(def, substs) => {
                 let sized_crit = def.sized_constraint(self.tcx());
                 // (*) binder moved here
-                Where(ty::Binder::bind(
+                Where(ty::Binder::rebind(
                     sized_crit.iter().map(|ty| ty.subst(self.tcx(), substs)).collect(),
+                    obligation.predicate.bound_vars(),
                 ))
             }
 
@@ -1620,17 +1624,23 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
             ty::Array(element_ty, _) => {
                 // (*) binder moved here
-                Where(ty::Binder::bind(vec![element_ty]))
+                Where(ty::Binder::rebind(vec![element_ty], obligation.predicate.bound_vars()))
             }
 
             ty::Tuple(tys) => {
                 // (*) binder moved here
-                Where(ty::Binder::bind(tys.iter().map(|k| k.expect_ty()).collect()))
+                Where(ty::Binder::rebind(
+                    tys.iter().map(|k| k.expect_ty()).collect(),
+                    obligation.predicate.bound_vars(),
+                ))
             }
 
             ty::Closure(_, substs) => {
                 // (*) binder moved here
-                Where(ty::Binder::bind(substs.as_closure().upvar_tys().collect()))
+                Where(ty::Binder::rebind(
+                    substs.as_closure().upvar_tys().collect(),
+                    obligation.predicate.bound_vars(),
+                ))
             }
 
             ty::Adt(..) | ty::Projection(..) | ty::Param(..) | ty::Opaque(..) => {
@@ -1749,11 +1759,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // 2. Produce something like `&'0 i32 : Copy`
         // 3. Re-bind the regions back to `for<'a> &'a i32 : Copy`
 
+        let bound_vars = types.bound_vars();
         types
             .skip_binder() // binder moved -\
             .iter()
             .flat_map(|ty| {
-                let ty: ty::Binder<Ty<'tcx>> = ty::Binder::bind(ty); // <----/
+                let ty: ty::Binder<Ty<'tcx>> = ty::Binder::rebind(ty, bound_vars); // <----/
 
                 self.infcx.commit_unconditionally(|_| {
                     let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(&ty);
