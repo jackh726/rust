@@ -1759,12 +1759,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // 2. Produce something like `&'0 i32 : Copy`
         // 3. Re-bind the regions back to `for<'a> &'a i32 : Copy`
 
-        let bound_vars = types.bound_vars();
         types
             .skip_binder() // binder moved -\
             .iter()
             .flat_map(|ty| {
-                let ty: ty::Binder<Ty<'tcx>> = ty::Binder::rebind(ty, bound_vars); // <----/
+                let ty: ty::Binder<Ty<'tcx>> = ty::Binder::bind(ty); // <----/
 
                 self.infcx.commit_unconditionally(|_| {
                     let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(&ty);
