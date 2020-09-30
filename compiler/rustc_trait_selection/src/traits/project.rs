@@ -687,9 +687,10 @@ fn prune_cache_value_obligations<'a, 'tcx>(
                 // indirect obligations (e.g., we project to `?0`,
                 // but we have `T: Foo<X = ?1>` and `?1: Bar<X =
                 // ?0>`).
-                ty::PredicateAtom::Projection(data) => infcx
-                    .unresolved_type_vars(&ty::Binder::rebind(data.ty, predicate.bound_vars()))
-                    .is_some(),
+                // FIXME: for some reason, rebind doesn't work here
+                ty::PredicateAtom::Projection(data) => {
+                    infcx.unresolved_type_vars(&ty::Binder::bind(data.ty)).is_some()
+                }
 
                 // We are only interested in `T: Foo<X = U>` predicates, whre
                 // `U` references one of `unresolved_type_vars`. =)

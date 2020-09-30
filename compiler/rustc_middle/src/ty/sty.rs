@@ -796,8 +796,7 @@ impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
     pub fn iter<'a>(
         &'a self,
     ) -> impl DoubleEndedIterator<Item = Binder<ExistentialPredicate<'tcx>>> + 'tcx {
-        let bound_vars = self.bound_vars();
-        self.skip_binder().iter().map(move |p| Binder::rebind(p, bound_vars))
+        self.skip_binder().iter().map(move |p| Binder::bind(p))
     }
 }
 
@@ -981,13 +980,15 @@ where
         let bound_vars = bound_tys + bound_regions + bound_consts;
         Binder(value, bound_vars as u32)
     }
+
+    pub fn rebind(value: T, bound_vars: u32) -> Self {
+        let bound = Binder::bind(value);
+        assert_eq!(bound.bound_vars(), bound_vars);
+        bound
+    }
 }
 
 impl<T> Binder<T> {
-    pub fn rebind(value: T, bound_vars: u32) -> Self {
-        Binder(value, bound_vars)
-    }
-
     /// Wraps `value` in a binder without actually binding any currently
     /// unbound variables.
     ///

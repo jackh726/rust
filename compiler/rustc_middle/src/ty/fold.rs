@@ -932,7 +932,7 @@ impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
 
     fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
         match t.kind {
-            ty::Bound(debruijn, ty) if debruijn >= self.outer_index => {
+            ty::Bound(debruijn, ty) if debruijn == self.outer_index => {
                 self.bound_tys.insert(ty);
                 true
             }
@@ -952,7 +952,7 @@ impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
 
     fn visit_const(&mut self, ct: &'tcx ty::Const<'tcx>) -> bool {
         match ct.val {
-            ty::ConstKind::Bound(debruijn, c) if debruijn >= self.outer_index => {
+            ty::ConstKind::Bound(debruijn, c) if debruijn == self.outer_index => {
                 self.bound_consts.insert(c);
                 true
             }
