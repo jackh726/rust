@@ -89,6 +89,19 @@ pub fn hash_stable_derive(mut s: synstructure::Structure<'_>) -> proc_macro2::To
     let generic: syn::GenericParam = parse_quote!('__ctx);
     s.add_bounds(synstructure::AddBounds::Generics);
     s.add_impl_generic(generic);
+
+    let input = s.ast();
+    input.generics.params.iter().for_each(|param| {
+        match param {
+            syn::GenericParam::Lifetime(l) => {
+                let lifetime = &l.lifetime;
+                let predicate = syn::parse_quote!(#lifetime: '__ctx);
+                s.add_where_predicate(predicate);
+            }
+            _ => {}
+        }
+    });
+
     let body = s.each(|bi| {
         let attrs = parse_attributes(bi.ast());
         if attrs.ignore {

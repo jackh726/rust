@@ -498,7 +498,7 @@ impl<'tcx> TyCtxt<'tcx> {
         self,
         closure_def_id: DefId,
         closure_substs: SubstsRef<'tcx>,
-    ) -> Option<ty::Binder<Ty<'tcx>>> {
+    ) -> Option<ty::Binder<'tcx, Ty<'tcx>>> {
         let closure_ty = self.mk_closure(closure_def_id, closure_substs);
         let env_region = ty::ReLateBound(ty::INNERMOST, ty::BrEnv);
         let closure_kind_ty = closure_substs.as_closure().kind_ty();
@@ -508,7 +508,7 @@ impl<'tcx> TyCtxt<'tcx> {
             ty::ClosureKind::FnMut => self.mk_mut_ref(self.mk_region(env_region), closure_ty),
             ty::ClosureKind::FnOnce => closure_ty,
         };
-        Some(ty::Binder::bind(env_ty))
+        Some(ty::Binder::bind(env_ty, self))
     }
 
     /// Given the `DefId` of some item that has no type or const parameters, make
