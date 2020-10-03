@@ -56,7 +56,9 @@ pub use self::sty::InferTy::*;
 pub use self::sty::RegionKind;
 pub use self::sty::RegionKind::*;
 pub use self::sty::TyKind::*;
-pub use self::sty::{Binder, BoundTy, BoundTyKind, BoundVar, DebruijnIndex, INNERMOST};
+pub use self::sty::{
+    Binder, BoundTy, BoundTyKind, BoundVar, BoundVariableKind, DebruijnIndex, INNERMOST,
+};
 pub use self::sty::{BoundRegion, EarlyBoundRegion, FreeRegion, Region};
 pub use self::sty::{CanonicalPolyFnSig, FnSig, GenSig, PolyFnSig, PolyGenSig};
 pub use self::sty::{ClosureSubsts, GeneratorSubsts, TypeAndMut, UpvarSubsts};
@@ -637,7 +639,7 @@ impl<'tcx> Hash for TyS<'tcx> {
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for TyS<'tcx> {
+impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for TyS<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         let ty::TyS {
             ref kind,
@@ -1081,9 +1083,9 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    /// Allows using a `Binder<PredicateAtom<'tcx>>` even if the given predicate previously
+    /// Allows using a `Binder<'tcx, PredicateAtom<'tcx>>` even if the given predicate previously
     /// contained unbound variables by shifting these variables outwards.
-    pub fn bound_atom(self, tcx: TyCtxt<'tcx>) -> Binder<PredicateAtom<'tcx>> {
+    pub fn bound_atom(self, tcx: TyCtxt<'tcx>) -> Binder<'tcx, PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => Binder::wrap_nonbinding(tcx, atom),
@@ -1091,7 +1093,7 @@ impl<'tcx> Predicate<'tcx> {
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
+impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         let PredicateInner {
             ref kind,
@@ -1110,7 +1112,7 @@ impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
 #[derive(HashStable, TypeFoldable)]
 pub enum PredicateKind<'tcx> {
     /// `for<'a>: ...`
-    ForAll(Binder<PredicateAtom<'tcx>>),
+    ForAll(Binder<'tcx, PredicateAtom<'tcx>>),
     Atom(PredicateAtom<'tcx>),
 }
 
@@ -1167,10 +1169,10 @@ impl<'tcx> PredicateAtom<'tcx> {
     pub fn potentially_quantified(
         self,
         tcx: TyCtxt<'tcx>,
-        qualifier: impl FnOnce(Binder<PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
+        qualifier: impl FnOnce(Binder<'tcx, PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
     ) -> Predicate<'tcx> {
         if self.has_escaping_bound_vars() {
-            qualifier(Binder::bind(self))
+            qualifier(Binder::bind(self, tcx))
         } else {
             PredicateKind::Atom(self)
         }
@@ -1275,7 +1277,7 @@ pub struct TraitPredicate<'tcx> {
     pub trait_ref: TraitRef<'tcx>,
 }
 
-pub type PolyTraitPredicate<'tcx> = ty::Binder<TraitPredicate<'tcx>>;
+pub type PolyTraitPredicate<'tcx> = ty::Binder<'tcx, TraitPredicate<'tcx>>;
 
 impl<'tcx> TraitPredicate<'tcx> {
     pub fn def_id(self) -> DefId {
@@ -1297,11 +1299,11 @@ impl<'tcx> PolyTraitPredicate<'tcx> {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable, TypeFoldable)]
 pub struct OutlivesPredicate<A, B>(pub A, pub B); // `A: B`
-pub type PolyOutlivesPredicate<A, B> = ty::Binder<OutlivesPredicate<A, B>>;
+pub type PolyOutlivesPredicate<'tcx, A, B> = ty::Binder<'tcx, OutlivesPredicate<A, B>>;
 pub type RegionOutlivesPredicate<'tcx> = OutlivesPredicate<ty::Region<'tcx>, ty::Region<'tcx>>;
 pub type TypeOutlivesPredicate<'tcx> = OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>;
-pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<RegionOutlivesPredicate<'tcx>>;
-pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<TypeOutlivesPredicate<'tcx>>;
+pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<'tcx, RegionOutlivesPredicate<'tcx>>;
+pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<'tcx, TypeOutlivesPredicate<'tcx>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable, TypeFoldable)]
@@ -1310,7 +1312,7 @@ pub struct SubtypePredicate<'tcx> {
     pub a: Ty<'tcx>,
     pub b: Ty<'tcx>,
 }
-pub type PolySubtypePredicate<'tcx> = ty::Binder<SubtypePredicate<'tcx>>;
+pub type PolySubtypePredicate<'tcx> = ty::Binder<'tcx, SubtypePredicate<'tcx>>;
 
 /// This kind of predicate has no *direct* correspondent in the
 /// syntax, but it roughly corresponds to the syntactic forms:
@@ -1338,7 +1340,7 @@ impl<'tcx> ProjectionPredicate<'tcx> {
     }
 }
 
-pub type PolyProjectionPredicate<'tcx> = Binder<ProjectionPredicate<'tcx>>;
+pub type PolyProjectionPredicate<'tcx> = Binder<'tcx, ProjectionPredicate<'tcx>>;
 
 impl<'tcx> PolyProjectionPredicate<'tcx> {
     /// Returns the `DefId` of the associated item being projected.
@@ -1356,7 +1358,7 @@ impl<'tcx> PolyProjectionPredicate<'tcx> {
         self.map_bound(|predicate| predicate.to_trait_ref(tcx))
     }
 
-    pub fn ty(&self) -> Binder<Ty<'tcx>> {
+    pub fn ty(&self) -> Binder<'tcx, Ty<'tcx>> {
         self.map_bound(|predicate| predicate.ty)
     }
 
@@ -1772,7 +1774,7 @@ impl<'tcx> fmt::Debug for ParamEnv<'tcx> {
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for ParamEnv<'tcx> {
+impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for ParamEnv<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         self.caller_bounds().hash_stable(hcx, hasher);
         self.reveal().hash_stable(hcx, hasher);
@@ -1920,7 +1922,7 @@ impl<'tcx, T> ParamEnvAnd<'tcx, T> {
     }
 }
 
-impl<'a, 'tcx, T> HashStable<StableHashingContext<'a>> for ParamEnvAnd<'tcx, T>
+impl<'a, 'tcx: 'a, T> HashStable<StableHashingContext<'a>> for ParamEnvAnd<'tcx, T>
 where
     T: HashStable<StableHashingContext<'a>>,
 {

@@ -54,7 +54,7 @@ where
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for ty::subst::GenericArg<'tcx> {
+impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for ty::subst::GenericArg<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         self.unpack().hash_stable(hcx, hasher);
     }
@@ -104,7 +104,7 @@ impl<'a> HashStable<StableHashingContext<'a>> for ty::RegionVid {
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for ty::ConstVid<'tcx> {
+impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for ty::ConstVid<'tcx> {
     #[inline]
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         self.index.hash_stable(hcx, hasher);
@@ -118,7 +118,7 @@ impl<'tcx> HashStable<StableHashingContext<'tcx>> for ty::BoundVar {
     }
 }
 
-impl<'a, T> HashStable<StableHashingContext<'a>> for ty::Binder<T>
+impl<'a, T> HashStable<StableHashingContext<'a>> for ty::Binder<'a, T>
 where
     T: HashStable<StableHashingContext<'a>>,
 {
