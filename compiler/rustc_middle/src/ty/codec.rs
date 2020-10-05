@@ -321,7 +321,7 @@ impl<'tcx, D: TyDecoder<'tcx>> RefDecodable<'tcx, D> for ty::List<Ty<'tcx>> {
 }
 
 impl<'tcx, D: TyDecoder<'tcx>> RefDecodable<'tcx, D>
-    for ty::List<ty::Binder<ty::ExistentialPredicate<'tcx>>>
+    for ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>>
 {
     fn decode(decoder: &mut D) -> Result<&'tcx Self, D::Error> {
         let len = decoder.read_usize()?;
@@ -376,7 +376,7 @@ impl<'tcx, D: TyDecoder<'tcx>> RefDecodable<'tcx, D> for [mir::abstract_const::N
 impl_decodable_via_ref! {
     &'tcx ty::TypeckResults<'tcx>,
     &'tcx ty::List<Ty<'tcx>>,
-    &'tcx ty::List<ty::Binder<ty::ExistentialPredicate<'tcx>>>,
+    &'tcx ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>>,
     &'tcx Allocation,
     &'tcx mir::Body<'tcx>,
     &'tcx mir::UnsafetyCheckResult,
