@@ -53,7 +53,7 @@ impl FlagComputation {
 
     /// Adds the flags/depth from a set of types that appear within the current type, but within a
     /// region binder.
-    fn bound_computation<T, F>(&mut self, value: ty::Binder<T>, f: F)
+    fn bound_computation<T, F>(&mut self, value: ty::Binder<'_, T>, f: F)
     where
         F: FnOnce(&mut Self, T),
     {
