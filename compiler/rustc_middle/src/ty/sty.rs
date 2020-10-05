@@ -152,7 +152,7 @@ pub enum TyKind<'tcx> {
     FnPtr(PolyFnSig<'tcx>),
 
     /// A trait, defined with `trait`.
-    Dynamic(Binder<&'tcx List<ExistentialPredicate<'tcx>>>, ty::Region<'tcx>),
+    Dynamic(Binder<'tcx, &'tcx List<ExistentialPredicate<'tcx>>>, ty::Region<'tcx>),
 
     /// The anonymous type of a closure. Used to represent the type of
     /// `|a| a`.
@@ -164,7 +164,7 @@ pub enum TyKind<'tcx> {
 
     /// A type representin the types stored inside a generator.
     /// This should only appear in GeneratorInteriors.
-    GeneratorWitness(Binder<&'tcx List<Ty<'tcx>>>),
+    GeneratorWitness(Binder<'tcx, &'tcx List<Ty<'tcx>>>),
 
     /// The never type `!`
     Never,
@@ -741,7 +741,7 @@ impl<'tcx> ExistentialPredicate<'tcx> {
     }
 }
 
-impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
+impl<'tcx> Binder<'tcx, ExistentialPredicate<'tcx>> {
     pub fn with_self_ty(&self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> ty::Predicate<'tcx> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
@@ -818,8 +818,8 @@ impl<'tcx> List<ExistentialPredicate<'tcx>> {
     }
 }
 
-impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
-    pub fn principal(&self) -> Option<ty::Binder<ExistentialTraitRef<'tcx>>> {
+impl<'tcx> Binder<'tcx, &'tcx List<ExistentialPredicate<'tcx>>> {
+    pub fn principal(&self) -> Option<ty::Binder<'tcx, ExistentialTraitRef<'tcx>>> {
         self.map_bound(|b| b.principal()).transpose()
     }
 
@@ -841,7 +841,7 @@ impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
 
     pub fn iter<'a>(
         &'a self,
-    ) -> impl DoubleEndedIterator<Item = Binder<ExistentialPredicate<'tcx>>> + 'tcx {
+    ) -> impl DoubleEndedIterator<Item = Binder<'tcx, ExistentialPredicate<'tcx>>> + 'tcx {
         // Have to specifically rebind since self is a ref
         let binders = self.rebind(());
         self.skip_binder().iter().map(move |p| binders.rebind(p))
@@ -897,10 +897,10 @@ impl<'tcx> TraitRef<'tcx> {
     }
 }
 
-pub type PolyTraitRef<'tcx> = Binder<TraitRef<'tcx>>;
+pub type PolyTraitRef<'tcx> = Binder<'tcx, TraitRef<'tcx>>;
 
 impl<'tcx> PolyTraitRef<'tcx> {
-    pub fn self_ty(&self) -> Binder<Ty<'tcx>> {
+    pub fn self_ty(&self) -> Binder<'tcx, Ty<'tcx>> {
         self.map_bound_ref(|tr| tr.self_ty())
     }
 
@@ -953,7 +953,7 @@ impl<'tcx> ExistentialTraitRef<'tcx> {
     }
 }
 
-pub type PolyExistentialTraitRef<'tcx> = Binder<ExistentialTraitRef<'tcx>>;
+pub type PolyExistentialTraitRef<'tcx> = Binder<'tcx, ExistentialTraitRef<'tcx>>;
 
 impl<'tcx> PolyExistentialTraitRef<'tcx> {
     pub fn def_id(&self) -> DefId {
@@ -972,14 +972,14 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 /// Binder is a binder for higher-ranked lifetimes or types. It is part of the
 /// compiler's representation for things like `for<'a> Fn(&'a isize)`
 /// (which would be represented by the type `PolyTraitRef ==
-/// Binder<TraitRef>`). Note that when we instantiate,
+/// Binder<'tcx, TraitRef>`). Note that when we instantiate,
 /// erase, or otherwise "discharge" these bound vars, we change the
-/// type from `Binder<T>` to just `T` (see
+/// type from `Binder<'tcx, T>` to just `T` (see
 /// e.g., `liberate_late_bound_regions`).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
-pub struct Binder<T>(T, u32);
+pub struct Binder<'tcx, T>(T, u32, std::marker::PhantomData<&'tcx ()>);
 
-impl<'tcx, T> Binder<T>
+impl<'tcx, T> Binder<'tcx, T>
 where
     T: TypeFoldable<'tcx>,
 {
@@ -987,13 +987,13 @@ where
     /// contain any bound vars that would be bound by the
     /// binder. This is commonly used to 'inject' a value T into a
     /// different binding level.
-    pub fn dummy(value: T) -> Binder<T> {
+    pub fn dummy(value: T) -> Binder<'tcx, T> {
         debug_assert!(!value.has_escaping_bound_vars());
-        Binder(value, 0)
+        Binder(value, 0, std::marker::PhantomData)
     }
 
     /// Wraps `value` in a binder, binding higher-ranked vars (if any).
-    pub fn bind(value: T) -> Binder<T> {
+    pub fn bind(value: T) -> Binder<'tcx, T> {
         use crate::ty::fold::CountBoundVars;
         use rustc_data_structures::fx::FxHashSet;
         let mut counter = CountBoundVars {
@@ -1026,17 +1026,17 @@ where
         let bound_consts = counter.bound_consts.len();
 
         let bound_vars = bound_tys + bound_regions + bound_consts;
-        Binder(value, bound_vars as u32)
+        Binder(value, bound_vars as u32, std::marker::PhantomData)
     }
 }
 
-impl<T> Binder<T> {
+impl<'tcx, T> Binder<'tcx, T> {
     /// Wraps `value` in a binder without actually binding any currently
     /// unbound variables.
     ///
     /// Note that this will shift all debrujin indices of escaping bound variables
     /// by 1 to avoid accidential captures.
-    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<T>
+    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<'tcx, T>
     where
         T: TypeFoldable<'tcx>,
     {
@@ -1071,22 +1071,22 @@ impl<T> Binder<T> {
         self.1
     }
 
-    pub fn as_ref(&self) -> Binder<&T> {
-        Binder(&self.0, self.1)
+    pub fn as_ref(&self) -> Binder<'tcx, &T> {
+        Binder(&self.0, self.1, std::marker::PhantomData)
     }
 
-    pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<U>
+    pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<'tcx, U>
     where
         F: FnOnce(&T) -> U,
     {
         self.as_ref().map_bound(f)
     }
 
-    pub fn map_bound<F, U>(self, f: F) -> Binder<U>
+    pub fn map_bound<F, U>(self, f: F) -> Binder<'tcx, U>
     where
         F: FnOnce(T) -> U,
     {
-        Binder(f(self.0), self.1)
+        Binder(f(self.0), self.1, std::marker::PhantomData)
     }
 
     /// Wraps a `value` in a binder, using the same bound variables as the
@@ -1098,8 +1098,8 @@ impl<T> Binder<T> {
     /// don't actually track bound vars. However, semantically, it is different
     /// because bound vars aren't allowed to change here, whereas they are
     /// in `bind`. This may be (debug) asserted in the future.
-    pub fn rebind<U>(&self, value: U) -> Binder<U> {
-        Binder(value, self.1)
+    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U> {
+        Binder(value, self.1, std::marker::PhantomData)
     }
 
     /// Unwraps and returns the value within, but only if it contains
@@ -1112,7 +1112,7 @@ impl<T> Binder<T> {
     /// binders, but that would require adjusting the debruijn
     /// indices, and given the shallow binding structure we often use,
     /// would not be that useful.)
-    pub fn no_bound_vars<'tcx>(self) -> Option<T>
+    pub fn no_bound_vars(self) -> Option<T>
     where
         T: TypeFoldable<'tcx>,
     {
@@ -1126,11 +1126,11 @@ impl<T> Binder<T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return value.
-    pub fn fuse<U, F, R>(self, u: Binder<U>, f: F) -> Binder<R>
+    pub fn fuse<U, F, R>(self, u: Binder<'tcx, U>, f: F) -> Binder<'tcx, R>
     where
         F: FnOnce(T, U) -> R,
     {
-        Binder(f(self.0, u.0), self.1)
+        Binder(f(self.0, u.0), self.1, std::marker::PhantomData)
     }
 
     /// Splits the contents into two things that share the same binder
@@ -1139,18 +1139,18 @@ impl<T> Binder<T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return values.
-    pub fn split<U, V, F>(self, f: F) -> (Binder<U>, Binder<V>)
+    pub fn split<U, V, F>(self, f: F) -> (Binder<'tcx, U>, Binder<'tcx, V>)
     where
         F: FnOnce(T) -> (U, V),
     {
         let (u, v) = f(self.0);
-        (Binder(u, self.1), Binder(v, self.1))
+        (Binder(u, self.1, std::marker::PhantomData), Binder(v, self.1, std::marker::PhantomData))
     }
 }
 
 impl<T> Binder<Option<T>> {
-    pub fn transpose(self) -> Option<Binder<T>> {
-        self.0.map(|v| Binder(v, self.1))
+    pub fn transpose(self) -> Option<Binder<'tcx, T>> {
+        self.0.map(|v| Binder(v, self.1, std::marker::PhantomData))
     }
 }
 
@@ -1206,16 +1206,16 @@ pub struct GenSig<'tcx> {
     pub return_ty: Ty<'tcx>,
 }
 
-pub type PolyGenSig<'tcx> = Binder<GenSig<'tcx>>;
+pub type PolyGenSig<'tcx> = Binder<'tcx, GenSig<'tcx>>;
 
 impl<'tcx> PolyGenSig<'tcx> {
-    pub fn resume_ty(&self) -> ty::Binder<Ty<'tcx>> {
+    pub fn resume_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.resume_ty)
     }
-    pub fn yield_ty(&self) -> ty::Binder<Ty<'tcx>> {
+    pub fn yield_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.yield_ty)
     }
-    pub fn return_ty(&self) -> ty::Binder<Ty<'tcx>> {
+    pub fn return_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.return_ty)
     }
 }
@@ -1256,22 +1256,22 @@ impl<'tcx> FnSig<'tcx> {
     }
 }
 
-pub type PolyFnSig<'tcx> = Binder<FnSig<'tcx>>;
+pub type PolyFnSig<'tcx> = Binder<'tcx, FnSig<'tcx>>;
 
 impl<'tcx> PolyFnSig<'tcx> {
     #[inline]
-    pub fn inputs(&self) -> Binder<&'tcx [Ty<'tcx>]> {
+    pub fn inputs(&self) -> Binder<'tcx, &'tcx [Ty<'tcx>]> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs())
     }
     #[inline]
-    pub fn input(&self, index: usize) -> ty::Binder<Ty<'tcx>> {
+    pub fn input(&self, index: usize) -> ty::Binder<'tcx, Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs()[index])
     }
-    pub fn inputs_and_output(&self) -> ty::Binder<&'tcx List<Ty<'tcx>>> {
+    pub fn inputs_and_output(&self) -> ty::Binder<'tcx, &'tcx List<Ty<'tcx>>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs_and_output)
     }
     #[inline]
-    pub fn output(&self) -> ty::Binder<Ty<'tcx>> {
+    pub fn output(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.output())
     }
     pub fn c_variadic(&self) -> bool {
@@ -1285,7 +1285,7 @@ impl<'tcx> PolyFnSig<'tcx> {
     }
 }
 
-pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<FnSig<'tcx>>>;
+pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<'tcx, FnSig<'tcx>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TyEncodable, TyDecodable)]
 #[derive(HashStable)]
@@ -1611,7 +1611,7 @@ pub struct ExistentialProjection<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-pub type PolyExistentialProjection<'tcx> = Binder<ExistentialProjection<'tcx>>;
+pub type PolyExistentialProjection<'tcx> = Binder<'tcx, ExistentialProjection<'tcx>>;
 
 impl<'tcx> ExistentialProjection<'tcx> {
     /// Extracts the underlying existential trait reference from this projection.

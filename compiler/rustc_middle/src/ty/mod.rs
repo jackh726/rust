@@ -1129,9 +1129,9 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    /// Converts this to a `Binder<PredicateAtom<'tcx>>`. If the value was an
+    /// Converts this to a `Binder<'tcx, PredicateAtom<'tcx>>`. If the value was an
     /// `Atom`, then it is not allowed to contain escaping bound vars.
-    pub fn bound_atom(self) -> Binder<PredicateAtom<'tcx>> {
+    pub fn bound_atom(self) -> Binder<'tcx, PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => {
@@ -1141,9 +1141,9 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    /// Allows using a `Binder<PredicateAtom<'tcx>>` even if the given predicate previously
+    /// Allows using a `Binder<'tcx, PredicateAtom<'tcx>>` even if the given predicate previously
     /// contained unbound variables by shifting these variables outwards.
-    pub fn bound_atom_with_opt_escaping(self, tcx: TyCtxt<'tcx>) -> Binder<PredicateAtom<'tcx>> {
+    pub fn bound_atom_with_opt_escaping(self, tcx: TyCtxt<'tcx>) -> Binder<'tcx, PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => Binder::wrap_nonbinding(tcx, atom),
@@ -1170,7 +1170,7 @@ impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
 #[derive(HashStable, TypeFoldable)]
 pub enum PredicateKind<'tcx> {
     /// `for<'a>: ...`
-    ForAll(Binder<PredicateAtom<'tcx>>),
+    ForAll(Binder<'tcx, PredicateAtom<'tcx>>),
     Atom(PredicateAtom<'tcx>),
 }
 
@@ -1227,7 +1227,7 @@ impl<'tcx> PredicateAtom<'tcx> {
     pub fn potentially_quantified(
         self,
         tcx: TyCtxt<'tcx>,
-        qualifier: impl FnOnce(Binder<PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
+        qualifier: impl FnOnce(Binder<'tcx, PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
     ) -> Predicate<'tcx> {
         if self.has_escaping_bound_vars() {
             qualifier(Binder::bind(self))
@@ -1335,7 +1335,7 @@ pub struct TraitPredicate<'tcx> {
     pub trait_ref: TraitRef<'tcx>,
 }
 
-pub type PolyTraitPredicate<'tcx> = ty::Binder<TraitPredicate<'tcx>>;
+pub type PolyTraitPredicate<'tcx> = ty::Binder<'tcx, TraitPredicate<'tcx>>;
 
 impl<'tcx> TraitPredicate<'tcx> {
     pub fn def_id(self) -> DefId {
@@ -1359,8 +1359,8 @@ impl<'tcx> PolyTraitPredicate<'tcx> {
 pub struct OutlivesPredicate<A, B>(pub A, pub B); // `A: B`
 pub type RegionOutlivesPredicate<'tcx> = OutlivesPredicate<ty::Region<'tcx>, ty::Region<'tcx>>;
 pub type TypeOutlivesPredicate<'tcx> = OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>;
-pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<RegionOutlivesPredicate<'tcx>>;
-pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<TypeOutlivesPredicate<'tcx>>;
+pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<'tcx, RegionOutlivesPredicate<'tcx>>;
+pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<'tcx, TypeOutlivesPredicate<'tcx>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable, TypeFoldable)]
@@ -1369,7 +1369,7 @@ pub struct SubtypePredicate<'tcx> {
     pub a: Ty<'tcx>,
     pub b: Ty<'tcx>,
 }
-pub type PolySubtypePredicate<'tcx> = ty::Binder<SubtypePredicate<'tcx>>;
+pub type PolySubtypePredicate<'tcx> = ty::Binder<'tcx, SubtypePredicate<'tcx>>;
 
 /// This kind of predicate has no *direct* correspondent in the
 /// syntax, but it roughly corresponds to the syntactic forms:
@@ -1390,7 +1390,7 @@ pub struct ProjectionPredicate<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-pub type PolyProjectionPredicate<'tcx> = Binder<ProjectionPredicate<'tcx>>;
+pub type PolyProjectionPredicate<'tcx> = Binder<'tcx, ProjectionPredicate<'tcx>>;
 
 impl<'tcx> PolyProjectionPredicate<'tcx> {
     /// Returns the `DefId` of the associated item being projected.
@@ -1408,7 +1408,7 @@ impl<'tcx> PolyProjectionPredicate<'tcx> {
         self.map_bound(|predicate| predicate.projection_ty.trait_ref(tcx))
     }
 
-    pub fn ty(&self) -> Binder<Ty<'tcx>> {
+    pub fn ty(&self) -> Binder<'tcx, Ty<'tcx>> {
         self.map_bound(|predicate| predicate.ty)
     }
 
