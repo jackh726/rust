@@ -1069,7 +1069,7 @@ impl<'tcx> GenericPredicates<'tcx> {
 
 #[derive(Debug)]
 crate struct PredicateInner<'tcx> {
-    kind: Binder<PredicateKind<'tcx>>,
+    kind: Binder<'tcx, PredicateKind<'tcx>>,
     flags: TypeFlags,
     /// See the comment for the corresponding field of [TyS].
     outer_exclusive_binder: ty::DebruijnIndex,
@@ -1099,8 +1099,8 @@ impl Hash for Predicate<'_> {
 impl<'tcx> Eq for Predicate<'tcx> {}
 
 impl<'tcx> Predicate<'tcx> {
-    /// Gets the inner `Binder<PredicateKind<'tcx>>`.
-    pub fn kind(self) -> Binder<PredicateKind<'tcx>> {
+    /// Gets the inner `Binder<'tcx, PredicateKind<'tcx>>`.
+    pub fn kind(self) -> Binder<'tcx, PredicateKind<'tcx>> {
         self.inner.kind
     }
 }
@@ -1265,7 +1265,7 @@ pub struct TraitPredicate<'tcx> {
     pub trait_ref: TraitRef<'tcx>,
 }
 
-pub type PolyTraitPredicate<'tcx> = ty::Binder<TraitPredicate<'tcx>>;
+pub type PolyTraitPredicate<'tcx> = ty::Binder<'tcx, TraitPredicate<'tcx>>;
 
 impl<'tcx> TraitPredicate<'tcx> {
     pub fn def_id(self) -> DefId {
@@ -1283,7 +1283,7 @@ impl<'tcx> PolyTraitPredicate<'tcx> {
         self.skip_binder().def_id()
     }
 
-    pub fn self_ty(self) -> ty::Binder<Ty<'tcx>> {
+    pub fn self_ty(self) -> ty::Binder<'tcx, Ty<'tcx>> {
         self.map_bound(|trait_ref| trait_ref.self_ty())
     }
 }
@@ -1293,8 +1293,8 @@ impl<'tcx> PolyTraitPredicate<'tcx> {
 pub struct OutlivesPredicate<A, B>(pub A, pub B); // `A: B`
 pub type RegionOutlivesPredicate<'tcx> = OutlivesPredicate<ty::Region<'tcx>, ty::Region<'tcx>>;
 pub type TypeOutlivesPredicate<'tcx> = OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>;
-pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<RegionOutlivesPredicate<'tcx>>;
-pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<TypeOutlivesPredicate<'tcx>>;
+pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<'tcx, RegionOutlivesPredicate<'tcx>>;
+pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<'tcx, TypeOutlivesPredicate<'tcx>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable, TypeFoldable)]
@@ -1303,7 +1303,7 @@ pub struct SubtypePredicate<'tcx> {
     pub a: Ty<'tcx>,
     pub b: Ty<'tcx>,
 }
-pub type PolySubtypePredicate<'tcx> = ty::Binder<SubtypePredicate<'tcx>>;
+pub type PolySubtypePredicate<'tcx> = ty::Binder<'tcx, SubtypePredicate<'tcx>>;
 
 /// This kind of predicate has no *direct* correspondent in the
 /// syntax, but it roughly corresponds to the syntactic forms:
@@ -1324,7 +1324,7 @@ pub struct ProjectionPredicate<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-pub type PolyProjectionPredicate<'tcx> = Binder<ProjectionPredicate<'tcx>>;
+pub type PolyProjectionPredicate<'tcx> = Binder<'tcx, ProjectionPredicate<'tcx>>;
 
 impl<'tcx> PolyProjectionPredicate<'tcx> {
     /// Returns the `DefId` of the associated item being projected.
@@ -1342,7 +1342,7 @@ impl<'tcx> PolyProjectionPredicate<'tcx> {
         self.map_bound(|predicate| predicate.projection_ty.trait_ref(tcx))
     }
 
-    pub fn ty(&self) -> Binder<Ty<'tcx>> {
+    pub fn ty(&self) -> Binder<'tcx, Ty<'tcx>> {
         self.map_bound(|predicate| predicate.ty)
     }
 
@@ -1376,7 +1376,7 @@ pub trait ToPredicate<'tcx> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx>;
 }
 
-impl ToPredicate<'tcx> for Binder<PredicateKind<'tcx>> {
+impl ToPredicate<'tcx> for Binder<'tcx, PredicateKind<'tcx>> {
     #[inline(always)]
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
         tcx.mk_predicate(self)
@@ -1399,11 +1399,11 @@ impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitRef<'tcx>> {
 
 impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<PolyTraitRef<'tcx>> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        ConstnessAnd {
-            value: self.value.map_bound(|trait_ref| ty::TraitPredicate { trait_ref }),
-            constness: self.constness,
-        }
-        .to_predicate(tcx)
+        self.value
+            .map_bound(|trait_ref| {
+                PredicateKind::Trait(ty::TraitPredicate { trait_ref }, self.constness)
+            })
+            .to_predicate(tcx)
     }
 }
 
