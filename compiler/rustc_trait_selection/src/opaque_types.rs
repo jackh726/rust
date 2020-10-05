@@ -690,7 +690,7 @@ impl<'tcx, OP> TypeVisitor<'tcx> for ConstrainOpaqueTypeRegionVisitor<OP>
 where
     OP: FnMut(ty::Region<'tcx>),
 {
-    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &ty::Binder<T>) -> bool {
+    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &ty::Binder<'tcx, T>) -> bool {
         t.as_ref().skip_binder().visit_with(self);
         false // keep visiting
     }

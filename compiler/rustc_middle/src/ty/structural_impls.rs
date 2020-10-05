@@ -546,8 +546,8 @@ impl<'a, 'tcx> Lift<'tcx> for ty::PredicateAtom<'a> {
     }
 }
 
-impl<'tcx, T: Lift<'tcx>> Lift<'tcx> for ty::Binder<T> {
-    type Lifted = ty::Binder<T::Lifted>;
+impl<'a, 'tcx, T: Lift<'tcx>> Lift<'tcx> for ty::Binder<'a, T> {
+    type Lifted = ty::Binder<'tcx, T::Lifted>;
     fn lift_to_tcx(&self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
         tcx.lift(self.as_ref().skip_binder()).map(ty::Binder::bind)
     }
@@ -835,7 +835,7 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for Box<[T]> {
     }
 }
 
-impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for ty::Binder<T> {
+impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for ty::Binder<'tcx, T> {
     fn super_fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
         self.map_bound_ref(|ty| ty.fold_with(folder))
     }
