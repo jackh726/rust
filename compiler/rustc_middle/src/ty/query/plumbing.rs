@@ -309,8 +309,8 @@ macro_rules! define_queries_inner {
             }
         }
 
-        impl<'a, $tcx> HashStable<StableHashingContext<'a>> for Query<$tcx> {
-            fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
+        impl<$tcx> HashStable<StableHashingContext<$tcx>> for Query<$tcx> {
+            fn hash_stable(&self, hcx: &mut StableHashingContext<$tcx>, hasher: &mut StableHasher) {
                 mem::discriminant(self).hash_stable(hcx, hasher);
                 match *self {
                     $(Query::$name(key) => key.hash_stable(hcx, hasher),)*
@@ -382,7 +382,7 @@ macro_rules! define_queries_inner {
             }
 
             fn hash_result(
-                _hcx: &mut StableHashingContext<'_>,
+                _hcx: &mut StableHashingContext<$tcx>,
                 _result: &Self::Value
             ) -> Option<Fingerprint> {
                 hash_result!([$($modifiers)*][_hcx, _result])

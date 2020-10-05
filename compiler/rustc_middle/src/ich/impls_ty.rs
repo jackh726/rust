@@ -11,11 +11,11 @@ use rustc_data_structures::stable_hasher::{HashStable, StableHasher, ToStableHas
 use std::cell::RefCell;
 use std::mem;
 
-impl<'a, 'tcx, T> HashStable<StableHashingContext<'a>> for &'tcx ty::List<T>
+impl<'tcx, T> HashStable<StableHashingContext<'tcx>> for &'tcx ty::List<T>
 where
-    T: HashStable<StableHashingContext<'a>>,
+    T: HashStable<StableHashingContext<'tcx>>,
 {
-    fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
+    fn hash_stable(&self, hcx: &mut StableHashingContext<'tcx>, hasher: &mut StableHasher) {
         thread_local! {
             static CACHE: RefCell<FxHashMap<(usize, usize), Fingerprint>> =
                 RefCell::new(Default::default());
@@ -54,8 +54,8 @@ where
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for ty::subst::GenericArg<'tcx> {
-    fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
+impl<'tcx> HashStable<StableHashingContext<'tcx>> for ty::subst::GenericArg<'tcx> {
+    fn hash_stable(&self, hcx: &mut StableHashingContext<'tcx>, hasher: &mut StableHasher) {
         self.unpack().hash_stable(hcx, hasher);
     }
 }
@@ -104,9 +104,9 @@ impl<'a> HashStable<StableHashingContext<'a>> for ty::RegionVid {
     }
 }
 
-impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for ty::ConstVid<'tcx> {
+impl<'tcx> HashStable<StableHashingContext<'tcx>> for ty::ConstVid<'tcx> {
     #[inline]
-    fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
+    fn hash_stable(&self, hcx: &mut StableHashingContext<'tcx>, hasher: &mut StableHasher) {
         self.index.hash_stable(hcx, hasher);
     }
 }
@@ -118,7 +118,7 @@ impl<'tcx> HashStable<StableHashingContext<'tcx>> for ty::BoundVar {
     }
 }
 
-impl<'a, T> HashStable<StableHashingContext<'a>> for ty::Binder<T>
+impl<'a, T> HashStable<StableHashingContext<'a>> for ty::Binder<'a, T>
 where
     T: HashStable<StableHashingContext<'a>>,
 {
@@ -133,7 +133,8 @@ impl<'a> HashStable<StableHashingContext<'a>> for mir::interpret::AllocId {
         ty::tls::with_opt(|tcx| {
             trace!("hashing {:?}", *self);
             let tcx = tcx.expect("can't hash AllocIds during hir lowering");
-            tcx.get_global_alloc(*self).hash_stable(hcx, hasher);
+            let global_alloc = tcx.get_global_alloc(*self);
+            global_alloc.hash_stable(hcx, hasher);
         });
     }
 }
