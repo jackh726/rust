@@ -49,7 +49,7 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn normalize_erasing_late_bound_regions<T>(
         self,
         param_env: ty::ParamEnv<'tcx>,
-        value: &ty::Binder<'tcx, T>,
+        value: &ty::Binder<T>,
     ) -> T
     where
         T: TypeFoldable<'tcx>,

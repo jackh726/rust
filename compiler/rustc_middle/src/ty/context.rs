@@ -91,7 +91,6 @@ pub struct CtxtInterners<'tcx> {
     projs: InternedSet<'tcx, List<ProjectionKind>>,
     place_elems: InternedSet<'tcx, List<PlaceElem<'tcx>>>,
     const_: InternedSet<'tcx, Const<'tcx>>,
-    bound_variable_kinds: InternedSet<'tcx, List<ty::BoundVariableKind>>,
 }
 
 impl<'tcx> CtxtInterners<'tcx> {
@@ -109,7 +108,6 @@ impl<'tcx> CtxtInterners<'tcx> {
             projs: Default::default(),
             place_elems: Default::default(),
             const_: Default::default(),
-            bound_variable_kinds: Default::default(),
         }
     }
 
@@ -661,7 +659,7 @@ impl<'tcx> TypeckResults<'tcx> {
     }
 }
 
-impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for TypeckResults<'tcx> {
+impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for TypeckResults<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         let ty::TypeckResults {
             hir_owner,
@@ -2059,7 +2057,6 @@ slice_interners!(
     predicates: _intern_predicates(Predicate<'tcx>),
     projs: _intern_projs(ProjectionKind),
     place_elems: _intern_place_elems(PlaceElem<'tcx>),
-    bound_variable_kinds: _intern_bound_variable_kinds(ty::BoundVariableKind),
 );
 
 impl<'tcx> TyCtxt<'tcx> {
@@ -2287,7 +2284,7 @@ impl<'tcx> TyCtxt<'tcx> {
     #[inline]
     pub fn mk_dynamic(
         self,
-        obj: ty::Binder<'tcx, &'tcx List<ExistentialPredicate<'tcx>>>,
+        obj: ty::Binder<&'tcx List<ExistentialPredicate<'tcx>>>,
         reg: ty::Region<'tcx>,
     ) -> Ty<'tcx> {
         self.mk_ty(Dynamic(obj, reg))
@@ -2314,7 +2311,7 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     #[inline]
-    pub fn mk_generator_witness(self, types: ty::Binder<'tcx, &'tcx List<Ty<'tcx>>>) -> Ty<'tcx> {
+    pub fn mk_generator_witness(self, types: ty::Binder<&'tcx List<Ty<'tcx>>>) -> Ty<'tcx> {
         self.mk_ty(GeneratorWitness(types))
     }
 
@@ -2458,10 +2455,6 @@ impl<'tcx> TyCtxt<'tcx> {
         if ts.is_empty() { List::empty() } else { self._intern_canonical_var_infos(ts) }
     }
 
-    pub fn intern_bound_variable_kinds(self, ts: &[ty::BoundVariableKind]) -> &'tcx List<ty::BoundVariableKind> {
-        if ts.is_empty() { List::empty() } else { self._intern_bound_variable_kinds(ts) }
-    }
-
     pub fn mk_fn_sig<I>(
         self,
         inputs: I,
@@ -2517,13 +2510,6 @@ impl<'tcx> TyCtxt<'tcx> {
 
     pub fn mk_substs_trait(self, self_ty: Ty<'tcx>, rest: &[GenericArg<'tcx>]) -> SubstsRef<'tcx> {
         self.mk_substs(iter::once(self_ty.into()).chain(rest.iter().cloned()))
-    }
-
-    pub fn mk_bound_variable_kinds<I: InternAs<[ty::BoundVariableKind], &'tcx List<ty::BoundVariableKind>>>(
-        self,
-        iter: I,
-    ) -> I::Output {
-        iter.intern_with(|xs| self.intern_bound_variable_kinds(xs))
     }
 
     /// Walks upwards from `id` to find a node which might change lint levels with attributes.

@@ -6,7 +6,6 @@ use self::InferTy::*;
 use self::TyKind::*;
 
 use crate::infer::canonical::Canonical;
-use crate::ty::fold::BoundVarsCollector;
 use crate::ty::subst::{GenericArg, InternalSubsts, Subst, SubstsRef};
 use crate::ty::{
     self, AdtDef, DefIdTree, Discr, Ty, TyCtxt, TypeFlags, TypeFoldable, WithConstness,
@@ -153,7 +152,7 @@ pub enum TyKind<'tcx> {
     FnPtr(PolyFnSig<'tcx>),
 
     /// A trait, defined with `trait`.
-    Dynamic(Binder<'tcx, &'tcx List<ExistentialPredicate<'tcx>>>, ty::Region<'tcx>),
+    Dynamic(Binder<&'tcx List<ExistentialPredicate<'tcx>>>, ty::Region<'tcx>),
 
     /// The anonymous type of a closure. Used to represent the type of
     /// `|a| a`.
@@ -165,7 +164,7 @@ pub enum TyKind<'tcx> {
 
     /// A type representin the types stored inside a generator.
     /// This should only appear in GeneratorInteriors.
-    GeneratorWitness(Binder<'tcx, &'tcx List<Ty<'tcx>>>),
+    GeneratorWitness(Binder<&'tcx List<Ty<'tcx>>>),
 
     /// The never type `!`
     Never,
@@ -691,7 +690,7 @@ impl<'tcx> ExistentialPredicate<'tcx> {
     }
 }
 
-impl<'tcx> Binder<'tcx, ExistentialPredicate<'tcx>> {
+impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
     pub fn with_self_ty(&self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> ty::Predicate<'tcx> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
@@ -771,8 +770,8 @@ impl<'tcx> List<ExistentialPredicate<'tcx>> {
     }
 }
 
-impl<'tcx> Binder<'tcx, &'tcx List<ExistentialPredicate<'tcx>>> {
-    pub fn principal(&self) -> Option<ty::Binder<'tcx, ExistentialTraitRef<'tcx>>> {
+impl<'tcx> Binder<&'tcx List<ExistentialPredicate<'tcx>>> {
+    pub fn principal(&self) -> Option<ty::Binder<ExistentialTraitRef<'tcx>>> {
         let bound_vars = self.bound_vars();
         self.skip_binder().principal().map(move |p| Binder::rebind(p, bound_vars))
     }
@@ -796,9 +795,8 @@ impl<'tcx> Binder<'tcx, &'tcx List<ExistentialPredicate<'tcx>>> {
 
     pub fn iter<'a>(
         &'a self,
-    ) -> impl DoubleEndedIterator<Item = Binder<'tcx, ExistentialPredicate<'tcx>>> + 'tcx {
-        let bound_vars = self.bound_vars();
-        self.skip_binder().iter().map(move |p| Binder::rebind(p, bound_vars))
+    ) -> impl DoubleEndedIterator<Item = Binder<ExistentialPredicate<'tcx>>> + 'tcx {
+        self.skip_binder().iter().map(move |p| Binder::bind(p))
     }
 }
 
@@ -851,10 +849,10 @@ impl<'tcx> TraitRef<'tcx> {
     }
 }
 
-pub type PolyTraitRef<'tcx> = Binder<'tcx, TraitRef<'tcx>>;
+pub type PolyTraitRef<'tcx> = Binder<TraitRef<'tcx>>;
 
 impl<'tcx> PolyTraitRef<'tcx> {
-    pub fn self_ty(&self) -> Binder<'tcx, Ty<'tcx>> {
+    pub fn self_ty(&self) -> Binder<Ty<'tcx>> {
         self.map_bound_ref(|tr| tr.self_ty())
     }
 
@@ -907,7 +905,7 @@ impl<'tcx> ExistentialTraitRef<'tcx> {
     }
 }
 
-pub type PolyExistentialTraitRef<'tcx> = Binder<'tcx, ExistentialTraitRef<'tcx>>;
+pub type PolyExistentialTraitRef<'tcx> = Binder<ExistentialTraitRef<'tcx>>;
 
 impl<'tcx> PolyExistentialTraitRef<'tcx> {
     pub fn def_id(&self) -> DefId {
@@ -923,24 +921,17 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
-pub enum BoundVariableKind {
-    Ty(BoundTyKind),
-    Region(BoundRegion),
-    Const,
-}
-
 /// Binder is a binder for higher-ranked lifetimes or types. It is part of the
 /// compiler's representation for things like `for<'a> Fn(&'a isize)`
 /// (which would be represented by the type `PolyTraitRef ==
-/// Binder<'tcx, TraitRef>`). Note that when we instantiate,
+/// Binder<TraitRef>`). Note that when we instantiate,
 /// erase, or otherwise "discharge" these bound vars, we change the
-/// type from `Binder<'tcx, T>` to just `T` (see
+/// type from `Binder<T>` to just `T` (see
 /// e.g., `liberate_late_bound_regions`).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
-pub struct Binder<'tcx, T>(T, &'tcx List<BoundVariableKind>);
+pub struct Binder<T>(T, u32);
 
-impl<'tcx, T> Binder<'tcx, T>
+impl<'tcx, T> Binder<T>
 where
     T: TypeFoldable<'tcx>,
 {
@@ -948,35 +939,67 @@ where
     /// contain any bound vars that would be bound by the
     /// binder. This is commonly used to 'inject' a value T into a
     /// different binding level.
-    pub fn dummy(value: T) -> Binder<'tcx, T> {
+    pub fn dummy(value: T) -> Binder<T> {
         debug_assert!(!value.has_escaping_bound_vars());
-        Binder(value, ty::List::empty())
+        Binder(value, 0)
     }
 
     /// Wraps `value` in a binder, binding higher-ranked vars (if any).
-    pub fn bind(value: T, tcx: TyCtxt<'tcx>) -> Binder<'tcx, T> {
-        let mut collector = BoundVarsCollector::new();
-        value.visit_with(&mut collector);
-        Binder(value, collector.into_vars(tcx))
+    pub fn bind(value: T) -> Binder<T> {
+        use crate::ty::fold::CountBoundVars;
+        use rustc_data_structures::fx::FxHashSet;
+        let mut counter = CountBoundVars {
+            outer_index: ty::INNERMOST,
+            bound_tys: FxHashSet::default(),
+            bound_regions: FxHashSet::default(),
+            bound_consts: FxHashSet::default(),
+        };
+        value.visit_with(&mut counter);
+        let bound_tys = counter.bound_tys.len();
+        let bound_regions = if !counter.bound_regions.is_empty() {
+            let mut env = false;
+            let mut anons = FxHashSet::default();
+            let mut named = FxHashSet::default();
+            for br in counter.bound_regions {
+                match br {
+                    ty::BoundRegion::BrAnon(idx) => {
+                        anons.insert(idx);
+                    }
+                    ty::BoundRegion::BrNamed(def_id, _) => {
+                        named.insert(def_id);
+                    }
+                    ty::BoundRegion::BrEnv => env = true,
+                }
+            }
+            (if env { 1 } else { 0 }) + anons.len() + named.len()
+        } else {
+            0
+        };
+        let bound_consts = counter.bound_consts.len();
+
+        let bound_vars = bound_tys + bound_regions + bound_consts;
+        Binder(value, bound_vars as u32)
     }
 
-    pub fn rebind(value: T, bound_vars: &'tcx List<BoundVariableKind>) -> Self {
-        Binder(value, bound_vars)
+    pub fn rebind(value: T, bound_vars: u32) -> Self {
+        let bound = Binder::bind(value);
+        assert_eq!(bound.bound_vars(), bound_vars);
+        bound
     }
 }
 
-impl<'tcx, T> Binder<'tcx, T> {
+impl<T> Binder<T> {
     /// Wraps `value` in a binder without actually binding any currently
     /// unbound variables.
     ///
     /// Note that this will shift all debrujin indices of escaping bound variables
     /// by 1 to avoid accidential captures.
-    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<'tcx, T>
+    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<T>
     where
         T: TypeFoldable<'tcx>,
     {
         if value.has_escaping_bound_vars() {
-            Binder::bind(super::fold::shift_vars(tcx, &value, 1), tcx)
+            Binder::bind(super::fold::shift_vars(tcx, &value, 1))
         } else {
             Binder::dummy(value)
         }
@@ -1002,22 +1025,22 @@ impl<'tcx, T> Binder<'tcx, T> {
         self.0
     }
 
-    pub fn bound_vars(&self) -> &'tcx List<BoundVariableKind> {
+    pub fn bound_vars(&self) -> u32 {
         self.1
     }
 
-    pub fn as_ref(&self) -> Binder<'tcx, &T> {
+    pub fn as_ref(&self) -> Binder<&T> {
         Binder(&self.0, self.1)
     }
 
-    pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<U>
     where
         F: FnOnce(&T) -> U,
     {
         self.as_ref().map_bound(f)
     }
 
-    pub fn map_bound<F, U>(self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound<F, U>(self, f: F) -> Binder<U>
     where
         F: FnOnce(T) -> U,
     {
@@ -1034,7 +1057,7 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// binders, but that would require adjusting the debruijn
     /// indices, and given the shallow binding structure we often use,
     /// would not be that useful.)
-    pub fn no_bound_vars(self) -> Option<T>
+    pub fn no_bound_vars<'tcx>(self) -> Option<T>
     where
         T: TypeFoldable<'tcx>,
     {
@@ -1048,7 +1071,7 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return value.
-    pub fn fuse<U, F, R>(self, u: Binder<'tcx, U>, f: F) -> Binder<'tcx, R>
+    pub fn fuse<U, F, R>(self, u: Binder<U>, f: F) -> Binder<R>
     where
         F: FnOnce(T, U) -> R,
     {
@@ -1061,7 +1084,7 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return values.
-    pub fn split<U, V, F>(self, f: F) -> (Binder<'tcx, U>, Binder<'tcx, V>)
+    pub fn split<U, V, F>(self, f: F) -> (Binder<U>, Binder<V>)
     where
         F: FnOnce(T) -> (U, V),
     {
@@ -1070,8 +1093,8 @@ impl<'tcx, T> Binder<'tcx, T> {
     }
 }
 
-impl<'tcx, T> Binder<'tcx, Option<T>> {
-    pub fn transpose(self) -> Option<Binder<'tcx, T>> {
+impl<T> Binder<Option<T>> {
+    pub fn transpose(self) -> Option<Binder<T>> {
         match self.0 {
             Some(v) => Some(Binder(v, self.1)),
             None => None,
@@ -1131,16 +1154,16 @@ pub struct GenSig<'tcx> {
     pub return_ty: Ty<'tcx>,
 }
 
-pub type PolyGenSig<'tcx> = Binder<'tcx, GenSig<'tcx>>;
+pub type PolyGenSig<'tcx> = Binder<GenSig<'tcx>>;
 
 impl<'tcx> PolyGenSig<'tcx> {
-    pub fn resume_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn resume_ty(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.resume_ty)
     }
-    pub fn yield_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn yield_ty(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.yield_ty)
     }
-    pub fn return_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn return_ty(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.return_ty)
     }
 }
@@ -1181,22 +1204,22 @@ impl<'tcx> FnSig<'tcx> {
     }
 }
 
-pub type PolyFnSig<'tcx> = Binder<'tcx, FnSig<'tcx>>;
+pub type PolyFnSig<'tcx> = Binder<FnSig<'tcx>>;
 
 impl<'tcx> PolyFnSig<'tcx> {
     #[inline]
-    pub fn inputs(&self) -> Binder<'tcx, &'tcx [Ty<'tcx>]> {
+    pub fn inputs(&self) -> Binder<&'tcx [Ty<'tcx>]> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs())
     }
     #[inline]
-    pub fn input(&self, index: usize) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn input(&self, index: usize) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs()[index])
     }
-    pub fn inputs_and_output(&self) -> ty::Binder<'tcx, &'tcx List<Ty<'tcx>>> {
+    pub fn inputs_and_output(&self) -> ty::Binder<&'tcx List<Ty<'tcx>>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs_and_output)
     }
     #[inline]
-    pub fn output(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn output(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.output())
     }
     pub fn c_variadic(&self) -> bool {
@@ -1210,7 +1233,7 @@ impl<'tcx> PolyFnSig<'tcx> {
     }
 }
 
-pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<'tcx, FnSig<'tcx>>>;
+pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<FnSig<'tcx>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TyEncodable, TyDecodable)]
 #[derive(HashStable)]
@@ -1536,7 +1559,7 @@ pub struct ExistentialProjection<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-pub type PolyExistentialProjection<'tcx> = Binder<'tcx, ExistentialProjection<'tcx>>;
+pub type PolyExistentialProjection<'tcx> = Binder<ExistentialProjection<'tcx>>;
 
 impl<'tcx> ExistentialProjection<'tcx> {
     /// Extracts the underlying existential trait reference from this projection.

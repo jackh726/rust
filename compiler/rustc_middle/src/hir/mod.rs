@@ -21,7 +21,7 @@ pub struct Owner<'tcx> {
     node: Node<'tcx>,
 }
 
-impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for Owner<'tcx> {
+impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Owner<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         let Owner { parent, node } = self;
         hcx.while_hashing_hir_bodies(false, |hcx| {
@@ -43,7 +43,7 @@ pub struct OwnerNodes<'tcx> {
     bodies: FxHashMap<ItemLocalId, &'tcx Body<'tcx>>,
 }
 
-impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for OwnerNodes<'tcx> {
+impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for OwnerNodes<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         // We ignore the `nodes` and `bodies` fields since these refer to information included in
         // `hash` which is hashed in the collector and used for the crate hash.

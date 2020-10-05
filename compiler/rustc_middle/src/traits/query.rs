@@ -241,7 +241,7 @@ pub enum OutlivesBound<'tcx> {
     RegionSubProjection(ty::Region<'tcx>, ty::ProjectionTy<'tcx>),
 }
 
-impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for OutlivesBound<'tcx> {
+impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for OutlivesBound<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         mem::discriminant(self).hash_stable(hcx, hasher);
         match *self {

@@ -2308,7 +2308,7 @@ where
     }
 }
 
-impl<'a, 'tcx: 'a> HashStable<StableHashingContext<'a>> for LayoutError<'tcx> {
+impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for LayoutError<'tcx> {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         use crate::ty::layout::LayoutError::*;
         mem::discriminant(self).hash_stable(hcx, hasher);
