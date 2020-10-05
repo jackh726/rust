@@ -276,7 +276,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         &mut self,
         obligation: &TraitObligation<'tcx>,
         trait_def_id: DefId,
-        nested: ty::Binder<Vec<Ty<'tcx>>>,
+        nested: ty::Binder<'tcx, Vec<Ty<'tcx>>>,
     ) -> ImplSourceAutoImplData<PredicateObligation<'tcx>> {
         debug!("vtable_auto_impl: nested={:?}", nested);
         ensure_sufficient_stack(|| {

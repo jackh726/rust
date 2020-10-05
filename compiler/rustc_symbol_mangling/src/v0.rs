@@ -182,7 +182,7 @@ impl SymbolMangler<'tcx> {
 
     fn in_binder<T>(
         mut self,
-        value: &ty::Binder<T>,
+        value: &ty::Binder<'tcx, T>,
         print_value: impl FnOnce(Self, &T) -> Result<Self, !>,
     ) -> Result<Self, !>
     where
