@@ -465,7 +465,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 }
 
                 ty::PredicateAtom::Subtype(p) => {
-                    let p = ty::Binder::bind(p);
+                    let p = ty::Binder::rebind(p, bound_predicate.bound_vars());
                     // Does this code ever run?
                     match self.infcx.subtype_predicate(&obligation.cause, obligation.param_env, p) {
                         Some(Ok(InferOk { mut obligations, .. })) => {
@@ -1759,11 +1759,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // 2. Produce something like `&'0 i32 : Copy`
         // 3. Re-bind the regions back to `for<'a> &'a i32 : Copy`
 
+        let bound_vars = types.bound_vars();
         types
             .skip_binder() // binder moved -\
             .iter()
             .flat_map(|ty| {
-                let ty: ty::Binder<'tcx, Ty<'tcx>> = ty::Binder::bind(ty); // <----/
+                let ty: ty::Binder<'tcx, Ty<'tcx>> = ty::Binder::rebind(ty, bound_vars); // <----/
 
                 self.infcx.commit_unconditionally(|_| {
                     let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(&ty);

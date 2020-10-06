@@ -1083,9 +1083,10 @@ impl<'a, 'tcx> InferCtxtPrivExt<'tcx> for InferCtxt<'a, 'tcx> {
         }
 
         // FIXME: It should be possible to deal with `ForAll` in a cleaner way.
+        let bound_vars = error.bound_atom(self.tcx).bound_vars();
         let (cond, error) = match (cond.skip_binders(), error.skip_binders()) {
             (ty::PredicateAtom::Trait(..), ty::PredicateAtom::Trait(error, _)) => {
-                (cond, ty::Binder::bind(error))
+                (cond, ty::Binder::rebind(error, bound_vars))
             }
             _ => {
                 // FIXME: make this work in other cases too.

@@ -506,7 +506,7 @@ impl<'tcx> TyCtxt<'tcx> {
             ty::ClosureKind::FnMut => self.mk_mut_ref(self.mk_region(env_region), closure_ty),
             ty::ClosureKind::FnOnce => closure_ty,
         };
-        Some(ty::Binder::bind(env_ty))
+        Some(ty::Binder::bind(env_ty, self))
     }
 
     /// Given the `DefId` of some item that has no type or const parameters, make

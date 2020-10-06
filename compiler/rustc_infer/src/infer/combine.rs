@@ -551,7 +551,8 @@ impl TypeRelation<'tcx> for Generalizer<'_, 'tcx> {
     where
         T: Relate<'tcx>,
     {
-        Ok(ty::Binder::bind(self.relate(a.skip_binder(), b.skip_binder())?))
+        let bound_vars = a.bound_vars();
+        Ok(ty::Binder::rebind(self.relate(a.skip_binder(), b.skip_binder())?, bound_vars))
     }
 
     fn relate_item_substs(
