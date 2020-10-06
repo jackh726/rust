@@ -479,9 +479,7 @@ impl<'tcx> Clean<'tcx, Option<WherePredicate>> for ty::Predicate<'tcx> {
     fn clean(&self, cx: &DocContext<'tcx>) -> Option<WherePredicate> {
         let bound_predicate = self.bound_atom();
         match bound_predicate.skip_binder() {
-            ty::PredicateAtom::Trait(pred, _) => {
-                Some(bound_predicate.rebind(pred).clean(cx))
-            }
+            ty::PredicateAtom::Trait(pred, _) => Some(bound_predicate.rebind(pred).clean(cx)),
             ty::PredicateAtom::RegionOutlives(pred) => pred.clean(cx),
             ty::PredicateAtom::TypeOutlives(pred) => pred.clean(cx),
             ty::PredicateAtom::Projection(pred) => Some(pred.clean(cx)),
