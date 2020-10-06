@@ -389,13 +389,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // regions appearing free in `expected_sig` are now bound up
         // in this binder we are creating.
         assert!(!expected_sig.sig.has_vars_bound_above(ty::INNERMOST));
-        let bound_sig = ty::Binder::bind(self.tcx.mk_fn_sig(
-            expected_sig.sig.inputs().iter().cloned(),
-            expected_sig.sig.output(),
-            decl.c_variadic,
-            hir::Unsafety::Normal,
-            Abi::RustCall,
-        ));
+        let bound_sig = ty::Binder::bind(
+            self.tcx.mk_fn_sig(
+                expected_sig.sig.inputs().iter().cloned(),
+                expected_sig.sig.output(),
+                decl.c_variadic,
+                hir::Unsafety::Normal,
+                Abi::RustCall,
+            ),
+            self.tcx,
+        );
 
         // `deduce_expectations_from_expected_type` introduces
         // late-bound lifetimes defined elsewhere, which we now
@@ -500,7 +503,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let (supplied_ty, _) = self.infcx.replace_bound_vars_with_fresh_vars(
                     hir_ty.span,
                     LateBoundRegionConversionTime::FnCall,
-                    ty::Binder::bind(supplied_ty),
+                    ty::Binder::bind(supplied_ty, self.infcx.tcx),
                 ); // recreated from (*) above
 
                 // Check that E' = S'.
@@ -568,13 +571,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             },
         };
 
-        let result = ty::Binder::bind(self.tcx.mk_fn_sig(
-            supplied_arguments,
-            supplied_return,
-            decl.c_variadic,
-            hir::Unsafety::Normal,
-            Abi::RustCall,
-        ));
+        let result = ty::Binder::bind(
+            self.tcx.mk_fn_sig(
+                supplied_arguments,
+                supplied_return,
+                decl.c_variadic,
+                hir::Unsafety::Normal,
+                Abi::RustCall,
+            ),
+            self.tcx,
+        );
 
         debug!("supplied_sig_of_closure: result={:?}", result);
 
@@ -703,13 +709,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             astconv.ast_ty_to_ty(&output);
         }
 
-        let result = ty::Binder::bind(self.tcx.mk_fn_sig(
-            supplied_arguments,
-            self.tcx.ty_error(),
-            decl.c_variadic,
-            hir::Unsafety::Normal,
-            Abi::RustCall,
-        ));
+        let result = ty::Binder::bind(
+            self.tcx.mk_fn_sig(
+                supplied_arguments,
+                self.tcx.ty_error(),
+                decl.c_variadic,
+                hir::Unsafety::Normal,
+                Abi::RustCall,
+            ),
+            self.tcx,
+        );
 
         debug!("supplied_sig_of_closure: result={:?}", result);
 

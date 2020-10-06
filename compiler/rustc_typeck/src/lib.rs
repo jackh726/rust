@@ -232,13 +232,16 @@ fn check_main_fn_ty(tcx: TyCtxt<'_>, main_def_id: LocalDefId) {
                 tcx.mk_unit()
             };
 
-            let se_ty = tcx.mk_fn_ptr(ty::Binder::bind(tcx.mk_fn_sig(
-                iter::empty(),
-                expected_return_type,
-                false,
-                hir::Unsafety::Normal,
-                Abi::Rust,
-            )));
+            let se_ty = tcx.mk_fn_ptr(ty::Binder::bind(
+                tcx.mk_fn_sig(
+                    iter::empty(),
+                    expected_return_type,
+                    false,
+                    hir::Unsafety::Normal,
+                    Abi::Rust,
+                ),
+                tcx,
+            ));
 
             require_same_types(
                 tcx,
