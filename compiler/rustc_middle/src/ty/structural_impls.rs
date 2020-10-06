@@ -537,7 +537,7 @@ where
     type Lifted = ty::Binder<'tcx, T::Lifted>;
     fn lift_to_tcx(self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
         // FIXME: need to lift inner values
-        tcx.lift(self.skip_binder()).map(|v| ty::Binder::bind(v))
+        tcx.lift(self.skip_binder()).map(|v| ty::Binder::bind(v, tcx))
     }
 }
 
