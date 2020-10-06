@@ -715,7 +715,9 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Binders<chalk_ir::QuantifiedWhereClauses<Ru
     }
 }
 
-impl<'tcx> LowerInto<'tcx, chalk_ir::FnSig<RustInterner<'tcx>>> for ty::Binder<'tcx, ty::FnSig<'tcx>> {
+impl<'tcx> LowerInto<'tcx, chalk_ir::FnSig<RustInterner<'tcx>>>
+    for ty::Binder<'tcx, ty::FnSig<'tcx>>
+{
     fn lower_into(self, _interner: &RustInterner<'_>) -> FnSig<RustInterner<'tcx>> {
         chalk_ir::FnSig {
             abi: self.abi(),
@@ -738,11 +740,14 @@ impl<'tcx> LowerInto<'tcx, Option<chalk_solve::rust_ir::QuantifiedInlineBound<Ru
         self,
         interner: &RustInterner<'tcx>,
     ) -> Option<chalk_solve::rust_ir::QuantifiedInlineBound<RustInterner<'tcx>>> {
-        let bound_predicate = self.bound_atom(interner.tcx); 
+        let bound_predicate = self.bound_atom(interner.tcx);
         match bound_predicate.skip_binder() {
             ty::PredicateAtom::Trait(predicate, _) => {
-                let (predicate, binders, _named_regions) =
-                    collect_bound_vars(interner, interner.tcx, &ty::Binder::rebind(predicate, bound_predicate.bound_vars()));
+                let (predicate, binders, _named_regions) = collect_bound_vars(
+                    interner,
+                    interner.tcx,
+                    &ty::Binder::rebind(predicate, bound_predicate.bound_vars()),
+                );
 
                 Some(chalk_ir::Binders::new(
                     binders,
@@ -752,8 +757,11 @@ impl<'tcx> LowerInto<'tcx, Option<chalk_solve::rust_ir::QuantifiedInlineBound<Ru
                 ))
             }
             ty::PredicateAtom::Projection(predicate) => {
-                let (predicate, binders, _named_regions) =
-                    collect_bound_vars(interner, interner.tcx, &ty::Binder::rebind(predicate, bound_predicate.bound_vars()));
+                let (predicate, binders, _named_regions) = collect_bound_vars(
+                    interner,
+                    interner.tcx,
+                    &ty::Binder::rebind(predicate, bound_predicate.bound_vars()),
+                );
 
                 Some(chalk_ir::Binders::new(
                     binders,

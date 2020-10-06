@@ -139,7 +139,10 @@ impl Elaborator<'tcx> {
 
                 let obligations = predicates.predicates.iter().map(|&(pred, _)| {
                     predicate_obligation(
-                        pred.subst_supertrait(tcx, &ty::Binder::rebind(data.trait_ref, predicate.bound_vars())),
+                        pred.subst_supertrait(
+                            tcx,
+                            &ty::Binder::rebind(data.trait_ref, predicate.bound_vars()),
+                        ),
                         obligation.param_env,
                         obligation.cause.clone(),
                     )

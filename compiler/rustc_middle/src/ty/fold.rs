@@ -727,11 +727,10 @@ impl BoundVarsCollector {
         BoundVarsCollector { binder_index: ty::INNERMOST, vars: BTreeMap::new() }
     }
 
-    pub fn into_vars<'tcx>(self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
-        (0..self.vars.len()).for_each(|i| {
-            self.vars
-                .get(&(i as u32))
-                .or_else(|| bug!("Skipped bound var index: vars={:?}", &self.vars));
+    pub fn into_vars<'tcx>(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
+        let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+        (0..max).for_each(|i| {
+            self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
         });
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))

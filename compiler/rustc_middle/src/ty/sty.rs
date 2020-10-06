@@ -925,6 +925,7 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
 pub enum BoundVariableKind {
+    Unknown,
     Ty(BoundTyKind),
     Region(BoundRegion),
     Const,
