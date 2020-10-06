@@ -531,7 +531,8 @@ impl<'a, 'tcx> Lift<'tcx> for ty::PredicateAtom<'a> {
 }
 
 impl<'a, 'tcx, T: Lift<'tcx>> Lift<'tcx> for ty::Binder<'a, T>
-    where <T as Lift<'tcx>>::Lifted: TypeFoldable<'tcx>,
+where
+    <T as Lift<'tcx>>::Lifted: TypeFoldable<'tcx>,
 {
     type Lifted = ty::Binder<'tcx, T::Lifted>;
     fn lift_to_tcx(self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
