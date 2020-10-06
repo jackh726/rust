@@ -69,7 +69,7 @@ pub use self::sty::InferTy::*;
 pub use self::sty::RegionKind;
 pub use self::sty::RegionKind::*;
 pub use self::sty::TyKind::*;
-pub use self::sty::{Binder, BoundTy, BoundTyKind, BoundVar};
+pub use self::sty::{Binder, BoundTy, BoundTyKind, BoundVar, BoundVariableKind};
 pub use self::sty::{BoundRegion, BoundRegionKind, EarlyBoundRegion, FreeRegion, Region};
 pub use self::sty::{CanonicalPolyFnSig, FnSig, GenSig, PolyFnSig, PolyGenSig};
 pub use self::sty::{ClosureSubsts, GeneratorSubsts, TypeAndMut, UpvarSubsts};
@@ -1255,7 +1255,7 @@ impl<'tcx> Predicate<'tcx> {
         let substs = trait_ref.skip_binder().substs;
         let pred = self.kind().skip_binder();
         let new = pred.subst(tcx, substs);
-        tcx.reuse_or_mk_predicate(self, ty::Binder::bind(new))
+        tcx.reuse_or_mk_predicate(self, ty::Binder::bind(new, tcx))
     }
 }
 
