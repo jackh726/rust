@@ -746,9 +746,12 @@ impl<'tcx> Binder<'tcx, ExistentialPredicate<'tcx>> {
     pub fn with_self_ty(&self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> ty::Predicate<'tcx> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
-            ExistentialPredicate::Trait(tr) => {
-                self.rebind(tr).with_self_ty(tcx, self_ty).to_poly_trait_predicate().without_const().to_predicate(tcx)
-            }
+            ExistentialPredicate::Trait(tr) => self
+                .rebind(tr)
+                .with_self_ty(tcx, self_ty)
+                .to_poly_trait_predicate()
+                .without_const()
+                .to_predicate(tcx),
             ExistentialPredicate::Projection(p) => {
                 self.rebind(p.with_self_ty(tcx, self_ty)).to_predicate(tcx)
             }
@@ -971,7 +974,9 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
+#[derive(HashStable)]
 pub enum BoundVariableKind {
+    Unknown,
     Ty(BoundTyKind),
     Region(BoundRegion),
     Const,

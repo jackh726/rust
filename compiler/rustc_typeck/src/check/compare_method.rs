@@ -498,10 +498,7 @@ fn compare_self_type<'tcx>(
         let param_env = ty::ParamEnv::reveal_all();
 
         tcx.infer_ctxt().enter(|infcx| {
-            let self_arg_ty = tcx.liberate_late_bound_regions(
-                method.def_id,
-                &self_arg_ty,
-            );
+            let self_arg_ty = tcx.liberate_late_bound_regions(method.def_id, self_arg_ty);
             let can_eq_self = |ty| infcx.can_eq(param_env, untransformed_self_ty, ty).is_ok();
             match ExplicitSelf::determine(self_arg_ty, can_eq_self) {
                 ExplicitSelf::ByValue => "self".to_owned(),

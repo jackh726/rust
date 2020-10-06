@@ -35,6 +35,7 @@ use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 
 use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::sso::SsoHashSet;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::ControlFlow;
@@ -715,28 +716,32 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 }
 
-pub struct BoundVarsCollector {
+pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
+    visited: SsoHashSet<Ty<'tcx>>,
 }
 
-impl BoundVarsCollector {
+impl<'tcx> BoundVarsCollector<'tcx> {
     pub fn new() -> Self {
-        BoundVarsCollector { binder_index: ty::INNERMOST, vars: BTreeMap::new() }
+        BoundVarsCollector {
+            binder_index: ty::INNERMOST,
+            vars: BTreeMap::new(),
+            visited: SsoHashSet::default(),
+        }
     }
 
-    pub fn into_vars<'tcx>(self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
-        (0..self.vars.len()).for_each(|i| {
-            self.vars
-                .get(&(i as u32))
-                .or_else(|| bug!("Skipped bound var index: vars={:?}", &self.vars));
+    pub fn into_vars(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
+        let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+        (0..max).for_each(|i| {
+            self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
         });
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
     }
 }
 
-impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector {
+impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
     fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> bool {
         self.binder_index.shift_in(1);
         let result = t.super_visit_with(self);
@@ -745,6 +750,9 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector {
     }
 
     fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
+        if t.outer_exclusive_binder < self.binder_index || !self.visited.insert(t) {
+            return false;
+        }
         use std::collections::btree_map::Entry;
         match *t.kind() {
             ty::Bound(debruijn, bound_ty) if debruijn == self.binder_index => {
