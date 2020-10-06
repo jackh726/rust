@@ -788,8 +788,10 @@ fn contains_illegal_self_type_reference<'tcx, T: TypeFoldable<'tcx>>(
 
                     // Compute supertraits of current trait lazily.
                     if self.supertraits.is_none() {
-                        let trait_ref =
-                            ty::Binder::bind(ty::TraitRef::identity(self.tcx, self.trait_def_id));
+                        let trait_ref = ty::Binder::bind(
+                            ty::TraitRef::identity(self.tcx, self.trait_def_id),
+                            self.tcx,
+                        );
                         self.supertraits = Some(traits::supertraits(self.tcx, trait_ref).collect());
                     }
 
@@ -801,7 +803,7 @@ fn contains_illegal_self_type_reference<'tcx, T: TypeFoldable<'tcx>>(
                     // direct equality here because all of these types
                     // are part of the formal parameter listing, and
                     // hence there should be no inference variables.
-                    let projection_trait_ref = ty::Binder::bind(data.trait_ref(self.tcx));
+                    let projection_trait_ref = ty::Binder::bind(data.trait_ref(self.tcx), self.tcx);
                     let is_supertrait_of_current_trait =
                         self.supertraits.as_ref().unwrap().contains(&projection_trait_ref);
 

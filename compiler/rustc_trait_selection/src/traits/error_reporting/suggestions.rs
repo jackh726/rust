@@ -2081,7 +2081,8 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     }
                     count += 1;
                     data = child;
-                    parent_predicate = child_trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx);
+                    parent_predicate =
+                        child_trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx);
                     parent_trait_ref = child_trait_ref;
                 }
                 if count > 0 {

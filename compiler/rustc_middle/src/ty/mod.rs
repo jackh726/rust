@@ -56,7 +56,7 @@ pub use self::sty::InferTy::*;
 pub use self::sty::RegionKind;
 pub use self::sty::RegionKind::*;
 pub use self::sty::TyKind::*;
-pub use self::sty::{Binder, BoundTy, BoundTyKind, BoundVar};
+pub use self::sty::{Binder, BoundTy, BoundTyKind, BoundVar, BoundVariableKind};
 pub use self::sty::{BoundRegion, EarlyBoundRegion, FreeRegion, Region};
 pub use self::sty::{CanonicalPolyFnSig, FnSig, GenSig, PolyFnSig, PolyGenSig};
 pub use self::sty::{ClosureSubsts, GeneratorSubsts, TypeAndMut, UpvarSubsts};
@@ -1070,7 +1070,10 @@ impl<'tcx> Predicate<'tcx> {
 
     /// Allows using a `Binder<'tcx, PredicateAtom<'tcx>>` even if the given predicate previously
     /// contained unbound variables by shifting these variables outwards.
-    pub fn bound_atom_with_opt_escaping(self, tcx: TyCtxt<'tcx>) -> Binder<'tcx, PredicateAtom<'tcx>> {
+    pub fn bound_atom_with_opt_escaping(
+        self,
+        tcx: TyCtxt<'tcx>,
+    ) -> Binder<'tcx, PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => Binder::wrap_nonbinding(tcx, atom),
@@ -1252,7 +1255,7 @@ impl<'tcx> Predicate<'tcx> {
         let pred = self.skip_binders();
         let new = pred.subst(tcx, substs);
         if new != pred {
-            ty::Binder::bind(new).potentially_quantified(tcx, PredicateKind::ForAll)
+            ty::Binder::bind(new, tcx).potentially_quantified(tcx, PredicateKind::ForAll)
         } else {
             self
         }
