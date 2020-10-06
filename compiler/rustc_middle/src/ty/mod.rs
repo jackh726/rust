@@ -1073,7 +1073,10 @@ impl<'tcx> Predicate<'tcx> {
 
     /// Allows using a `Binder<'tcx, PredicateAtom<'tcx>>` even if the given predicate previously
     /// contained unbound variables by shifting these variables outwards.
-    pub fn bound_atom_with_opt_escaping(self, tcx: TyCtxt<'tcx>) -> Binder<'tcx, PredicateAtom<'tcx>> {
+    pub fn bound_atom_with_opt_escaping(
+        self,
+        tcx: TyCtxt<'tcx>,
+    ) -> Binder<'tcx, PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => Binder::wrap_nonbinding(tcx, atom),
@@ -1425,9 +1428,7 @@ impl<'tcx> Predicate<'tcx> {
     pub fn to_opt_poly_trait_ref(self) -> Option<PolyTraitRef<'tcx>> {
         let predicate = self.bound_atom();
         match predicate.skip_binder() {
-            PredicateAtom::Trait(t, _) => {
-                Some(predicate.rebind(t.trait_ref))
-            }
+            PredicateAtom::Trait(t, _) => Some(predicate.rebind(t.trait_ref)),
             PredicateAtom::Projection(..)
             | PredicateAtom::Subtype(..)
             | PredicateAtom::RegionOutlives(..)
