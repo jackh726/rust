@@ -338,7 +338,7 @@ pub fn closure_trait_ref_and_return_type(
         def_id: fn_trait_def_id,
         substs: tcx.mk_substs_trait(self_ty, &[arguments_tuple.into()]),
     };
-    ty::Binder::bind((trait_ref, sig.skip_binder().output()))
+    ty::Binder::bind((trait_ref, sig.skip_binder().output()), tcx)
 }
 
 pub fn generator_trait_ref_and_outputs(
@@ -351,7 +351,7 @@ pub fn generator_trait_ref_and_outputs(
         def_id: fn_trait_def_id,
         substs: tcx.mk_substs_trait(self_ty, &[sig.skip_binder().resume_ty.into()]),
     };
-    ty::Binder::bind((trait_ref, sig.skip_binder().yield_ty, sig.skip_binder().return_ty))
+    ty::Binder::bind((trait_ref, sig.skip_binder().yield_ty, sig.skip_binder().return_ty), tcx)
 }
 
 pub fn impl_item_is_final(tcx: TyCtxt<'_>, assoc_item: &ty::AssocItem) -> bool {

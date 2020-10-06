@@ -1172,7 +1172,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     abi::Abi::Rust,
                 )
             };
-            ty::Binder::bind(sig).to_string()
+            ty::Binder::bind(sig, tcx).to_string()
         }
 
         let argument_is_closure = expected_ref.skip_binder().substs.type_at(0).is_closure();
@@ -1423,7 +1423,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             // generator frame. Bound regions are preserved by
             // `erase_regions` and so we must also call
             // `erase_late_bound_regions`.
-            let ty_erased = self.tcx.erase_late_bound_regions(ty::Binder::bind(ty));
+            let ty_erased = self.tcx.erase_late_bound_regions(ty::Binder::bind(ty, self.tcx));
             let ty_erased = self.tcx.erase_regions(ty_erased);
             let eq = ty::TyS::same_type(ty_erased, target_ty_erased);
             debug!(

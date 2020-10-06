@@ -50,7 +50,7 @@ impl<'a, 'tcx> CombineFields<'a, 'tcx> {
 
             debug!("higher_ranked_sub: OK result={:?}", result);
 
-            Ok(ty::Binder::bind(result))
+            Ok(ty::Binder::bind(result, self.infcx.tcx))
         })
     }
 }

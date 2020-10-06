@@ -201,7 +201,7 @@ pub fn resolve_interior<'a, 'tcx>(
 
     // Extract type components to build the witness type.
     let type_list = fcx.tcx.mk_type_list(type_causes.iter().map(|cause| cause.ty));
-    let witness = fcx.tcx.mk_generator_witness(ty::Binder::bind(type_list));
+    let witness = fcx.tcx.mk_generator_witness(ty::Binder::bind(type_list, fcx.tcx));
 
     // Store the generator types and spans into the typeck results for this generator.
     visitor.fcx.inh.typeck_results.borrow_mut().generator_interior_types = type_causes;

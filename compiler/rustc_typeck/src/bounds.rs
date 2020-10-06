@@ -57,10 +57,10 @@ impl<'tcx> Bounds<'tcx> {
         // If it could be sized, and is, add the `Sized` predicate.
         let sized_predicate = self.implicitly_sized.and_then(|span| {
             tcx.lang_items().sized_trait().map(|sized| {
-                let trait_ref = ty::Binder::bind(ty::TraitRef {
-                    def_id: sized,
-                    substs: tcx.mk_substs_trait(param_ty, &[]),
-                });
+                let trait_ref = ty::Binder::bind(
+                    ty::TraitRef { def_id: sized, substs: tcx.mk_substs_trait(param_ty, &[]) },
+                    tcx,
+                );
                 (trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx), span)
             })
         });
@@ -69,7 +69,7 @@ impl<'tcx> Bounds<'tcx> {
             .into_iter()
             .chain(self.region_bounds.iter().map(|&(region_bound, span)| {
                 let outlives = ty::OutlivesPredicate(param_ty, region_bound);
-                (ty::Binder::bind(outlives).to_predicate(tcx), span)
+                (ty::Binder::bind(outlives, tcx).to_predicate(tcx), span)
             }))
             .chain(self.trait_bounds.iter().map(|&(bound_trait_ref, span, constness)| {
                 let predicate = bound_trait_ref
