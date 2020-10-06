@@ -53,13 +53,10 @@ fn equate_intrinsic_type<'tcx>(
         return;
     }
 
-    let fty = tcx.mk_fn_ptr(ty::Binder::bind(tcx.mk_fn_sig(
-        inputs.into_iter(),
-        output,
-        false,
-        safety,
-        abi,
-    )));
+    let fty = tcx.mk_fn_ptr(ty::Binder::bind(
+        tcx.mk_fn_sig(inputs.into_iter(), output, false, safety, abi),
+        tcx,
+    ));
     let cause = ObligationCause::new(it.span, it.hir_id, ObligationCauseCode::IntrinsicType);
     require_same_types(tcx, &cause, tcx.mk_fn_ptr(tcx.fn_sig(def_id)), fty);
 }

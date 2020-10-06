@@ -110,12 +110,12 @@ pub fn get_deprecation(cx: &DocContext<'_>, def_id: DefId) -> Option<Deprecation
     cx.tcx.lookup_deprecation(def_id).clean(cx)
 }
 
-fn external_generic_args(
-    cx: &DocContext<'_>,
+fn external_generic_args<'tcx>(
+    cx: &DocContext<'tcx>,
     trait_did: Option<DefId>,
     has_self: bool,
     bindings: Vec<TypeBinding>,
-    substs: SubstsRef<'_>,
+    substs: SubstsRef<'tcx>,
 ) -> GenericArgs {
     let mut skip_self = has_self;
     let mut ty_kind = None;
@@ -160,13 +160,13 @@ fn external_generic_args(
 
 // trait_did should be set to a trait's DefId if called on a TraitRef, in order to sugar
 // from Fn<(A, B,), C> to Fn(A, B) -> C
-pub(super) fn external_path(
-    cx: &DocContext<'_>,
+pub(super) fn external_path<'tcx>(
+    cx: &DocContext<'tcx>,
     name: Symbol,
     trait_did: Option<DefId>,
     has_self: bool,
     bindings: Vec<TypeBinding>,
-    substs: SubstsRef<'_>,
+    substs: SubstsRef<'tcx>,
 ) -> Path {
     Path {
         global: false,

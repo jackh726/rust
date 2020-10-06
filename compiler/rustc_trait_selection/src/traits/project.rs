@@ -1252,7 +1252,7 @@ fn confirm_discriminant_kind_candidate<'cx, 'tcx>(
         ty: self_ty.discriminant_ty(tcx),
     };
 
-    confirm_param_env_candidate(selcx, obligation, ty::Binder::bind(predicate), false)
+    confirm_param_env_candidate(selcx, obligation, ty::Binder::bind(predicate, selcx.tcx()), false)
 }
 
 fn confirm_fn_pointer_candidate<'cx, 'tcx>(
