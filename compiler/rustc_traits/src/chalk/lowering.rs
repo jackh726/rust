@@ -738,10 +738,11 @@ impl<'tcx> LowerInto<'tcx, Option<chalk_solve::rust_ir::QuantifiedInlineBound<Ru
         self,
         interner: &RustInterner<'tcx>,
     ) -> Option<chalk_solve::rust_ir::QuantifiedInlineBound<RustInterner<'tcx>>> {
-        match self.bound_atom(interner.tcx).skip_binder() {
+        let bound_predicate = self.bound_atom(interner.tcx); 
+        match bound_predicate.skip_binder() {
             ty::PredicateAtom::Trait(predicate, _) => {
                 let (predicate, binders, _named_regions) =
-                    collect_bound_vars(interner, interner.tcx, &ty::Binder::bind(predicate));
+                    collect_bound_vars(interner, interner.tcx, &ty::Binder::rebind(predicate, bound_predicate.bound_vars()));
 
                 Some(chalk_ir::Binders::new(
                     binders,
@@ -752,7 +753,7 @@ impl<'tcx> LowerInto<'tcx, Option<chalk_solve::rust_ir::QuantifiedInlineBound<Ru
             }
             ty::PredicateAtom::Projection(predicate) => {
                 let (predicate, binders, _named_regions) =
-                    collect_bound_vars(interner, interner.tcx, &ty::Binder::bind(predicate));
+                    collect_bound_vars(interner, interner.tcx, &ty::Binder::rebind(predicate, bound_predicate.bound_vars()));
 
                 Some(chalk_ir::Binders::new(
                     binders,

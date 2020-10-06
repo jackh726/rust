@@ -230,13 +230,16 @@ fn check_main_fn_ty(tcx: TyCtxt<'_>, main_def_id: LocalDefId) {
                 tcx.mk_unit()
             };
 
-            let se_ty = tcx.mk_fn_ptr(ty::Binder::bind(tcx.mk_fn_sig(
-                iter::empty(),
-                expected_return_type,
-                false,
-                hir::Unsafety::Normal,
-                Abi::Rust,
-            )));
+            let se_ty = tcx.mk_fn_ptr(ty::Binder::bind(
+                tcx.mk_fn_sig(
+                    iter::empty(),
+                    expected_return_type,
+                    false,
+                    hir::Unsafety::Normal,
+                    Abi::Rust,
+                ),
+                tcx,
+            ));
 
             require_same_types(
                 tcx,
@@ -317,13 +320,16 @@ fn check_start_fn_ty(tcx: TyCtxt<'_>, start_def_id: LocalDefId) {
                 }
             }
 
-            let se_ty = tcx.mk_fn_ptr(ty::Binder::bind(tcx.mk_fn_sig(
-                [tcx.types.isize, tcx.mk_imm_ptr(tcx.mk_imm_ptr(tcx.types.u8))].iter().cloned(),
-                tcx.types.isize,
-                false,
-                hir::Unsafety::Normal,
-                Abi::Rust,
-            )));
+            let se_ty = tcx.mk_fn_ptr(ty::Binder::bind(
+                tcx.mk_fn_sig(
+                    [tcx.types.isize, tcx.mk_imm_ptr(tcx.mk_imm_ptr(tcx.types.u8))].iter().cloned(),
+                    tcx.types.isize,
+                    false,
+                    hir::Unsafety::Normal,
+                    Abi::Rust,
+                ),
+                tcx,
+            ));
 
             require_same_types(
                 tcx,

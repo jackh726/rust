@@ -1008,9 +1008,10 @@ where
     {
         debug!("TypeGeneralizer::binders(a={:?})", a);
 
+        let bound_vars = a.bound_vars();
         self.first_free_index.shift_in(1);
         let result = self.relate(a.skip_binder(), a.skip_binder())?;
         self.first_free_index.shift_out(1);
-        Ok(ty::Binder::bind(result))
+        Ok(ty::Binder::rebind(result, bound_vars))
     }
 }

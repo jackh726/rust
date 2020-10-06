@@ -670,6 +670,7 @@ fn prune_cache_value_obligations<'a, 'tcx>(
         .iter()
         .filter(|obligation| {
             let predicate = obligation.predicate.bound_atom(infcx.tcx);
+            let bound_vars = predicate.bound_vars();
             match predicate.skip_binder() {
                 // We found a `T: Foo<X = U>` predicate, let's check
                 // if `U` references any unresolved type
@@ -680,9 +681,8 @@ fn prune_cache_value_obligations<'a, 'tcx>(
                 // indirect obligations (e.g., we project to `?0`,
                 // but we have `T: Foo<X = ?1>` and `?1: Bar<X =
                 // ?0>`).
-                // FIXME: for some reason, rebind doesn't work here
                 ty::PredicateAtom::Projection(data) => {
-                    infcx.unresolved_type_vars(&ty::Binder::bind(data.ty)).is_some()
+                    infcx.unresolved_type_vars(&ty::Binder::rebind(data.ty, bound_vars)).is_some()
                 }
 
                 // We are only interested in `T: Foo<X = U>` predicates, whre
@@ -1309,7 +1309,7 @@ fn confirm_discriminant_kind_candidate<'cx, 'tcx>(
         ty: self_ty.discriminant_ty(tcx),
     };
 
-    confirm_param_env_candidate(selcx, obligation, ty::Binder::bind(predicate), false)
+    confirm_param_env_candidate(selcx, obligation, ty::Binder::bind(predicate, selcx.tcx()), false)
 }
 
 fn confirm_fn_pointer_candidate<'cx, 'tcx>(
