@@ -67,12 +67,12 @@ pub use self::sty::BoundRegionKind::*;
 pub use self::sty::RegionKind::*;
 pub use self::sty::TyKind::*;
 pub use self::sty::{
-    Binder, BoundRegion, BoundRegionKind, BoundTy, BoundTyKind, BoundVar, CanonicalPolyFnSig,
-    ClosureSubsts, ClosureSubstsParts, ConstVid, EarlyBoundRegion, ExistentialPredicate,
-    ExistentialProjection, ExistentialTraitRef, FnSig, FreeRegion, GenSig, GeneratorSubsts,
-    GeneratorSubstsParts, ParamConst, ParamTy, PolyExistentialProjection, PolyExistentialTraitRef,
-    PolyFnSig, PolyGenSig, PolyTraitRef, ProjectionTy, Region, RegionKind, RegionVid, TraitRef,
-    TyKind, TypeAndMut, UpvarSubsts,
+    Binder, BoundRegion, BoundRegionKind, BoundTy, BoundTyKind, BoundVar, BoundVariableKind,
+    CanonicalPolyFnSig, ClosureSubsts, ClosureSubstsParts, ConstVid, EarlyBoundRegion,
+    ExistentialPredicate, ExistentialProjection, ExistentialTraitRef, FnSig, FreeRegion, GenSig,
+    GeneratorSubsts, GeneratorSubstsParts, ParamConst, ParamTy, PolyExistentialProjection,
+    PolyExistentialTraitRef, PolyFnSig, PolyGenSig, PolyTraitRef, ProjectionTy, Region, RegionKind,
+    RegionVid, TraitRef, TyKind, TypeAndMut, UpvarSubsts,
 };
 pub use self::trait_def::TraitDef;
 
@@ -546,7 +546,7 @@ impl<'tcx> Predicate<'tcx> {
         let substs = trait_ref.skip_binder().substs;
         let pred = self.kind().skip_binder();
         let new = pred.subst(tcx, substs);
-        tcx.reuse_or_mk_predicate(self, ty::Binder::bind(new))
+        tcx.reuse_or_mk_predicate(self, ty::Binder::bind(new, tcx))
     }
 }
 
@@ -630,7 +630,7 @@ impl<'tcx> PolyProjectionPredicate<'tcx> {
     }
 
     #[inline]
-    pub fn projection_self_ty(&self) -> Binder<Ty<'tcx>> {
+    pub fn projection_self_ty(&self) -> Binder<'tcx, Ty<'tcx>> {
         self.map_bound(|predicate| predicate.projection_ty.self_ty())
     }
 
