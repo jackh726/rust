@@ -625,7 +625,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             self_ty,
             trait_ref.path.segments.last().unwrap(),
         );
-        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs));
+        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs), self.tcx());
 
         bounds.trait_bounds.push((poly_trait_ref, span, constness));
 
@@ -701,7 +701,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         let (substs, assoc_bindings, _) =
             self.create_substs_for_ast_path(span, trait_def_id, &[], args, false, Some(self_ty));
-        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs));
+        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs), self.tcx());
         bounds.trait_bounds.push((poly_trait_ref, span, Constness::NotConst));
 
         let mut dup_bindings = FxHashMap::default();
@@ -927,7 +927,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 let late_bound_in_trait_ref =
                     tcx.collect_constrained_late_bound_regions(&trait_ref);
                 let late_bound_in_ty =
-                    tcx.collect_referenced_late_bound_regions(&ty::Binder::bind(ty));
+                    tcx.collect_referenced_late_bound_regions(&ty::Binder::bind(ty, tcx));
                 debug!("late_bound_in_trait_ref = {:?}", late_bound_in_trait_ref);
                 debug!("late_bound_in_ty = {:?}", late_bound_in_ty);
 
@@ -1269,7 +1269,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             .collect::<SmallVec<[_; 8]>>();
         v.sort_by(|a, b| a.stable_cmp(tcx, b));
         v.dedup();
-        let existential_predicates = ty::Binder::bind(tcx.mk_existential_predicates(v.into_iter()));
+        let existential_predicates =
+            ty::Binder::bind(tcx.mk_existential_predicates(v.into_iter()), tcx);
 
         // Use explicitly-specified region bound.
         let region_bound = if !lifetime.is_elided() {
@@ -1550,7 +1551,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 };
 
                 self.one_bound_for_assoc_type(
-                    || traits::supertraits(tcx, ty::Binder::bind(trait_ref)),
+                    || traits::supertraits(tcx, ty::Binder::bind(trait_ref, tcx)),
                     || "Self".to_string(),
                     assoc_ident,
                     span,
@@ -2251,8 +2252,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         debug!("ty_of_fn: output_ty={:?}", output_ty);
 
-        let bare_fn_ty =
-            ty::Binder::bind(tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi));
+        let bare_fn_ty = ty::Binder::bind(
+            tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi),
+            tcx,
+        );
 
         if !self.allow_ty_infer() {
             // We always collect the spans for placeholder types when evaluating `fn`s, but we

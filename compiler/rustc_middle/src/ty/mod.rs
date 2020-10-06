@@ -56,7 +56,9 @@ pub use self::sty::InferTy::*;
 pub use self::sty::RegionKind;
 pub use self::sty::RegionKind::*;
 pub use self::sty::TyKind::*;
-pub use self::sty::{Binder, BoundTy, BoundTyKind, BoundVar, DebruijnIndex, INNERMOST};
+pub use self::sty::{
+    Binder, BoundTy, BoundTyKind, BoundVar, BoundVariableKind, DebruijnIndex, INNERMOST,
+};
 pub use self::sty::{BoundRegion, EarlyBoundRegion, FreeRegion, Region};
 pub use self::sty::{CanonicalPolyFnSig, FnSig, GenSig, PolyFnSig, PolyGenSig};
 pub use self::sty::{ClosureSubsts, GeneratorSubsts, TypeAndMut, UpvarSubsts};
@@ -1230,7 +1232,7 @@ impl<'tcx> PredicateAtom<'tcx> {
         qualifier: impl FnOnce(Binder<'tcx, PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
     ) -> Predicate<'tcx> {
         if self.has_escaping_bound_vars() {
-            qualifier(Binder::bind(self))
+            qualifier(Binder::bind(self, tcx))
         } else {
             PredicateKind::Atom(self)
         }

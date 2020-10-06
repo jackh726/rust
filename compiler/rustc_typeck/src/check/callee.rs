@@ -389,13 +389,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // In that case, we check each argument against "error" in order to
                 // set up all the node type bindings.
                 (
-                    ty::Binder::bind(self.tcx.mk_fn_sig(
-                        self.err_args(arg_exprs.len()).into_iter(),
-                        self.tcx.ty_error(),
-                        false,
-                        hir::Unsafety::Normal,
-                        abi::Abi::Rust,
-                    )),
+                    ty::Binder::bind(
+                        self.tcx.mk_fn_sig(
+                            self.err_args(arg_exprs.len()).into_iter(),
+                            self.tcx.ty_error(),
+                            false,
+                            hir::Unsafety::Normal,
+                            abi::Abi::Rust,
+                        ),
+                        self.tcx,
+                    ),
                     None,
                 )
             }

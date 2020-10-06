@@ -710,7 +710,88 @@ impl<'tcx> TyCtxt<'tcx> {
                 r
             })
             .0,
+            self,
         )
+    }
+}
+
+pub struct BoundVarsCollector {
+    binder_index: ty::DebruijnIndex,
+    vars: BTreeMap<u32, ty::BoundVariableKind>,
+}
+
+impl BoundVarsCollector {
+    pub fn new() -> Self {
+        BoundVarsCollector { binder_index: ty::INNERMOST, vars: BTreeMap::new() }
+    }
+
+    pub fn into_vars<'tcx>(self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
+        (0..self.vars.len()).for_each(|i| {
+            self.vars
+                .get(&(i as u32))
+                .or_else(|| bug!("Skipped bound var index: vars={:?}", &self.vars));
+        });
+
+        tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
+    }
+}
+
+impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector {
+    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> bool {
+        self.binder_index.shift_in(1);
+        let result = t.super_visit_with(self);
+        self.binder_index.shift_out(1);
+        result
+    }
+
+    fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
+        use std::collections::btree_map::Entry;
+        match *t.kind() {
+            ty::Bound(debruijn, bound_ty) if debruijn == self.binder_index => {
+                match self.vars.entry(bound_ty.var.as_u32()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(ty::BoundVariableKind::Ty(bound_ty.kind));
+                    }
+                    Entry::Occupied(entry) => match entry.get() {
+                        ty::BoundVariableKind::Ty(_) => {}
+                        _ => bug!("Conflicting bound vars"),
+                    },
+                }
+            }
+
+            _ => (),
+        };
+
+        t.super_visit_with(self)
+    }
+
+    fn visit_region(&mut self, r: ty::Region<'tcx>) -> bool {
+        use std::collections::btree_map::Entry;
+        match r {
+            ty::ReLateBound(index, br) if *index == self.binder_index => match br {
+                ty::BoundRegion::BrNamed(_def_id, _name) => {
+                    // FIXME
+                }
+
+                ty::BoundRegion::BrAnon(var) => match self.vars.entry(*var) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(ty::BoundVariableKind::Region(*br));
+                    }
+                    Entry::Occupied(entry) => match entry.get() {
+                        ty::BoundVariableKind::Region(_) => {}
+                        _ => bug!("Conflicting bound vars"),
+                    },
+                },
+
+                ty::BrEnv => {
+                    // FIXME
+                }
+            },
+
+            _ => (),
+        };
+
+        r.super_visit_with(self)
     }
 }
 
