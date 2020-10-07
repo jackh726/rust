@@ -37,6 +37,7 @@ use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
 
 use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::sso::SsoHashSet;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -717,17 +718,22 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 }
 
-pub struct BoundVarsCollector {
+pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
+    visited: SsoHashSet<Ty<'tcx>>,
 }
 
-impl BoundVarsCollector {
+impl<'tcx> BoundVarsCollector<'tcx> {
     pub fn new() -> Self {
-        BoundVarsCollector { binder_index: ty::INNERMOST, vars: BTreeMap::new() }
+        BoundVarsCollector {
+            binder_index: ty::INNERMOST,
+            vars: BTreeMap::new(),
+            visited: SsoHashSet::default(),
+        }
     }
 
-    pub fn into_vars<'tcx>(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
+    pub fn into_vars(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
         let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
         (0..max).for_each(|i| {
             self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
@@ -737,7 +743,7 @@ impl BoundVarsCollector {
     }
 }
 
-impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector {
+impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
     fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> bool {
         self.binder_index.shift_in(1);
         let result = t.super_visit_with(self);
@@ -747,6 +753,9 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector {
 
     fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
         use std::collections::btree_map::Entry;
+        if self.visited.insert(t) {
+            return false;
+        }
         match *t.kind() {
             ty::Bound(debruijn, bound_ty) if debruijn == self.binder_index => {
                 match self.vars.entry(bound_ty.var.as_u32()) {
@@ -1004,14 +1013,15 @@ impl<'tcx> PredicateVisitor<'tcx> for HasEscapingVarsVisitor {
     }
 }
 
-crate struct CountBoundVars {
+crate struct CountBoundVars<'tcx> {
     crate outer_index: ty::DebruijnIndex,
     crate bound_tys: FxHashSet<ty::BoundTy>,
     crate bound_regions: FxHashSet<ty::BoundRegion>,
     crate bound_consts: FxHashSet<ty::BoundVar>,
+    crate visited: SsoHashSet<Ty<'tcx>>,
 }
 
-impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
+impl<'tcx> TypeVisitor<'tcx> for CountBoundVars<'tcx> {
     fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> bool {
         self.outer_index.shift_in(1);
         let result = t.super_visit_with(self);
@@ -1020,6 +1030,9 @@ impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
     }
 
     fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
+        if self.visited.insert(t) {
+            return false;
+        }
         match t.kind {
             ty::Bound(debruijn, ty) if debruijn == self.outer_index => {
                 self.bound_tys.insert(ty);
