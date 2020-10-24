@@ -503,7 +503,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let (supplied_ty, _) = self.infcx.replace_bound_vars_with_fresh_vars(
                     hir_ty.span,
                     LateBoundRegionConversionTime::FnCall,
-                    supplied_sig.inputs().rebind(supplied_ty),
+                    ty::Binder::bind_with_vars(supplied_ty, supplied_sig.inputs().bound_vars()),
                 ); // recreated from (*) above
 
                 // Check that E' = S'.

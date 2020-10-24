@@ -1008,6 +1008,6 @@ where
         self.first_free_index.shift_in(1);
         let result = self.relate(a.skip_binder(), a.skip_binder())?;
         self.first_free_index.shift_out(1);
-        Ok(a.rebind(result))
+        Ok(a.rebind_checked(result))
     }
 }

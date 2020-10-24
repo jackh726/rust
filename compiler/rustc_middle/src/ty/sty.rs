@@ -987,9 +987,7 @@ where
         value.visit_with(&mut collector);
         Binder(value, collector.into_vars(tcx))
     }
-}
 
-impl<'tcx, T> Binder<'tcx, T> {
     /// Wraps `value` in a binder without actually binding any currently
     /// unbound variables.
     ///
@@ -1004,6 +1002,55 @@ impl<'tcx, T> Binder<'tcx, T> {
         } else {
             Binder::dummy(value)
         }
+    }
+
+    /// Wraps a `value` in a binder, using the same bound variables as the
+    /// current `Binder`. This should not be used if the new value *changes*
+    /// the bound variables. Note: the (old or new) value itself does not
+    /// necessarily need to *name* all the bound variables.
+    ///
+    /// This currently doesn't do anything different than `bind`, because we
+    /// don't actually track bound vars. However, semantically, it is different
+    /// because bound vars aren't allowed to change here, whereas they are
+    /// in `bind`. This may be (debug) asserted in the future.
+    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U>
+    where
+        U: TypeFoldable<'tcx>,
+    {
+        Binder(value, self.1)
+    }
+
+    /// Like `rebind`, but will debug assert that bound vars are compatible
+    pub fn rebind_checked<U>(&self, value: U) -> Binder<'tcx, U>
+    where
+        U: TypeFoldable<'tcx>,
+    {
+        if cfg!(debug_assertions) {
+            let mut collector = BoundVarsCollector::new();
+            value.visit_with(&mut collector);
+            let new_var_map = collector.into_inner();
+            for (i, var_a) in self.1.iter().enumerate() {
+                let var_b = new_var_map.get(&(i as u32)).unwrap_or(&BoundVariableKind::Unknown);
+                match (var_a, *var_b) {
+                    (BoundVariableKind::Unknown, _) | (_, BoundVariableKind::Unknown) => continue,
+                    (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
+                        debug_assert_eq!(kind_a, kind_b)
+                    }
+                    (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
+                        debug_assert_eq!(region_a, region_b)
+                    }
+                    (BoundVariableKind::Const, BoundVariableKind::Const) => continue,
+                    (_, _) => panic!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
+                }
+            }
+        }
+        Binder(value, self.1)
+    }
+}
+
+impl<'tcx, T> Binder<'tcx, T> {
+    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
+        Binder(value, vars)
     }
 
     /// Skips the binder and returns the "bound" value. This is a
@@ -1046,19 +1093,6 @@ impl<'tcx, T> Binder<'tcx, T> {
         F: FnOnce(T) -> U,
     {
         Binder(f(self.0), self.1)
-    }
-
-    /// Wraps a `value` in a binder, using the same bound variables as the
-    /// current `Binder`. This should not be used if the new value *changes*
-    /// the bound variables. Note: the (old or new) value itself does not
-    /// necessarily need to *name* all the bound variables.
-    ///
-    /// This currently doesn't do anything different than `bind`, because we
-    /// don't actually track bound vars. However, semantically, it is different
-    /// because bound vars aren't allowed to change here, whereas they are
-    /// in `bind`. This may be (debug) asserted in the future.
-    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U> {
-        Binder(value, self.1)
     }
 
     /// Unwraps and returns the value within, but only if it contains

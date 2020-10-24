@@ -118,6 +118,6 @@ impl TypeRelation<'tcx> for Match<'tcx> {
     where
         T: Relate<'tcx>,
     {
-        Ok(a.rebind(self.relate(a.skip_binder(), b.skip_binder())?))
+        Ok(a.rebind_checked(self.relate(a.skip_binder(), b.skip_binder())?))
     }
 }
