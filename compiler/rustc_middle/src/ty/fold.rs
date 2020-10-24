@@ -733,6 +733,15 @@ impl<'tcx> BoundVarsCollector<'tcx> {
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
     }
+
+    pub fn into_inner(mut self) -> BTreeMap<u32, ty::BoundVariableKind> {
+        let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+        (0..max).for_each(|i| {
+            self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
+        });
+
+        self.vars
+    }
 }
 
 impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
