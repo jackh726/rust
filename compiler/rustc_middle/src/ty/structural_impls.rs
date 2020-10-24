@@ -534,8 +534,10 @@ where
 {
     type Lifted = ty::Binder<'tcx, T::Lifted>;
     fn lift_to_tcx(self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
-        // FIXME: need to lift inner values
-        tcx.lift(self.skip_binder()).map(|v| ty::Binder::bind(v, tcx))
+        let bound_vars = tcx.lift(self.bound_vars());
+        tcx.lift(self.skip_binder())
+            .zip(bound_vars)
+            .map(|(value, vars)| ty::Binder::bind_with_vars(value, vars))
     }
 }
 
@@ -826,7 +828,7 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for Box<[T]> {
 impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for ty::Binder<'tcx, T> {
     fn super_fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
         let new_ty = self.as_ref().skip_binder().fold_with(folder);
-        ty::Binder::bind(new_ty, folder.tcx())
+        self.rebind_checked(new_ty)
     }
 
     fn fold_with<F: TypeFolder<'tcx>>(&self, folder: &mut F) -> Self {
