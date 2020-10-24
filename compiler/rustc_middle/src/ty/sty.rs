@@ -991,9 +991,7 @@ where
         value.visit_with(&mut collector);
         Binder(value, collector.into_vars(tcx))
     }
-}
 
-impl<'tcx, T> Binder<'tcx, T> {
     /// Wraps `value` in a binder without actually binding any currently
     /// unbound variables.
     ///
@@ -1008,6 +1006,12 @@ impl<'tcx, T> Binder<'tcx, T> {
         } else {
             Binder::dummy(value)
         }
+    }
+}
+
+impl<'tcx, T> Binder<'tcx, T> {
+    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
+        Binder(value, vars)
     }
 
     /// Skips the binder and returns the "bound" value. This is a
