@@ -200,14 +200,20 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let r = match tcx.named_region(lifetime.hir_id) {
             Some(rl::Region::Static) => tcx.lifetimes.re_static,
 
-            Some(rl::Region::LateBound(debruijn, _, id, _)) => {
-                let name = lifetime_name(id.expect_local());
-                let br = ty::BoundRegion { kind: ty::BrNamed(id, name) };
+            Some(rl::Region::LateBound(debruijn, index, def_id, _)) => {
+                let name = lifetime_name(def_id.expect_local());
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(index),
+                    kind: ty::BrNamed(def_id, name),
+                };
                 tcx.mk_region(ty::ReLateBound(debruijn, br))
             }
 
-            Some(rl::Region::LateBoundAnon(debruijn, _index, anon_index)) => {
-                let br = ty::BoundRegion { kind: ty::BrAnon(anon_index) };
+            Some(rl::Region::LateBoundAnon(debruijn, index, anon_index)) => {
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(index),
+                    kind: ty::BrAnon(anon_index),
+                };
                 tcx.mk_region(ty::ReLateBound(debruijn, br))
             }
 
@@ -638,7 +644,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             self_ty,
             trait_ref.path.segments.last().unwrap(),
         );
-        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs), self.tcx());
+
+        let tcx = self.tcx();
+        let bound_vars = tcx.late_bound_vars(trait_ref.hir_ref_id);
+        let poly_trait_ref =
+            ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
 
         bounds.trait_bounds.push((poly_trait_ref, span, constness));
 
@@ -721,7 +731,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             false,
             Some(self_ty),
         );
-        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs), self.tcx());
+        let tcx = self.tcx();
+        let bound_vars = tcx.late_bound_vars(hir_id);
+        let poly_trait_ref =
+            ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
         bounds.trait_bounds.push((poly_trait_ref, span, Constness::NotConst));
 
         let mut dup_bindings = FxHashMap::default();
@@ -2105,6 +2118,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             hir::TyKind::BareFn(ref bf) => {
                 require_c_abi_if_c_variadic(tcx, &bf.decl, bf.abi, ast_ty.span);
                 tcx.mk_fn_ptr(self.ty_of_fn(
+                    ast_ty.hir_id,
                     bf.unsafety,
                     bf.abi,
                     &bf.decl,
@@ -2244,6 +2258,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
     pub fn ty_of_fn(
         &self,
+        hir_id: hir::HirId,
         unsafety: hir::Unsafety,
         abi: abi::Abi,
         decl: &hir::FnDecl<'_>,
@@ -2253,6 +2268,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         debug!("ty_of_fn");
 
         let tcx = self.tcx();
+        let bound_vars = tcx.late_bound_vars(hir_id);
 
         // We proactively collect all the inferred type params to emit a single error per fn def.
         let mut visitor = PlaceholderHirTyCollector::default();
@@ -2272,10 +2288,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         debug!("ty_of_fn: output_ty={:?}", output_ty);
 
-        let bare_fn_ty = ty::Binder::bind(
-            tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi),
-            tcx,
-        );
+        let fn_ty = tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi);
+        let bare_fn_ty = ty::Binder::bind_with_vars(fn_ty, bound_vars);
 
         if !self.allow_ty_infer() {
             // We always collect the spans for placeholder types when evaluating `fn`s, but we
