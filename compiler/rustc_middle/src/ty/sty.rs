@@ -1093,11 +1093,47 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return value.
-    pub fn fuse<U, F, R>(self, u: Binder<'tcx, U>, f: F) -> Binder<'tcx, R>
+    pub fn fuse<U, F, R>(self, u: Binder<'tcx, U>, tcx: TyCtxt<'tcx>, f: F) -> Binder<'tcx, R>
     where
         F: FnOnce(T, U) -> R,
     {
-        Binder(f(self.0, u.0), self.1)
+        if cfg!(debug_assertions) {
+            for (var_a, var_b) in self.1.iter().zip(u.1.iter()) {
+                match (var_a, var_b) {
+                    (BoundVariableKind::Unknown, _) | (_, BoundVariableKind::Unknown) => continue,
+                    (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
+                        debug_assert_eq!(kind_a, kind_b)
+                    }
+                    // If we encounter a `BrEnv`, then we added it and it's not actually referenced by position
+                    // It's last and we're done
+                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
+                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
+                    (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
+                        debug_assert_eq!(region_a, region_b)
+                    }
+                    (BoundVariableKind::Const, BoundVariableKind::Const) => continue,
+                    (_, _) => panic!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
+                }
+            }
+        }
+        let self_has_env = self
+            .bound_vars()
+            .last()
+            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .unwrap_or(false);
+        let u_has_env = u
+            .bound_vars()
+            .last()
+            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .unwrap_or(false);
+        let env_iter = if u_has_env && !self_has_env {
+            Some(BoundVariableKind::Region(BoundRegion::BrEnv)).into_iter()
+        } else {
+            None.into_iter()
+        };
+        let bound_vars_iter = self.1.iter().chain(env_iter);
+        let bound_vars = tcx.mk_bound_variable_kinds(bound_vars_iter);
+        Binder(f(self.0, u.0), bound_vars)
     }
 
     /// Splits the contents into two things that share the same binder
