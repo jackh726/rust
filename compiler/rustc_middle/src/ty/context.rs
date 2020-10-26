@@ -803,7 +803,7 @@ impl CanonicalUserType<'tcx> {
                             ty::ReLateBound(debruijn, br) => {
                                 // We only allow a `ty::INNERMOST` index in substitutions.
                                 assert_eq!(*debruijn, ty::INNERMOST);
-                                cvar == br.assert_bound_var()
+                                cvar == br.var
                             }
                             _ => false,
                         },
@@ -2606,6 +2606,29 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn object_lifetime_defaults(self, id: HirId) -> Option<&'tcx [ObjectLifetimeDefault]> {
         self.object_lifetime_defaults_map(id.owner)
             .and_then(|map| map.get(&id.local_id).map(|v| &**v))
+    }
+
+    pub fn late_bound_vars(self, id: HirId) -> &'tcx List<ty::BoundVariableKind> {
+        self.mk_bound_variable_kinds(
+            self.late_bound_vars_map(id.owner)
+                .and_then(|map| map.get(&id.local_id).cloned())
+                .unwrap_or_else(|| {
+                    bug!("No bound vars found for {:?} ({:?})", self.hir().node_to_string(id), id)
+                })
+                .iter()
+                .map(|b| match b {
+                    resolve_lifetime::Region::LateBound(_, _, def_id, _) => {
+                        let name = self
+                            .hir()
+                            .name(self.hir().local_def_id_to_hir_id(def_id.expect_local()));
+                        ty::BoundVariableKind::Region(ty::BrNamed(*def_id, name))
+                    }
+                    resolve_lifetime::Region::LateBoundAnon(_, _, anon_idx) => {
+                        ty::BoundVariableKind::Region(ty::BrAnon(*anon_idx))
+                    }
+                    _ => bug!(),
+                }),
+        )
     }
 }
 
