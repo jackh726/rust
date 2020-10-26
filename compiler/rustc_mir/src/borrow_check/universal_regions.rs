@@ -597,23 +597,28 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
                 let closure_sig = substs.as_closure().sig();
                 let inputs_and_output = closure_sig.inputs_and_output();
                 let closure_ty = tcx.closure_env_ty(def_id, substs).unwrap();
-                ty::Binder::fuse(closure_ty, inputs_and_output, |closure_ty, inputs_and_output| {
-                    // The "inputs" of the closure in the
-                    // signature appear as a tuple.  The MIR side
-                    // flattens this tuple.
-                    let (&output, tuplized_inputs) = inputs_and_output.split_last().unwrap();
-                    assert_eq!(tuplized_inputs.len(), 1, "multiple closure inputs");
-                    let inputs = match tuplized_inputs[0].kind() {
-                        ty::Tuple(inputs) => inputs,
-                        _ => bug!("closure inputs not a tuple: {:?}", tuplized_inputs[0]),
-                    };
+                ty::Binder::fuse(
+                    closure_ty,
+                    inputs_and_output,
+                    tcx,
+                    |closure_ty, inputs_and_output| {
+                        // The "inputs" of the closure in the
+                        // signature appear as a tuple.  The MIR side
+                        // flattens this tuple.
+                        let (&output, tuplized_inputs) = inputs_and_output.split_last().unwrap();
+                        assert_eq!(tuplized_inputs.len(), 1, "multiple closure inputs");
+                        let inputs = match tuplized_inputs[0].kind() {
+                            ty::Tuple(inputs) => inputs,
+                            _ => bug!("closure inputs not a tuple: {:?}", tuplized_inputs[0]),
+                        };
 
-                    tcx.mk_type_list(
-                        iter::once(closure_ty)
-                            .chain(inputs.iter().map(|k| k.expect_ty()))
-                            .chain(iter::once(output)),
-                    )
-                })
+                        tcx.mk_type_list(
+                            iter::once(closure_ty)
+                                .chain(inputs.iter().map(|k| k.expect_ty()))
+                                .chain(iter::once(output)),
+                        )
+                    },
+                )
             }
 
             DefiningTy::Generator(def_id, substs, movability) => {

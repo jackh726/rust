@@ -719,6 +719,7 @@ impl<'tcx> TyCtxt<'tcx> {
 pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
+    brenv: bool,
     visited: SsoHashSet<Ty<'tcx>>,
 }
 
@@ -727,6 +728,7 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         BoundVarsCollector {
             binder_index: ty::INNERMOST,
             vars: BTreeMap::new(),
+            brenv: false,
             visited: SsoHashSet::default(),
         }
     }
@@ -736,6 +738,12 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         (0..max).for_each(|i| {
             self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
         });
+        if self.brenv {
+            self.vars.insert(
+                self.vars.len() as u32,
+                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
+            );
+        }
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
     }
@@ -745,6 +753,12 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         (0..max).for_each(|i| {
             self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
         });
+        if self.brenv {
+            self.vars.insert(
+                self.vars.len() as u32,
+                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
+            );
+        }
 
         self.vars
     }
@@ -801,7 +815,7 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
                 },
 
                 ty::BrEnv => {
-                    // FIXME
+                    self.brenv = true;
                 }
             },
 
