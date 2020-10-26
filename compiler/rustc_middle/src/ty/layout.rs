@@ -2442,9 +2442,9 @@ impl<'tcx> ty::Instance<'tcx> {
                 let sig = substs.as_closure().sig();
 
                 let env_ty = tcx.closure_env_ty(def_id, substs).unwrap();
-                sig.map_bound(|sig| {
+                ty::Binder::fuse(env_ty, sig, tcx, |env_ty, sig| {
                     tcx.mk_fn_sig(
-                        iter::once(env_ty.skip_binder()).chain(sig.inputs().iter().cloned()),
+                        iter::once(env_ty).chain(sig.inputs().iter().cloned()),
                         sig.output(),
                         sig.c_variadic,
                         sig.unsafety,
