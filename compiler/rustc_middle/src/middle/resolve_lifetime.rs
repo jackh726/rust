@@ -88,4 +88,6 @@ pub struct ResolveLifetimes {
     /// to the trait object lifetime defaults computed from them.
     pub object_lifetime_defaults:
         FxHashMap<LocalDefId, FxHashMap<ItemLocalId, Vec<ObjectLifetimeDefault>>>,
+
+    pub late_bound_vars: FxHashMap<LocalDefId, FxHashMap<ItemLocalId, Vec<Region>>>,
 }
