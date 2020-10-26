@@ -84,8 +84,5 @@ pub struct ResolveLifetimes {
     /// (b) it DOES appear in the arguments.
     pub late_bound: FxHashMap<LocalDefId, FxHashSet<ItemLocalId>>,
 
-    /// For each type and trait definition, maps type parameters
-    /// to the trait object lifetime defaults computed from them.
-    pub object_lifetime_defaults:
-        FxHashMap<LocalDefId, FxHashMap<ItemLocalId, Vec<ObjectLifetimeDefault>>>,
+    pub late_bound_vars: FxHashMap<LocalDefId, FxHashMap<ItemLocalId, Vec<ty::BoundVariableKind>>>,
 }

@@ -1414,7 +1414,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 &[][..],
                 has_self,
                 self_ty,
-                arg_count,
+                &arg_count,
                 &mut CreateCtorSubstsContext {
                     fcx: self,
                     span,

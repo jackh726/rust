@@ -1692,6 +1692,7 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
                 }
                 None => AstConv::ty_of_fn(
                     &icx,
+                    hir_id,
                     sig.header.unsafety,
                     sig.header.abi,
                     &sig.decl,
@@ -1709,6 +1710,7 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
             ..
         }) => AstConv::ty_of_fn(
             &icx,
+            hir_id,
             header.unsafety,
             header.abi,
             decl,
@@ -2057,6 +2059,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
         match predicate {
             hir::WherePredicate::BoundPredicate(bound_pred) => {
                 let ty = icx.to_ty(&bound_pred.bounded_ty);
+                let bound_vars = icx.tcx.late_bound_vars(bound_pred.bounded_ty.hir_id);
 
                 // Keep the type around in a dummy predicate, in case of no bounds.
                 // That way, `where Ty:` is not a complete noop (see #53696) and `Ty`
@@ -2072,12 +2075,12 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                     } else {
                         let span = bound_pred.bounded_ty.span;
                         let re_root_empty = tcx.lifetimes.re_root_empty;
-                        let predicate = ty::Binder::bind(
+                        let predicate = ty::Binder::bind_with_vars(
                             ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(
                                 ty,
                                 re_root_empty,
                             )),
-                            tcx,
+                            bound_vars,
                         );
                         predicates.insert((predicate.to_predicate(tcx), span));
                     }
@@ -2095,10 +2098,12 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                             let mut bounds = Bounds::default();
                             let _ = AstConv::instantiate_poly_trait_ref(
                                 &icx,
-                                &poly_trait_ref,
+                                &poly_trait_ref.trait_ref,
+                                poly_trait_ref.span,
                                 constness,
                                 ty,
                                 &mut bounds,
+                                false,
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
@@ -2120,11 +2125,11 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                         hir::GenericBound::Outlives(lifetime) => {
                             let region = AstConv::ast_region_to_region(&icx, lifetime, None);
                             predicates.insert((
-                                ty::Binder::bind(
+                                ty::Binder::bind_with_vars(
                                     ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(
                                         ty, region,
                                     )),
-                                    tcx,
+                                    bound_vars,
                                 )
                                 .to_predicate(tcx),
                                 lifetime.span,
@@ -2346,7 +2351,14 @@ fn predicates_from_bound<'tcx>(
             };
 
             let mut bounds = Bounds::default();
-            let _ = astconv.instantiate_poly_trait_ref(tr, constness, param_ty, &mut bounds);
+            let _ = astconv.instantiate_poly_trait_ref(
+                &tr.trait_ref,
+                tr.span,
+                constness,
+                param_ty,
+                &mut bounds,
+                false,
+            );
             bounds.predicates(astconv.tcx(), param_ty)
         }
         hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => {
@@ -2382,8 +2394,10 @@ fn compute_sig_of_foreign_fn_decl<'tcx>(
     } else {
         hir::Unsafety::Unsafe
     };
+    let hir_id = tcx.hir().local_def_id_to_hir_id(def_id.expect_local());
     let fty = AstConv::ty_of_fn(
         &ItemCtxt::new(tcx, def_id),
+        hir_id,
         unsafety,
         abi,
         decl,
