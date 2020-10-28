@@ -416,11 +416,11 @@ fn virtual_call_violation_for_method<'tcx>(
     }
 
     for (i, input_ty) in sig.skip_binder().inputs()[1..].iter().enumerate() {
-        if contains_illegal_self_type_reference(tcx, trait_def_id, input_ty) {
+        if contains_illegal_self_type_reference(tcx, trait_def_id, sig.rebind(input_ty)) {
             return Some(MethodViolationCode::ReferencesSelfInput(i));
         }
     }
-    if contains_illegal_self_type_reference(tcx, trait_def_id, sig.output().skip_binder()) {
+    if contains_illegal_self_type_reference(tcx, trait_def_id, sig.output()) {
         return Some(MethodViolationCode::ReferencesSelfOutput);
     }
 
@@ -438,10 +438,14 @@ fn virtual_call_violation_for_method<'tcx>(
         // so outlives predicates will always hold.
         .cloned()
         .filter(|(p, _)| p.to_opt_type_outlives().is_none())
-        .collect::<Vec<_>>()
-        // Do a shallow visit so that `contains_illegal_self_type_reference`
-        // may apply it's custom visiting.
-        .visit_tys_shallow(|t| contains_illegal_self_type_reference(tcx, trait_def_id, t))
+        .any(|(p, _)| {
+            let bound_p = p.bound_atom();
+            // Do a shallow visit so that `contains_illegal_self_type_reference`
+            // may apply it's custom visiting.
+            bound_p.visit_tys_shallow(|t| {
+                contains_illegal_self_type_reference(tcx, trait_def_id, bound_p.rebind(t))
+            })
+        })
     {
         return Some(MethodViolationCode::WhereClauseReferencesSelf);
     }
@@ -723,7 +727,7 @@ fn receiver_is_dispatchable<'tcx>(
 fn contains_illegal_self_type_reference<'tcx>(
     tcx: TyCtxt<'tcx>,
     trait_def_id: DefId,
-    ty: Ty<'tcx>,
+    ty: ty::Binder<'tcx, Ty<'tcx>>,
 ) -> bool {
     // This is somewhat subtle. In general, we want to forbid
     // references to `Self` in the argument and return types,
@@ -768,7 +772,7 @@ fn contains_illegal_self_type_reference<'tcx>(
         tcx: TyCtxt<'tcx>,
         self_ty: Ty<'tcx>,
         trait_def_id: DefId,
-        supertraits: Option<Vec<ty::PolyTraitRef<'tcx>>>,
+        supertraits: Option<Vec<DefId>>,
     }
 
     impl<'tcx> TypeVisitor<'tcx> for IllegalSelfTypeVisitor<'tcx> {
@@ -780,11 +784,11 @@ fn contains_illegal_self_type_reference<'tcx>(
 
                     // Compute supertraits of current trait lazily.
                     if self.supertraits.is_none() {
-                        let trait_ref = ty::Binder::bind(
-                            ty::TraitRef::identity(self.tcx, self.trait_def_id),
-                            self.tcx,
+                        let trait_ref =
+                            ty::Binder::dummy(ty::TraitRef::identity(self.tcx, self.trait_def_id));
+                        self.supertraits = Some(
+                            traits::supertraits(self.tcx, trait_ref).map(|t| t.def_id()).collect(),
                         );
-                        self.supertraits = Some(traits::supertraits(self.tcx, trait_ref).collect());
                     }
 
                     // Determine whether the trait reference `Foo as
@@ -795,9 +799,11 @@ fn contains_illegal_self_type_reference<'tcx>(
                     // direct equality here because all of these types
                     // are part of the formal parameter listing, and
                     // hence there should be no inference variables.
-                    let projection_trait_ref = ty::Binder::bind(data.trait_ref(self.tcx), self.tcx);
-                    let is_supertrait_of_current_trait =
-                        self.supertraits.as_ref().unwrap().contains(&projection_trait_ref);
+                    let is_supertrait_of_current_trait = self
+                        .supertraits
+                        .as_ref()
+                        .unwrap()
+                        .contains(&data.trait_ref(self.tcx).def_id);
 
                     if is_supertrait_of_current_trait {
                         false // do not walk contained types, do not report error, do collect $200
