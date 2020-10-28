@@ -84,9 +84,9 @@ impl<'tcx> AutoTraitFinder<'tcx> {
     ) -> AutoTraitResult<A> {
         let tcx = self.tcx;
 
+        debug_assert!(!ty.has_escaping_bound_vars());
         let trait_ref = ty::TraitRef { def_id: trait_did, substs: tcx.mk_substs_trait(ty, &[]) };
-
-        let trait_pred = ty::Binder::bind(trait_ref, tcx);
+        let trait_pred = ty::Binder::dummy(trait_ref);
 
         let bail_out = tcx.infer_ctxt().enter(|infcx| {
             let mut selcx = SelectionContext::with_negative(&infcx, true);
@@ -282,15 +282,12 @@ impl AutoTraitFinder<'tcx> {
 
         let mut already_visited = FxHashSet::default();
         let mut predicates = VecDeque::new();
-        predicates.push_back(ty::Binder::bind(
-            ty::TraitPredicate {
-                trait_ref: ty::TraitRef {
-                    def_id: trait_did,
-                    substs: infcx.tcx.mk_substs_trait(ty, &[]),
-                },
+        predicates.push_back(ty::Binder::dummy(ty::TraitPredicate {
+            trait_ref: ty::TraitRef {
+                def_id: trait_did,
+                substs: infcx.tcx.mk_substs_trait(ty, &[]),
             },
-            tcx,
-        ));
+        }));
 
         let computed_preds = param_env.caller_bounds().iter();
         let mut user_computed_preds: FxHashSet<_> = user_env.caller_bounds().iter().collect();
