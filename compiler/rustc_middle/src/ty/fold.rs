@@ -733,10 +733,7 @@ impl<'tcx> BoundVarsCollector<'tcx> {
             self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
         });
         if self.brenv {
-            self.vars.insert(
-                self.vars.len() as u32,
-                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
-            );
+            self.vars.insert(self.vars.len() as u32, ty::BoundVariableKind::Region(ty::BrEnv));
         }
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
@@ -748,10 +745,7 @@ impl<'tcx> BoundVarsCollector<'tcx> {
             self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
         });
         if self.brenv {
-            self.vars.insert(
-                self.vars.len() as u32,
-                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
-            );
+            self.vars.insert(self.vars.len() as u32, ty::BoundVariableKind::Region(ty::BrEnv));
         }
 
         self.vars

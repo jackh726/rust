@@ -1106,8 +1106,8 @@ impl<'tcx, T> Binder<'tcx, T> {
                     }
                     // If we encounter a `BrEnv`, then we added it and it's not actually referenced by position
                     // It's last and we're done
-                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
-                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
+                    (BoundVariableKind::Region(ty::BrEnv), _) => break,
+                    (_, BoundVariableKind::Region(ty::BrEnv)) => break,
                     (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
                         debug_assert_eq!(region_a, region_b)
                     }
@@ -1119,15 +1119,15 @@ impl<'tcx, T> Binder<'tcx, T> {
         let self_has_env = self
             .bound_vars()
             .last()
-            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .map(|b| matches!(b, BoundVariableKind::Region(ty::BrEnv)))
             .unwrap_or(false);
         let u_has_env = u
             .bound_vars()
             .last()
-            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .map(|b| matches!(b, BoundVariableKind::Region(ty::BrEnv)))
             .unwrap_or(false);
         let env_iter = if u_has_env && !self_has_env {
-            Some(BoundVariableKind::Region(BoundRegion::BrEnv)).into_iter()
+            Some(BoundVariableKind::Region(ty::BrEnv)).into_iter()
         } else {
             None.into_iter()
         };

@@ -2015,16 +2015,13 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                                             traits::ObligationCauseCode::RepeatVec(should_suggest),
                                         ),
                                         self.param_env,
-                                        ty::Binder::bind(
-                                            ty::TraitRef::new(
-                                                self.tcx().require_lang_item(
-                                                    LangItem::Copy,
-                                                    Some(self.last_span),
-                                                ),
-                                                tcx.mk_substs_trait(ty, &[]),
+                                        ty::Binder::dummy(ty::TraitRef::new(
+                                            self.tcx().require_lang_item(
+                                                LangItem::Copy,
+                                                Some(self.last_span),
                                             ),
-                                            tcx,
-                                        )
+                                            tcx.mk_substs_trait(ty, &[]),
+                                        ))
                                         .without_const()
                                         .to_predicate(self.tcx()),
                                     ),

@@ -513,9 +513,8 @@ impl<'tcx> TyCtxt<'tcx> {
             ty::ClosureKind::FnMut => self.mk_mut_ref(self.mk_region(env_region), closure_ty),
             ty::ClosureKind::FnOnce => closure_ty,
         };
-        let bound_vars = self.mk_bound_variable_kinds(
-            Some(ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv)).into_iter(),
-        );
+        let bound_vars = self
+            .mk_bound_variable_kinds(Some(ty::BoundVariableKind::Region(ty::BrEnv)).into_iter());
         Some(ty::Binder::bind_with_vars(env_ty, bound_vars))
     }
 
