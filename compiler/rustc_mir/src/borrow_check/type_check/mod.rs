@@ -2004,6 +2004,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                             debug!("check_rvalue: should_suggest={:?}", should_suggest);
 
                             let def_id = body.source.def_id().expect_local();
+                            debug_assert!(!ty.has_escaping_bound_vars());
                             self.infcx.report_selection_error(
                                 &traits::Obligation::new(
                                     ObligationCause::new(
@@ -2012,16 +2013,13 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                                         traits::ObligationCauseCode::RepeatVec(should_suggest),
                                     ),
                                     self.param_env,
-                                    ty::Binder::bind(
-                                        ty::TraitRef::new(
-                                            self.tcx().require_lang_item(
-                                                LangItem::Copy,
-                                                Some(self.last_span),
-                                            ),
-                                            tcx.mk_substs_trait(ty, &[]),
+                                    ty::Binder::dummy(ty::TraitRef::new(
+                                        self.tcx().require_lang_item(
+                                            LangItem::Copy,
+                                            Some(self.last_span),
                                         ),
-                                        tcx,
-                                    )
+                                        tcx.mk_substs_trait(ty, &[]),
+                                    ))
                                     .to_poly_trait_predicate()
                                     .without_const()
                                     .to_predicate(self.tcx()),
