@@ -1004,22 +1004,6 @@ where
         }
     }
 
-    /// Wraps a `value` in a binder, using the same bound variables as the
-    /// current `Binder`. This should not be used if the new value *changes*
-    /// the bound variables. Note: the (old or new) value itself does not
-    /// necessarily need to *name* all the bound variables.
-    ///
-    /// This currently doesn't do anything different than `bind`, because we
-    /// don't actually track bound vars. However, semantically, it is different
-    /// because bound vars aren't allowed to change here, whereas they are
-    /// in `bind`. This may be (debug) asserted in the future.
-    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U>
-    where
-        U: TypeFoldable<'tcx>,
-    {
-        Binder(value, self.1)
-    }
-
     /// Like `rebind`, but will debug assert that bound vars are compatible
     pub fn rebind_checked<U>(&self, value: U) -> Binder<'tcx, U>
     where
@@ -1097,6 +1081,22 @@ impl<'tcx, T> Binder<'tcx, T> {
         F: FnOnce(T) -> U,
     {
         Binder(f(self.0), self.1)
+    }
+
+    /// Wraps a `value` in a binder, using the same bound variables as the
+    /// current `Binder`. This should not be used if the new value *changes*
+    /// the bound variables. Note: the (old or new) value itself does not
+    /// necessarily need to *name* all the bound variables.
+    ///
+    /// This currently doesn't do anything different than `bind`, because we
+    /// don't actually track bound vars. However, semantically, it is different
+    /// because bound vars aren't allowed to change here, whereas they are
+    /// in `bind`. This may be (debug) asserted in the future.
+    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U>
+    where
+        U: TypeFoldable<'tcx>,
+    {
+        Binder(value, self.1)
     }
 
     /// Unwraps and returns the value within, but only if it contains
