@@ -1152,9 +1152,9 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
     ) -> DiagnosticBuilder<'tcx> {
         crate fn build_fn_sig_string<'tcx>(
             tcx: TyCtxt<'tcx>,
-            trait_ref: ty::TraitRef<'tcx>,
+            trait_ref: ty::PolyTraitRef<'tcx>,
         ) -> String {
-            let inputs = trait_ref.substs.type_at(1);
+            let inputs = trait_ref.skip_binder().substs.type_at(1);
             let sig = if let ty::Tuple(inputs) = inputs.kind() {
                 tcx.mk_fn_sig(
                     inputs.iter().map(|k| k.expect_ty()),
@@ -1172,7 +1172,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                     abi::Abi::Rust,
                 )
             };
-            ty::Binder::bind(sig, tcx).to_string()
+            trait_ref.rebind(sig).to_string()
         }
 
         let argument_is_closure = expected_ref.skip_binder().substs.type_at(0).is_closure();
@@ -1184,17 +1184,12 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             if argument_is_closure { "closure" } else { "function" }
         );
 
-        let found_str = format!(
-            "expected signature of `{}`",
-            build_fn_sig_string(self.tcx, found.skip_binder())
-        );
+        let found_str = format!("expected signature of `{}`", build_fn_sig_string(self.tcx, found));
         err.span_label(span, found_str);
 
         let found_span = found_span.unwrap_or(span);
-        let expected_str = format!(
-            "found signature of `{}`",
-            build_fn_sig_string(self.tcx, expected_ref.skip_binder())
-        );
+        let expected_str =
+            format!("found signature of `{}`", build_fn_sig_string(self.tcx, expected_ref));
         err.span_label(found_span, expected_str);
 
         err
