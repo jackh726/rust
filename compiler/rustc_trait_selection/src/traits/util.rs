@@ -6,7 +6,7 @@ use smallvec::SmallVec;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::subst::{GenericArg, Subst, SubstsRef};
-use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, WithConstness};
+use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable, WithConstness};
 
 use super::{Normalized, Obligation, ObligationCause, PredicateObligation, SelectionContext};
 pub use rustc_infer::traits::util::*;
@@ -330,6 +330,7 @@ pub fn closure_trait_ref_and_return_type(
     sig: ty::PolyFnSig<'tcx>,
     tuple_arguments: TupleArgumentsFlag,
 ) -> ty::Binder<'tcx, (ty::TraitRef<'tcx>, Ty<'tcx>)> {
+    debug_assert!(!self_ty.has_escaping_bound_vars());
     let arguments_tuple = match tuple_arguments {
         TupleArgumentsFlag::No => sig.skip_binder().inputs()[0],
         TupleArgumentsFlag::Yes => tcx.intern_tup(sig.skip_binder().inputs()),
@@ -338,7 +339,7 @@ pub fn closure_trait_ref_and_return_type(
         def_id: fn_trait_def_id,
         substs: tcx.mk_substs_trait(self_ty, &[arguments_tuple.into()]),
     };
-    ty::Binder::bind((trait_ref, sig.skip_binder().output()), tcx)
+    sig.rebind((trait_ref, sig.skip_binder().output()))
 }
 
 pub fn generator_trait_ref_and_outputs(
@@ -347,11 +348,12 @@ pub fn generator_trait_ref_and_outputs(
     self_ty: Ty<'tcx>,
     sig: ty::PolyGenSig<'tcx>,
 ) -> ty::Binder<'tcx, (ty::TraitRef<'tcx>, Ty<'tcx>, Ty<'tcx>)> {
+    debug_assert!(!self_ty.has_escaping_bound_vars());
     let trait_ref = ty::TraitRef {
         def_id: fn_trait_def_id,
         substs: tcx.mk_substs_trait(self_ty, &[sig.skip_binder().resume_ty.into()]),
     };
-    ty::Binder::bind((trait_ref, sig.skip_binder().yield_ty, sig.skip_binder().return_ty), tcx)
+    sig.rebind((trait_ref, sig.skip_binder().yield_ty, sig.skip_binder().return_ty))
 }
 
 pub fn impl_item_is_final(tcx: TyCtxt<'_>, assoc_item: &ty::AssocItem) -> bool {
