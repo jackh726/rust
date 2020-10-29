@@ -503,7 +503,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 let (supplied_ty, _) = self.infcx.replace_bound_vars_with_fresh_vars(
                     hir_ty.span,
                     LateBoundRegionConversionTime::FnCall,
-                    ty::Binder::bind(supplied_ty, self.infcx.tcx),
+                    supplied_sig.inputs().rebind(supplied_ty),
                 ); // recreated from (*) above
 
                 // Check that E' = S'.
@@ -709,16 +709,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             astconv.ast_ty_to_ty(&output);
         }
 
-        let result = ty::Binder::bind(
-            self.tcx.mk_fn_sig(
-                supplied_arguments,
-                self.tcx.ty_error(),
-                decl.c_variadic,
-                hir::Unsafety::Normal,
-                Abi::RustCall,
-            ),
-            self.tcx,
-        );
+        let result = ty::Binder::dummy(self.tcx.mk_fn_sig(
+            supplied_arguments,
+            self.tcx.ty_error(),
+            decl.c_variadic,
+            hir::Unsafety::Normal,
+            Abi::RustCall,
+        ));
 
         debug!("supplied_sig_of_closure: result={:?}", result);
 
