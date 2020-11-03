@@ -15,6 +15,7 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::{AsyncGeneratorKind, GeneratorKind, Node};
+use rustc_middle::ty::fold::BoundVarsCollector;
 use rustc_middle::ty::{
     self, suggest_constraining_type_param, AdtKind, DefIdTree, Infer, InferTy, ToPredicate, Ty,
     TyCtxt, TypeFoldable, WithConstness,
@@ -1416,7 +1417,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             // generator frame. Bound regions are preserved by
             // `erase_regions` and so we must also call
             // `erase_late_bound_regions`.
-            let ty_erased = self.tcx.erase_late_bound_regions(&ty::Binder::bind(ty, self.tcx));
+            let ty_erased = self.tcx.erase_late_bound_regions(&ty);
             let ty_erased = self.tcx.erase_regions(&ty_erased);
             let eq = ty::TyS::same_type(ty_erased, target_ty_erased);
             debug!(
@@ -1434,7 +1435,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             interior_or_upvar_span = upvars.iter().find_map(|(upvar_id, upvar)| {
                 let upvar_ty = typeck_results.node_type(*upvar_id);
                 let upvar_ty = self.resolve_vars_if_possible(&upvar_ty);
-                if ty_matches(&upvar_ty) {
+                if ty_matches(ty::Binder::bind(upvar_ty, self.tcx)) {
                     Some(GeneratorInteriorOrUpvar::Upvar(upvar.span))
                 } else {
                     None
@@ -1442,10 +1443,16 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
             });
         };
 
+        // The generator interior types share the same binders
+        let mut collector = BoundVarsCollector::new();
+        typeck_results.generator_interior_types.visit_with(&mut collector);
+        let vars = collector.into_vars(self.tcx);
         typeck_results
             .generator_interior_types
             .iter()
-            .find(|ty::GeneratorInteriorTypeCause { ty, .. }| ty_matches(ty))
+            .find(|ty::GeneratorInteriorTypeCause { ty, .. }| {
+                ty_matches(ty::Binder::bind_with_vars(ty, vars))
+            })
             .map(|cause| {
                 // Check to see if any awaited expressions have the target type.
                 let from_awaited_ty = visitor
@@ -1458,7 +1465,7 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
                             "maybe_note_obligation_cause_for_async_await: await_expr={:?}",
                             await_expr
                         );
-                        ty_matches(ty)
+                        ty_matches(ty::Binder::bind(ty, self.tcx))
                     })
                     .map(|expr| expr.span);
                 let ty::GeneratorInteriorTypeCause { span, scope_span, yield_span, expr, .. } =
