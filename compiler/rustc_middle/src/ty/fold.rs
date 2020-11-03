@@ -723,7 +723,7 @@ pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
     brenv: bool,
-    visited: SsoHashSet<Ty<'tcx>>,
+    visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
 }
 
 impl<'tcx> BoundVarsCollector<'tcx> {
@@ -732,15 +732,18 @@ impl<'tcx> BoundVarsCollector<'tcx> {
             binder_index: ty::INNERMOST,
             vars: BTreeMap::new(),
             brenv: false,
+            // We may encounter the same variable at different levels of binding
             visited: SsoHashSet::default(),
         }
     }
 
     pub fn into_vars(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
         let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
-        (0..max).for_each(|i| {
-            self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
-        });
+        for i in 0..max {
+            if let None = self.vars.get(&i) {
+                panic!("Unknown variable: {:?}", i);
+            }
+        }
         if self.brenv {
             self.vars.insert(
                 self.vars.len() as u32,
@@ -751,16 +754,10 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
     }
 
-    pub fn into_inner(mut self) -> BTreeMap<u32, ty::BoundVariableKind> {
-        let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
-        (0..max).for_each(|i| {
-            self.vars.entry(i).or_insert(ty::BoundVariableKind::Unknown);
-        });
+    pub(crate) fn into_inner(mut self) -> BTreeMap<u32, ty::BoundVariableKind> {
+        let env = self.vars.iter().map(|(k, _)| *k + 1).max().unwrap_or_else(|| 0);
         if self.brenv {
-            self.vars.insert(
-                self.vars.len() as u32,
-                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
-            );
+            self.vars.insert(env as u32, ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv));
         }
 
         self.vars
@@ -781,7 +778,9 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
     }
 
     fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
-        if t.outer_exclusive_binder < self.binder_index || !self.visited.insert(t) {
+        if t.outer_exclusive_binder < self.binder_index
+            || !self.visited.insert((self.binder_index, t))
+        {
             return ControlFlow::CONTINUE;
         }
         use std::collections::btree_map::Entry;
