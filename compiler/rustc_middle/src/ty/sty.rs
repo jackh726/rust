@@ -956,7 +956,6 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable)]
 pub enum BoundVariableKind {
-    Unknown,
     Ty(BoundTyKind),
     Region(BoundRegionKind),
     Const,
@@ -1100,7 +1099,6 @@ impl<'tcx, T> Binder<'tcx, T> {
         if cfg!(debug_assertions) {
             for (var_a, var_b) in self.1.iter().zip(u.1.iter()) {
                 match (var_a, var_b) {
-                    (BoundVariableKind::Unknown, _) | (_, BoundVariableKind::Unknown) => continue,
                     (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
                         debug_assert_eq!(kind_a, kind_b)
                     }
