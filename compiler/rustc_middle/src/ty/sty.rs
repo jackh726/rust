@@ -976,7 +976,6 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable)]
 pub enum BoundVariableKind {
-    Unknown,
     Ty(BoundTyKind),
     Region(BoundRegion),
     Const,
@@ -1038,20 +1037,21 @@ where
             value.visit_with(&mut collector);
             let new_var_map = collector.into_inner();
             for (i, var_a) in self.1.iter().enumerate() {
-                let var_b = new_var_map.get(&(i as u32)).unwrap_or(&BoundVariableKind::Unknown);
-                match (var_a, *var_b) {
-                    (BoundVariableKind::Unknown, _) | (_, BoundVariableKind::Unknown) => continue,
-                    (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
-                        debug_assert_eq!(kind_a, kind_b)
+                let var_b = new_var_map.get(&(i as u32)).map(Some).unwrap_or(None);
+                match (var_a, var_b) {
+                    (_, None) => continue,
+                    (BoundVariableKind::Ty(kind_a), Some(BoundVariableKind::Ty(kind_b))) => {
+                        debug_assert_eq!(kind_a, *kind_b)
                     }
                     // If we encounter a `BrEnv`, then we added it and it's not actually referenced by position
                     // It's last and we're done
                     (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
-                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
-                    (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
-                        debug_assert_eq!(region_a, region_b)
-                    }
-                    (BoundVariableKind::Const, BoundVariableKind::Const) => continue,
+                    (_, Some(BoundVariableKind::Region(BoundRegion::BrEnv))) => break,
+                    (
+                        BoundVariableKind::Region(region_a),
+                        Some(BoundVariableKind::Region(region_b)),
+                    ) => debug_assert_eq!(region_a, *region_b),
+                    (BoundVariableKind::Const, Some(BoundVariableKind::Const)) => continue,
                     (_, _) => panic!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
                 }
             }
@@ -1154,7 +1154,6 @@ impl<'tcx, T> Binder<'tcx, T> {
         if cfg!(debug_assertions) {
             for (var_a, var_b) in self.1.iter().zip(u.1.iter()) {
                 match (var_a, var_b) {
-                    (BoundVariableKind::Unknown, _) | (_, BoundVariableKind::Unknown) => continue,
                     (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
                         debug_assert_eq!(kind_a, kind_b)
                     }
