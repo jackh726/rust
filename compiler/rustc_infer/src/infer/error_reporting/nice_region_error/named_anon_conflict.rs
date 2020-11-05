@@ -23,7 +23,7 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
         // only introduced anonymous regions in parameters) as well as a
         // version new_ty of its type where the anonymous region is replaced
         // with the named one.
-        let (named, anon, anon_param_info, region_info) = if sub.has_name()
+        let (named, anon, anon_param_info, region_info) = if sub.has_name(ty::List::empty())
             && self.tcx().is_suitable_region(sup).is_some()
             && self.find_param_with_region(sup, sub).is_some()
         {
@@ -33,7 +33,7 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
                 self.find_param_with_region(sup, sub).unwrap(),
                 self.tcx().is_suitable_region(sup).unwrap(),
             )
-        } else if sup.has_name()
+        } else if sup.has_name(ty::List::empty())
             && self.tcx().is_suitable_region(sub).is_some()
             && self.find_param_with_region(sub, sup).is_some()
         {

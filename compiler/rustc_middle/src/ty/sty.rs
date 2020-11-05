@@ -62,6 +62,16 @@ pub enum BoundRegion {
 }
 
 impl BoundRegion {
+    pub fn extract_bound<'a, 'tcx: 'a>(
+        &'a self,
+        binders: &'tcx List<BoundVariableKind>,
+    ) -> &'a Self {
+        match self {
+            BoundRegion::BrAnon(idx) => binders[*idx as usize].expect_region(),
+            _ => self,
+        }
+    }
+
     pub fn is_named(&self) -> bool {
         match *self {
             BoundRegion::BrNamed(_, name) => name != kw::UnderscoreLifetime,
@@ -981,6 +991,15 @@ pub enum BoundVariableKind {
     Const,
 }
 
+impl BoundVariableKind {
+    fn expect_region(&self) -> &BoundRegion {
+        match self {
+            BoundVariableKind::Region(region) => region,
+            _ => bug!(),
+        }
+    }
+}
+
 /// Binder is a binder for higher-ranked lifetimes or types. It is part of the
 /// compiler's representation for things like `for<'a> Fn(&'a isize)`
 /// (which would be represented by the type `PolyTraitRef ==
@@ -1036,23 +1055,21 @@ where
             let mut collector = BoundVarsCollector::new();
             value.visit_with(&mut collector);
             let new_var_map = collector.into_inner();
-            for (i, var_a) in self.1.iter().enumerate() {
-                let var_b = new_var_map.get(&(i as u32)).map(Some).unwrap_or(None);
-                match (var_a, var_b) {
-                    (_, None) => continue,
-                    (BoundVariableKind::Ty(kind_a), Some(BoundVariableKind::Ty(kind_b))) => {
+            // The previous bound variables don't need to be in the new type,
+            // but any that are need to be compatible.
+            for (i, var_a) in new_var_map.iter() {
+                let var_b = self.1.get(*i as usize).unwrap_or_else(|| {
+                    bug!("{:?} (from {:?}) not found in {:?}", var_a, value, self.1)
+                });
+                match (*var_a, var_b) {
+                    (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
                         debug_assert_eq!(kind_a, *kind_b)
                     }
-                    // If we encounter a `BrEnv`, then we added it and it's not actually referenced by position
-                    // It's last and we're done
-                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
-                    (_, Some(BoundVariableKind::Region(BoundRegion::BrEnv))) => break,
-                    (
-                        BoundVariableKind::Region(region_a),
-                        Some(BoundVariableKind::Region(region_b)),
-                    ) => debug_assert_eq!(region_a, *region_b),
-                    (BoundVariableKind::Const, Some(BoundVariableKind::Const)) => continue,
-                    (_, _) => panic!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
+                    (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
+                        debug_assert_eq!(region_a, *region_b)
+                    }
+                    (BoundVariableKind::Const, BoundVariableKind::Const) => continue,
+                    (_, _) => bug!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
                 }
             }
         }
@@ -1151,35 +1168,41 @@ impl<'tcx, T> Binder<'tcx, T> {
     where
         F: FnOnce(T, U) -> R,
     {
+        // No matter the order, we want to bind the *most* variables.
+        let (longer, shorter) =
+            if self.1.len() >= u.1.len() { (self.1, u.1) } else { (u.1, self.1) };
         if cfg!(debug_assertions) {
-            for (var_a, var_b) in self.1.iter().zip(u.1.iter()) {
+            // We want to verify that the bound variables are compatible
+            for (var_a, var_b) in longer.iter().zip(shorter.iter()) {
                 match (var_a, var_b) {
+                    // If we reach encounter a `BrEnv` in either list, then
+                    // we know this is the end of the list, so we can break.
+                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
+                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
+                    // Otherwise, ensure the bound vars are the same
                     (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
                         debug_assert_eq!(kind_a, kind_b)
                     }
-                    // If we encounter a `BrEnv`, then we added it and it's not actually referenced by position
-                    // It's last and we're done
-                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
-                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
                     (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
                         debug_assert_eq!(region_a, region_b)
                     }
                     (BoundVariableKind::Const, BoundVariableKind::Const) => continue,
+                    // Or it's wrong
                     (_, _) => panic!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
                 }
             }
         }
-        let self_has_env = self
-            .bound_vars()
+        // `BrEnv`s are special, because we don't actually *refer* to them from
+        // the type from by position. So, no matter where they are, we can bind.
+        let longer_has_env = longer
             .last()
             .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
             .unwrap_or(false);
-        let u_has_env = u
-            .bound_vars()
+        let shorter_has_env = shorter
             .last()
             .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
             .unwrap_or(false);
-        let env_iter = if u_has_env && !self_has_env {
+        let env_iter = if shorter_has_env && !longer_has_env {
             Some(BoundVariableKind::Region(BoundRegion::BrEnv)).into_iter()
         } else {
             None.into_iter()
@@ -1776,10 +1799,10 @@ impl DebruijnIndex {
 /// Region utilities
 impl RegionKind {
     /// Is this region named by the user?
-    pub fn has_name(&self) -> bool {
+    pub fn has_name(&self, binders: &List<BoundVariableKind>) -> bool {
         match *self {
             RegionKind::ReEarlyBound(ebr) => ebr.has_name(),
-            RegionKind::ReLateBound(_, br) => br.is_named(),
+            RegionKind::ReLateBound(_, br) => br.extract_bound(binders).is_named(),
             RegionKind::ReFree(fr) => fr.bound_region.is_named(),
             RegionKind::ReStatic => true,
             RegionKind::ReVar(..) => false,
