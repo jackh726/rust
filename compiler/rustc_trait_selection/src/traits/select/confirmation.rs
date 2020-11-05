@@ -259,10 +259,16 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     ) -> ImplSourceAutoImplData<PredicateObligation<'tcx>> {
         debug!(?obligation, ?trait_def_id, "confirm_auto_impl_candidate");
 
-        let types = obligation.predicate.map_bound(|inner| {
-            let self_ty = self.infcx.shallow_resolve(inner.self_ty());
-            self.constituent_types_for_ty(self_ty)
-        });
+        let self_ty = self.infcx.shallow_resolve(obligation.predicate.skip_binder().self_ty());
+        // Really, this is only wrapped in a `Binder` because of `GeneratorWitness`
+        // In that case, we don't expect outer binders
+        let constituent_types = self.constituent_types_for_ty(self_ty);
+        let types = ty::Binder::fuse(
+            constituent_types,
+            obligation.predicate,
+            self.infcx.tcx,
+            |types, _| types,
+        );
         self.vtable_auto_impl(obligation, trait_def_id, types)
     }
 
