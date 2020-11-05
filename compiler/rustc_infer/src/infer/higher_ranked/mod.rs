@@ -81,6 +81,13 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         let next_universe = self.universe().next_universe();
 
         let fld_r = |br| {
+            let br = match br {
+                ty::BoundRegion::BrAnon(idx) => match binder.bound_vars()[idx as usize] {
+                    ty::BoundVariableKind::Region(r) => r,
+                    _ => bug!(),
+                },
+                _ => br,
+            };
             self.tcx.mk_region(ty::RePlaceholder(ty::PlaceholderRegion {
                 universe: next_universe,
                 name: br,

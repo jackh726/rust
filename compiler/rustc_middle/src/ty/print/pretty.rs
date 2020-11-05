@@ -1803,6 +1803,15 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
     {
         struct LateBoundRegionNameCollector<'a>(&'a mut FxHashSet<Symbol>);
         impl<'tcx> ty::fold::TypeVisitor<'tcx> for LateBoundRegionNameCollector<'_> {
+            fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &ty::Binder<'tcx, T>) -> bool {
+                for b in t.bound_vars() {
+                    if let ty::BoundVariableKind::Region(ty::BrNamed(_, name)) = b {
+                        self.0.insert(name);
+                    }
+                }
+                t.as_ref().skip_binder().visit_with(self)
+            }
+
             fn visit_region(&mut self, r: ty::Region<'tcx>) -> bool {
                 if let ty::ReLateBound(_, ty::BrNamed(_, name)) = *r {
                     self.0.insert(name);

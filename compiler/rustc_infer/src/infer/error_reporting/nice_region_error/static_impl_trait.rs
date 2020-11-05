@@ -40,7 +40,7 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
                 // This is for an implicit `'static` requirement coming from `impl dyn Trait {}`.
                 if let ObligationCauseCode::UnifyReceiver(ctxt) = &cause.code {
                     let param = self.find_param_with_region(sup_r, sub_r)?;
-                    let lifetime = if sup_r.has_name() {
+                    let lifetime = if sup_r.has_name(ty::List::empty()) {
                         format!("lifetime `{}`", sup_r)
                     } else {
                         "an anonymous lifetime `'_`".to_string()
@@ -94,7 +94,7 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
         let sp = var_origin.span();
         let return_sp = sub_origin.span();
         let param = self.find_param_with_region(sup_r, sub_r)?;
-        let (lifetime_name, lifetime) = if sup_r.has_name() {
+        let (lifetime_name, lifetime) = if sup_r.has_name(ty::List::empty()) {
             (sup_r.to_string(), format!("lifetime `{}`", sup_r))
         } else {
             ("'_".to_owned(), "an anonymous lifetime `'_`".to_string())

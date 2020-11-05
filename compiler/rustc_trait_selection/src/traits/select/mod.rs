@@ -37,7 +37,7 @@ use rustc_middle::ty::fast_reject;
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::relate::TypeRelation;
 use rustc_middle::ty::subst::{GenericArgKind, Subst, SubstsRef};
-use rustc_middle::ty::{self, PolyProjectionPredicate, ToPolyTraitRef, ToPredicate};
+use rustc_middle::ty::{self, Binder, PolyProjectionPredicate, ToPolyTraitRef, ToPredicate};
 use rustc_middle::ty::{Ty, TyCtxt, TypeFoldable, WithConstness};
 use rustc_span::symbol::sym;
 
@@ -1640,7 +1640,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     /// Bar<i32> where struct Bar<T> { x: T, y: u32 } -> [i32, u32]
     /// Zed<i32> where enum Zed { A(T), B(u32) } -> [i32, u32]
     /// ```
-    fn constituent_types_for_ty(&self, t: Ty<'tcx>) -> Vec<Ty<'tcx>> {
+    fn constituent_types_for_ty(&self, t: Ty<'tcx>) -> Binder<'tcx, Vec<Ty<'tcx>>> {
         match *t.kind() {
             ty::Uint(_)
             | ty::Int(_)
@@ -1652,7 +1652,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             | ty::Error(_)
             | ty::Infer(ty::IntVar(_) | ty::FloatVar(_))
             | ty::Never
-            | ty::Char => Vec::new(),
+            | ty::Char => Binder::dummy(Vec::new()),
 
             ty::Placeholder(..)
             | ty::Dynamic(..)
@@ -1665,44 +1665,48 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             }
 
             ty::RawPtr(ty::TypeAndMut { ty: element_ty, .. }) | ty::Ref(_, element_ty, _) => {
-                vec![element_ty]
+                Binder::dummy(vec![element_ty])
             }
 
-            ty::Array(element_ty, _) | ty::Slice(element_ty) => vec![element_ty],
+            ty::Array(element_ty, _) | ty::Slice(element_ty) => Binder::dummy(vec![element_ty]),
 
             ty::Tuple(ref tys) => {
                 // (T1, ..., Tn) -- meets any bound that all of T1...Tn meet
-                tys.iter().map(|k| k.expect_ty()).collect()
+                Binder::dummy(tys.iter().map(|k| k.expect_ty()).collect())
             }
 
             ty::Closure(_, ref substs) => {
                 let ty = self.infcx.shallow_resolve(substs.as_closure().tupled_upvars_ty());
-                vec![ty]
+                Binder::dummy(vec![ty])
             }
 
             ty::Generator(_, ref substs, _) => {
                 let ty = self.infcx.shallow_resolve(substs.as_generator().tupled_upvars_ty());
                 let witness = substs.as_generator().witness();
-                vec![ty].into_iter().chain(iter::once(witness)).collect()
+                Binder::dummy(vec![ty].into_iter().chain(iter::once(witness)).collect())
             }
 
             ty::GeneratorWitness(types) => {
                 // This is sound because no regions in the witness can refer to
                 // the binder outside the witness. So we'll effectivly reuse
                 // the implicit binder around the witness.
-                types.skip_binder().to_vec()
+                types.rebind(types.skip_binder().to_vec())
             }
 
             // For `PhantomData<T>`, we pass `T`.
-            ty::Adt(def, substs) if def.is_phantom_data() => substs.types().collect(),
+            ty::Adt(def, substs) if def.is_phantom_data() => {
+                Binder::dummy(substs.types().collect())
+            }
 
-            ty::Adt(def, substs) => def.all_fields().map(|f| f.ty(self.tcx(), substs)).collect(),
+            ty::Adt(def, substs) => {
+                Binder::dummy(def.all_fields().map(|f| f.ty(self.tcx(), substs)).collect())
+            }
 
             ty::Opaque(def_id, substs) => {
                 // We can resolve the `impl Trait` to its concrete type,
                 // which enforces a DAG between the functions requiring
                 // the auto trait bounds in question.
-                vec![self.tcx().type_of(def_id).subst(self.tcx(), substs)]
+                Binder::dummy(vec![self.tcx().type_of(def_id).subst(self.tcx(), substs)])
             }
         }
     }
@@ -1734,7 +1738,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             .skip_binder() // binder moved -\
             .iter()
             .flat_map(|ty| {
-                let ty: ty::Binder<'tcx, Ty<'tcx>> = binders.rebind(ty); // <----/
+                let ty: ty::Binder<'tcx, Ty<'tcx>> = binders.rebind_checked(ty); // <----/
 
                 self.infcx.commit_unconditionally(|_| {
                     let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(&ty);
