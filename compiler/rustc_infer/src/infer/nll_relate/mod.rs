@@ -176,6 +176,13 @@ where
                         universe
                     });
 
+                    let br = match br {
+                        ty::BoundRegion::BrAnon(idx) => match value.bound_vars()[idx as usize] {
+                            ty::BoundVariableKind::Region(r) => r,
+                            _ => bug!(),
+                        },
+                        _ => br,
+                    };
                     let placeholder = ty::PlaceholderRegion { universe, name: br };
                     delegate.next_placeholder_region(placeholder)
                 } else {

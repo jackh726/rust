@@ -598,10 +598,10 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
                 let inputs_and_output = closure_sig.inputs_and_output();
                 let closure_ty = tcx.closure_env_ty(def_id, substs).unwrap();
                 ty::Binder::fuse(
-                    closure_ty,
                     inputs_and_output,
+                    closure_ty,
                     tcx,
-                    |closure_ty, inputs_and_output| {
+                    |inputs_and_output, closure_ty| {
                         // The "inputs" of the closure in the
                         // signature appear as a tuple.  The MIR side
                         // flattens this tuple.
@@ -701,7 +701,15 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
             "replace_bound_regions_with_nll_infer_vars(value={:?}, all_outlive_scope={:?})",
             value, all_outlive_scope,
         );
+        let bound_vars = value.bound_vars();
         let (value, _map) = self.tcx.replace_late_bound_regions(value, |br| {
+            let br = match br {
+                ty::BoundRegion::BrAnon(idx) => match bound_vars[idx as usize] {
+                    ty::BoundVariableKind::Region(r) => r,
+                    _ => bug!(),
+                },
+                _ => br,
+            };
             debug!("replace_bound_regions_with_nll_infer_vars: br={:?}", br);
             let liberated_region = self.tcx.mk_region(ty::ReFree(ty::FreeRegion {
                 scope: all_outlive_scope.to_def_id(),
