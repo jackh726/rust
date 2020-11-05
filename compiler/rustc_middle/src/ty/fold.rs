@@ -635,6 +635,13 @@ impl<'tcx> TyCtxt<'tcx> {
         T: TypeFoldable<'tcx>,
     {
         self.replace_late_bound_regions(value, |br| {
+            let br = match br {
+                ty::BoundRegion::BrAnon(idx) => match value.bound_vars()[idx as usize] {
+                    ty::BoundVariableKind::Region(r) => r,
+                    _ => bug!(),
+                },
+                _ => br,
+            };
             self.mk_region(ty::ReFree(ty::FreeRegion {
                 scope: all_outlive_scope,
                 bound_region: br,
