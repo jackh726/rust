@@ -7,6 +7,7 @@ use self::TyKind::*;
 
 use crate::infer::canonical::Canonical;
 use crate::ty::fold::BoundVarsCollector;
+use crate::ty::fold::ValidateBoundVars;
 use crate::ty::subst::{GenericArg, InternalSubsts, Subst, SubstsRef};
 use crate::ty::{
     self, AdtDef, DefIdTree, Discr, Ty, TyCtxt, TypeFlags, TypeFoldable, WithConstness,
@@ -64,20 +65,8 @@ pub enum BoundRegionKind {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, TyEncodable, TyDecodable, Debug, PartialOrd, Ord)]
 #[derive(HashStable)]
 pub struct BoundRegion {
+    pub var: BoundVar,
     pub kind: BoundRegionKind,
-}
-
-impl BoundRegion {
-    /// When canonicalizing, we replace unbound inference variables and free
-    /// regions with anonymous late bound regions. This method asserts that
-    /// we have an anonymous late bound region, which hence may refer to
-    /// a canonical variable.
-    pub fn assert_bound_var(&self) -> BoundVar {
-        match self.kind {
-            BoundRegionKind::BrAnon(var) => BoundVar::from_u32(var),
-            _ => bug!("bound region is not anonymous"),
-        }
-    }
 }
 
 impl BoundRegionKind {
@@ -1010,13 +999,17 @@ where
             Binder::dummy(value)
         }
     }
+
+    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(vars);
+            value.visit_with(&mut validator);
+        }
+        Binder(value, vars)
+    }
 }
 
 impl<'tcx, T> Binder<'tcx, T> {
-    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
-        Binder(value, vars)
-    }
-
     /// Skips the binder and returns the "bound" value. This is a
     /// risky thing to do because it's easy to get confused about
     /// De Bruijn indices and the like. It is usually better to
@@ -1045,18 +1038,31 @@ impl<'tcx, T> Binder<'tcx, T> {
         Binder(&self.0, self.1)
     }
 
-    pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound_ref_unchecked<F, U>(&self, f: F) -> Binder<'tcx, U>
+    where
+        F: FnOnce(&T) -> U,
+    {
+        let value = f(&self.0);
+        Binder(value, self.1)
+    }
+
+    pub fn map_bound_ref<F, U: TypeFoldable<'tcx>>(&self, f: F) -> Binder<'tcx, U>
     where
         F: FnOnce(&T) -> U,
     {
         self.as_ref().map_bound(f)
     }
 
-    pub fn map_bound<F, U>(self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound<F, U: TypeFoldable<'tcx>>(self, f: F) -> Binder<'tcx, U>
     where
         F: FnOnce(T) -> U,
     {
-        Binder(f(self.0), self.1)
+        let value = f(self.0);
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(self.1);
+            value.visit_with(&mut validator);
+        }
+        Binder(value, self.1)
     }
 
     /// Wraps a `value` in a binder, using the same bound variables as the
@@ -1068,7 +1074,14 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// don't actually track bound vars. However, semantically, it is different
     /// because bound vars aren't allowed to change here, whereas they are
     /// in `bind`. This may be (debug) asserted in the future.
-    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U> {
+    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U>
+    where
+        U: TypeFoldable<'tcx>,
+    {
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(self.bound_vars());
+            value.visit_with(&mut validator);
+        }
         Binder(value, self.1)
     }
 
@@ -1108,8 +1121,8 @@ impl<'tcx, T> Binder<'tcx, T> {
                     }
                     // If we encounter a `BrEnv`, then we added it and it's not actually referenced by position
                     // It's last and we're done
-                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
-                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
+                    (BoundVariableKind::Region(ty::BrEnv), _) => break,
+                    (_, BoundVariableKind::Region(ty::BrEnv)) => break,
                     (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
                         debug_assert_eq!(region_a, region_b)
                     }
@@ -1121,15 +1134,15 @@ impl<'tcx, T> Binder<'tcx, T> {
         let self_has_env = self
             .bound_vars()
             .last()
-            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .map(|b| matches!(b, BoundVariableKind::Region(ty::BrEnv)))
             .unwrap_or(false);
         let u_has_env = u
             .bound_vars()
             .last()
-            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .map(|b| matches!(b, BoundVariableKind::Region(ty::BrEnv)))
             .unwrap_or(false);
         let env_iter = if u_has_env && !self_has_env {
-            Some(BoundVariableKind::Region(BoundRegion::BrEnv)).into_iter()
+            Some(BoundVariableKind::Region(ty::BrEnv)).into_iter()
         } else {
             None.into_iter()
         };
@@ -1267,7 +1280,7 @@ pub type PolyFnSig<'tcx> = Binder<'tcx, FnSig<'tcx>>;
 impl<'tcx> PolyFnSig<'tcx> {
     #[inline]
     pub fn inputs(&self) -> Binder<'tcx, &'tcx [Ty<'tcx>]> {
-        self.map_bound_ref(|fn_sig| fn_sig.inputs())
+        self.map_bound_ref_unchecked(|fn_sig| fn_sig.inputs())
     }
     #[inline]
     pub fn input(&self, index: usize) -> ty::Binder<'tcx, Ty<'tcx>> {

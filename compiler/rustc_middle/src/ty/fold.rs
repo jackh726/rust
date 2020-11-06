@@ -560,6 +560,7 @@ impl<'tcx> TyCtxt<'tcx> {
         F: FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
         T: TypeFoldable<'tcx>,
     {
+        // FIXME: BoundVarReplacer could be changed to accept `None` to be noop
         // identity for bound types and consts
         let fld_t = |bound_ty| self.mk_ty(ty::Bound(ty::INNERMOST, bound_ty));
         let fld_c = |bound_ct, ty| {
@@ -697,23 +698,27 @@ impl<'tcx> TyCtxt<'tcx> {
         T: TypeFoldable<'tcx>,
     {
         let mut counter = 0;
-        Binder::bind(
-            self.replace_late_bound_regions(sig, |_| {
-                let br = ty::BoundRegion { kind: ty::BrAnon(counter) };
+        let inner = self
+            .replace_late_bound_regions(sig, |_| {
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(counter),
+                    kind: ty::BrAnon(counter),
+                };
                 let r = self.mk_region(ty::ReLateBound(ty::INNERMOST, br));
                 counter += 1;
                 r
             })
-            .0,
-            self,
-        )
+            .0;
+        let bound_vars = self.mk_bound_variable_kinds(
+            (0..counter).map(|i| ty::BoundVariableKind::Region(ty::BrAnon(i))),
+        );
+        Binder::bind_with_vars(inner, bound_vars)
     }
 }
 
 pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
-    brenv: bool,
     // We may encounter the same variable at different levels of binding, so
     // this can't just be `Ty`
     visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
@@ -724,35 +729,19 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         BoundVarsCollector {
             binder_index: ty::INNERMOST,
             vars: BTreeMap::new(),
-            brenv: false,
             visited: SsoHashSet::default(),
         }
     }
 
-    pub fn into_vars(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
+    pub fn into_vars(self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
         let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
         for i in 0..max {
             if let None = self.vars.get(&i) {
                 panic!("Unknown variable: {:?}", i);
             }
         }
-        if self.brenv {
-            self.vars.insert(
-                self.vars.len() as u32,
-                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
-            );
-        }
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
-    }
-
-    pub(crate) fn into_inner(mut self) -> BTreeMap<u32, ty::BoundVariableKind> {
-        let env = self.vars.iter().map(|(k, _)| *k + 1).max().unwrap_or_else(|| 0);
-        if self.brenv {
-            self.vars.insert(env as u32, ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv));
-        }
-
-        self.vars
     }
 }
 
@@ -796,27 +785,96 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
     }
 
     fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
-        use std::collections::btree_map::Entry;
         match r {
-            ty::ReLateBound(index, br) if *index == self.binder_index => match br.kind {
-                ty::BrNamed(_def_id, _name) => {
-                    // FIXME
-                }
+            ty::ReLateBound(index, _br) if *index == self.binder_index => bug!(),
 
-                ty::BrAnon(var) => match self.vars.entry(var) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(ty::BoundVariableKind::Region(br.kind));
+            _ => (),
+        };
+
+        r.super_visit_with(self)
+    }
+}
+
+pub struct ValidateBoundVars<'tcx> {
+    bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
+    binder_index: ty::DebruijnIndex,
+    // We may encounter the same variable at different levels of binding, so
+    // this can't just be `Ty`
+    visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
+}
+
+impl<'tcx> ValidateBoundVars<'tcx> {
+    pub fn new(bound_vars: &'tcx ty::List<ty::BoundVariableKind>) -> Self {
+        ValidateBoundVars {
+            bound_vars,
+            binder_index: ty::INNERMOST,
+            visited: SsoHashSet::default(),
+        }
+    }
+}
+
+impl<'tcx> TypeVisitor<'tcx> for ValidateBoundVars<'tcx> {
+    type BreakTy = ();
+
+    fn visit_binder<T: TypeFoldable<'tcx>>(
+        &mut self,
+        t: &Binder<'tcx, T>,
+    ) -> ControlFlow<Self::BreakTy> {
+        self.binder_index.shift_in(1);
+        let result = t.super_visit_with(self);
+        self.binder_index.shift_out(1);
+        result
+    }
+
+    fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
+        if t.outer_exclusive_binder < self.binder_index
+            || !self.visited.insert((self.binder_index, t))
+        {
+            return ControlFlow::BREAK;
+        }
+        match *t.kind() {
+            ty::Bound(debruijn, bound_ty) if debruijn == self.binder_index => {
+                if self.bound_vars.len() <= bound_ty.var.as_usize() {
+                    panic!("Not enough bound vars: {:?} not found in {:?}", t, self.bound_vars);
+                }
+                let list_var = self.bound_vars[bound_ty.var.as_usize()];
+                match list_var {
+                    ty::BoundVariableKind::Ty(kind) => {
+                        if kind != bound_ty.kind {
+                            panic!(
+                                "Mismatched type kinds: {:?} doesn't var in list {:?}",
+                                bound_ty.kind, list_var
+                            );
+                        }
                     }
-                    Entry::Occupied(entry) => match entry.get() {
-                        ty::BoundVariableKind::Region(_) => {}
-                        _ => bug!("Conflicting bound vars"),
-                    },
-                },
-
-                ty::BrEnv => {
-                    self.brenv = true;
+                    _ => panic!(
+                        "Mismatched bound variable kinds! Expected type, found {:?}",
+                        list_var
+                    ),
                 }
-            },
+            }
+
+            _ => (),
+        };
+
+        t.super_visit_with(self)
+    }
+
+    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
+        match r {
+            ty::ReLateBound(index, br) if *index == self.binder_index => {
+                if self.bound_vars.len() <= br.var.as_usize() {
+                    panic!("Not enough bound vars: {:?} not found in {:?}", *br, self.bound_vars);
+                }
+                let list_var = self.bound_vars[br.var.as_usize()];
+                match list_var {
+                    ty::BoundVariableKind::Region(_) => {}
+                    _ => panic!(
+                        "Mismatched bound variable kinds! Expected region, found {:?}",
+                        list_var
+                    ),
+                }
+            }
 
             _ => (),
         };
@@ -1022,57 +1080,6 @@ impl<'tcx> TypeVisitor<'tcx> for HasEscapingVarsVisitor {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 struct FoundFlags;
-
-crate struct CountBoundVars {
-    crate outer_index: ty::DebruijnIndex,
-    crate bound_tys: FxHashSet<ty::BoundTy>,
-    crate bound_regions: FxHashSet<ty::BoundRegion>,
-    crate bound_consts: FxHashSet<ty::BoundVar>,
-}
-
-impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
-    type BreakTy = ();
-
-    fn visit_binder<T: TypeFoldable<'tcx>>(
-        &mut self,
-        t: &Binder<'tcx, T>,
-    ) -> ControlFlow<Self::BreakTy> {
-        self.outer_index.shift_in(1);
-        let result = t.super_visit_with(self);
-        self.outer_index.shift_out(1);
-        result
-    }
-
-    fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
-        match t.kind {
-            ty::Bound(debruijn, ty) if debruijn == self.outer_index => {
-                self.bound_tys.insert(ty);
-                ControlFlow::CONTINUE
-            }
-            _ => t.super_visit_with(self),
-        }
-    }
-
-    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
-        match r {
-            ty::ReLateBound(debruijn, re) if *debruijn == self.outer_index => {
-                self.bound_regions.insert(*re);
-                ControlFlow::CONTINUE
-            }
-            _ => r.super_visit_with(self),
-        }
-    }
-
-    fn visit_const(&mut self, ct: &'tcx ty::Const<'tcx>) -> ControlFlow<Self::BreakTy> {
-        match ct.val {
-            ty::ConstKind::Bound(debruijn, c) if debruijn == self.outer_index => {
-                self.bound_consts.insert(c);
-                ControlFlow::CONTINUE
-            }
-            _ => ct.super_visit_with(self),
-        }
-    }
-}
 
 // FIXME: Optimize for checking for infer flags
 struct HasTypeFlagsVisitor {

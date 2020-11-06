@@ -1558,6 +1558,7 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
                 }
                 None => AstConv::ty_of_fn(
                     &icx,
+                    hir_id,
                     sig.header.unsafety,
                     sig.header.abi,
                     &sig.decl,
@@ -1571,10 +1572,17 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
             kind: TraitItemKind::Fn(FnSig { header, decl, span: _ }, _),
             ident,
             generics,
+            hir_id,
             ..
-        }) => {
-            AstConv::ty_of_fn(&icx, header.unsafety, header.abi, decl, &generics, Some(ident.span))
-        }
+        }) => AstConv::ty_of_fn(
+            &icx,
+            *hir_id,
+            header.unsafety,
+            header.abi,
+            decl,
+            &generics,
+            Some(ident.span),
+        ),
 
         ForeignItem(&hir::ForeignItem {
             kind: ForeignItemKind::Fn(ref fn_decl, _, _),
@@ -1911,6 +1919,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
         match predicate {
             &hir::WherePredicate::BoundPredicate(ref bound_pred) => {
                 let ty = icx.to_ty(&bound_pred.bounded_ty);
+                let bound_vars = icx.tcx.late_bound_vars(bound_pred.bounded_ty.hir_id);
 
                 // Keep the type around in a dummy predicate, in case of no bounds.
                 // That way, `where Ty:` is not a complete noop (see #53696) and `Ty`
@@ -1926,13 +1935,14 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                     } else {
                         let span = bound_pred.bounded_ty.span;
                         let re_root_empty = tcx.lifetimes.re_root_empty;
-                        let predicate = ty::Binder::bind(
+                        let predicate = ty::Binder::bind_with_vars(
                             ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(
                                 ty,
                                 re_root_empty,
                             )),
-                            tcx,
+                            bound_vars,
                         );
+
                         predicates.insert((
                             predicate.potentially_quantified(tcx, ty::PredicateKind::ForAll),
                             span,
@@ -1977,11 +1987,11 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                         &hir::GenericBound::Outlives(ref lifetime) => {
                             let region = AstConv::ast_region_to_region(&icx, lifetime, None);
                             predicates.insert((
-                                ty::Binder::bind(
+                                ty::Binder::bind_with_vars(
                                     ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(
                                         ty, region,
                                     )),
-                                    tcx,
+                                    bound_vars,
                                 )
                                 .potentially_quantified(tcx, ty::PredicateKind::ForAll),
                                 lifetime.span,
@@ -2270,8 +2280,10 @@ fn compute_sig_of_foreign_fn_decl<'tcx>(
     } else {
         hir::Unsafety::Unsafe
     };
+    let hir_id = tcx.hir().local_def_id_to_hir_id(def_id.expect_local());
     let fty = AstConv::ty_of_fn(
         &ItemCtxt::new(tcx, def_id),
+        hir_id,
         unsafety,
         abi,
         decl,

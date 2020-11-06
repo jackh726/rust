@@ -1252,10 +1252,26 @@ impl<'tcx> Predicate<'tcx> {
         // from the substitution and the value being substituted into, and
         // this trick achieves that).
         let substs = trait_ref.skip_binder().substs;
-        let pred = self.skip_binders();
+        let bound_pred = self.bound_atom();
+        let pred = bound_pred.skip_binder();
         let new = pred.subst(tcx, substs);
         if new != pred {
-            ty::Binder::bind(new, tcx).potentially_quantified(tcx, PredicateKind::ForAll)
+            let bound_vars =
+                if trait_ref.bound_vars().len() > 0 && bound_pred.bound_vars().len() == 0 {
+                    trait_ref.bound_vars()
+                } else if bound_pred.bound_vars().len() > 0 && trait_ref.bound_vars().len() == 0 {
+                    bound_pred.bound_vars()
+                } else if trait_ref.bound_vars().len() == 0 && bound_pred.bound_vars().len() == 0 {
+                    ty::List::empty()
+                } else {
+                    bug!(
+                        "Both trait ref and bound_pred bound vars not empty: {:?} and {:?}",
+                        trait_ref,
+                        bound_pred
+                    );
+                };
+            ty::Binder::bind_with_vars(new, bound_vars)
+                .potentially_quantified(tcx, PredicateKind::ForAll)
         } else {
             self
         }
