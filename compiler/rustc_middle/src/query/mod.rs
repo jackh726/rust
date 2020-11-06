@@ -1301,6 +1301,10 @@ rustc_queries! {
             -> Option<&'tcx FxHashMap<ItemLocalId, Vec<ObjectLifetimeDefault>>> {
             desc { "looking up lifetime defaults for a region" }
         }
+        query late_bound_vars_map(_: LocalDefId)
+            -> Option<&'tcx FxHashMap<ItemLocalId, Vec<Region>>> {
+            desc { "looking up late bound vars" }
+        }
     }
 
     TypeChecking {
