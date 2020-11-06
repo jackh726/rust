@@ -105,15 +105,17 @@ pub fn check_intrinsic_type(tcx: TyCtxt<'_>, it: &hir::ForeignItem<'_>) {
     let intrinsic_name = tcx.item_name(def_id);
     let name_str = intrinsic_name.as_str();
 
+    let bound_vars = tcx.mk_bound_variable_kinds(
+        [ty::BoundVariableKind::Region(ty::BrAnon(0)), ty::BoundVariableKind::Region(ty::BrEnv)]
+            .iter()
+            .copied(),
+    );
     let mk_va_list_ty = |mutbl| {
         tcx.lang_items().va_list().map(|did| {
             let region = tcx.mk_region(ty::ReLateBound(ty::INNERMOST, ty::BrAnon(0)));
-            let env_region = ty::ReLateBound(ty::INNERMOST, ty::BrEnv);
+            let env_region = tcx.mk_region(ty::ReLateBound(ty::INNERMOST, ty::BrAnon(1)));
             let va_list_ty = tcx.type_of(did).subst(tcx, &[region.into()]);
-            (
-                tcx.mk_ref(tcx.mk_region(env_region), ty::TypeAndMut { ty: va_list_ty, mutbl }),
-                va_list_ty,
-            )
+            (tcx.mk_ref(env_region, ty::TypeAndMut { ty: va_list_ty, mutbl }), va_list_ty)
         })
     };
 
@@ -372,7 +374,7 @@ pub fn check_intrinsic_type(tcx: TyCtxt<'_>, it: &hir::ForeignItem<'_>) {
         (n_tps, inputs, output, unsafety)
     };
     let sig = tcx.mk_fn_sig(inputs.into_iter(), output, false, unsafety, Abi::RustIntrinsic);
-    let sig = ty::Binder::bind(sig, tcx);
+    let sig = ty::Binder::bind_with_vars(sig, bound_vars);
     equate_intrinsic_type(tcx, it, def_id, n_tps, sig)
 }
 

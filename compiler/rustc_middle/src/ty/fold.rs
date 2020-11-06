@@ -730,7 +730,6 @@ impl<'tcx> TyCtxt<'tcx> {
 pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
-    brenv: bool,
     visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
 }
 
@@ -739,35 +738,23 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         BoundVarsCollector {
             binder_index: ty::INNERMOST,
             vars: BTreeMap::new(),
-            brenv: false,
             // We may encounter the same variable at different levels of binding
             visited: SsoHashSet::default(),
         }
     }
 
-    pub fn into_vars(mut self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
+    pub fn into_vars(self, tcx: TyCtxt<'tcx>) -> &'tcx ty::List<ty::BoundVariableKind> {
         let max = self.vars.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
         for i in 0..max {
             if let None = self.vars.get(&i) {
                 panic!("Unknown variable: {:?}", i);
             }
         }
-        if self.brenv {
-            self.vars.insert(
-                self.vars.len() as u32,
-                ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv),
-            );
-        }
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
     }
 
-    pub(crate) fn into_inner(mut self) -> BTreeMap<u32, ty::BoundVariableKind> {
-        let env = self.vars.iter().map(|(k, _)| *k + 1).max().unwrap_or_else(|| 0);
-        if self.brenv {
-            self.vars.insert(env as u32, ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv));
-        }
-
+    pub(crate) fn into_inner(self) -> BTreeMap<u32, ty::BoundVariableKind> {
         self.vars
     }
 }
@@ -829,9 +816,7 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
                     },
                 },
 
-                ty::BrEnv => {
-                    self.brenv = true;
-                }
+                ty::BrEnv => bug!(),
             },
 
             _ => (),
