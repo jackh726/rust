@@ -2338,21 +2338,39 @@ impl<'tcx> ty::Instance<'tcx> {
             ty::Closure(def_id, substs) => {
                 let sig = substs.as_closure().sig();
 
-                let env_ty = tcx.closure_env_ty(def_id, substs).unwrap();
-                ty::Binder::fuse(env_ty, sig, tcx, |env_ty, sig| {
-                    tcx.mk_fn_sig(
-                        iter::once(env_ty).chain(sig.inputs().iter().cloned()),
-                        sig.output(),
-                        sig.c_variadic,
-                        sig.unsafety,
-                        sig.abi,
-                    )
-                })
+                let bound_vars = tcx.mk_bound_variable_kinds(
+                    sig.bound_vars()
+                        .iter()
+                        .chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),
+                );
+                let env_region =
+                    ty::ReLateBound(ty::INNERMOST, ty::BrAnon((bound_vars.len() as u32) - 1));
+                let env_ty = tcx.closure_env_ty(def_id, substs, env_region).unwrap();
+
+                ty::Binder::bind_with_vars(
+                    sig.map_bound(|sig| {
+                        tcx.mk_fn_sig(
+                            iter::once(env_ty).chain(sig.inputs().iter().cloned()),
+                            sig.output(),
+                            sig.c_variadic,
+                            sig.unsafety,
+                            sig.abi,
+                        )
+                    })
+                    .skip_binder(),
+                    bound_vars,
+                )
             }
             ty::Generator(_, substs, _) => {
                 let sig = substs.as_generator().poly_sig();
 
-                let env_region = ty::ReLateBound(ty::INNERMOST, ty::BrEnv);
+                let bound_vars = tcx.mk_bound_variable_kinds(
+                    sig.bound_vars()
+                        .iter()
+                        .chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),
+                );
+                let env_region =
+                    ty::ReLateBound(ty::INNERMOST, ty::BrAnon((bound_vars.len() as u32) - 1));
                 let env_ty = tcx.mk_mut_ref(tcx.mk_region(env_region), ty);
 
                 let pin_did = tcx.require_lang_item(LangItem::Pin, None);
@@ -2360,21 +2378,25 @@ impl<'tcx> ty::Instance<'tcx> {
                 let pin_substs = tcx.intern_substs(&[env_ty.into()]);
                 let env_ty = tcx.mk_adt(pin_adt_ref, pin_substs);
 
-                sig.map_bound(|sig| {
-                    let state_did = tcx.require_lang_item(LangItem::GeneratorState, None);
-                    let state_adt_ref = tcx.adt_def(state_did);
-                    let state_substs =
-                        tcx.intern_substs(&[sig.yield_ty.into(), sig.return_ty.into()]);
-                    let ret_ty = tcx.mk_adt(state_adt_ref, state_substs);
+                ty::Binder::bind_with_vars(
+                    sig.map_bound(|sig| {
+                        let state_did = tcx.require_lang_item(LangItem::GeneratorState, None);
+                        let state_adt_ref = tcx.adt_def(state_did);
+                        let state_substs =
+                            tcx.intern_substs(&[sig.yield_ty.into(), sig.return_ty.into()]);
+                        let ret_ty = tcx.mk_adt(state_adt_ref, state_substs);
 
-                    tcx.mk_fn_sig(
-                        [env_ty, sig.resume_ty].iter(),
-                        &ret_ty,
-                        false,
-                        hir::Unsafety::Normal,
-                        rustc_target::spec::abi::Abi::Rust,
-                    )
-                })
+                        tcx.mk_fn_sig(
+                            [env_ty, sig.resume_ty].iter(),
+                            &ret_ty,
+                            false,
+                            hir::Unsafety::Normal,
+                            rustc_target::spec::abi::Abi::Rust,
+                        )
+                    })
+                    .skip_binder(),
+                    bound_vars,
+                )
             }
             _ => bug!("unexpected type {:?} in Instance::fn_sig", ty),
         }

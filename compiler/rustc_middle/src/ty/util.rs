@@ -496,9 +496,9 @@ impl<'tcx> TyCtxt<'tcx> {
         self,
         closure_def_id: DefId,
         closure_substs: SubstsRef<'tcx>,
-    ) -> Option<ty::Binder<'tcx, Ty<'tcx>>> {
+        env_region: ty::RegionKind,
+    ) -> Option<Ty<'tcx>> {
         let closure_ty = self.mk_closure(closure_def_id, closure_substs);
-        let env_region = ty::ReLateBound(ty::INNERMOST, ty::BrEnv);
         let closure_kind_ty = closure_substs.as_closure().kind_ty();
         let closure_kind = closure_kind_ty.to_opt_closure_kind()?;
         debug_assert!(!closure_ty.has_escaping_bound_vars());
@@ -507,10 +507,7 @@ impl<'tcx> TyCtxt<'tcx> {
             ty::ClosureKind::FnMut => self.mk_mut_ref(self.mk_region(env_region), closure_ty),
             ty::ClosureKind::FnOnce => closure_ty,
         };
-        let bound_vars = self.mk_bound_variable_kinds(
-            Some(ty::BoundVariableKind::Region(ty::BoundRegion::BrEnv)).into_iter(),
-        );
-        Some(ty::Binder::bind_with_vars(env_ty, bound_vars))
+        Some(env_ty)
     }
 
     /// Returns `true` if the node pointed to by `def_id` is a `static` item.
