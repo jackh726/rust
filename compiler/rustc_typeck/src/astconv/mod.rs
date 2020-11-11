@@ -37,6 +37,7 @@ use rustc_trait_selection::traits::wf::object_region_bounds;
 use smallvec::SmallVec;
 use std::array;
 use std::collections::BTreeSet;
+use std::iter;
 use std::slice;
 
 #[derive(Debug)]
@@ -170,39 +171,51 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         &self,
         lifetime: &hir::Lifetime,
         def: Option<&ty::GenericParamDef>,
-    ) -> ty::Region<'tcx> {
+    ) -> ty::Binder<'tcx, ty::Region<'tcx>> {
         let tcx = self.tcx();
         let lifetime_name = |def_id| tcx.hir().name(tcx.hir().local_def_id_to_hir_id(def_id));
 
         let r = match tcx.named_region(lifetime.hir_id) {
-            Some(rl::Region::Static) => tcx.lifetimes.re_static,
+            Some(rl::Region::Static) => ty::Binder::dummy(tcx.lifetimes.re_static),
 
             Some(rl::Region::LateBound(debruijn, id, _)) => {
                 let name = lifetime_name(id.expect_local());
-                tcx.mk_region(ty::ReLateBound(debruijn, ty::BrNamed(id, name)))
+                ty::Binder::bind_with_vars(
+                    tcx.mk_region(ty::ReLateBound(debruijn, ty::BrAnon(0))),
+                    tcx.mk_bound_variable_kinds(iter::once(ty::BoundVariableKind::Region(
+                        ty::BrNamed(id, name),
+                    ))),
+                )
             }
 
-            Some(rl::Region::LateBoundAnon(debruijn, index)) => {
-                tcx.mk_region(ty::ReLateBound(debruijn, ty::BrAnon(index)))
-            }
+            Some(rl::Region::LateBoundAnon(debruijn, index)) => ty::Binder::bind_with_vars(
+                tcx.mk_region(ty::ReLateBound(debruijn, ty::BrAnon(0))),
+                tcx.mk_bound_variable_kinds(iter::once(ty::BoundVariableKind::Region(ty::BrAnon(
+                    index,
+                )))),
+            ),
 
             Some(rl::Region::EarlyBound(index, id, _)) => {
                 let name = lifetime_name(id.expect_local());
-                tcx.mk_region(ty::ReEarlyBound(ty::EarlyBoundRegion { def_id: id, index, name }))
+                ty::Binder::dummy(tcx.mk_region(ty::ReEarlyBound(ty::EarlyBoundRegion {
+                    def_id: id,
+                    index,
+                    name,
+                })))
             }
 
             Some(rl::Region::Free(scope, id)) => {
                 let name = lifetime_name(id.expect_local());
-                tcx.mk_region(ty::ReFree(ty::FreeRegion {
+                ty::Binder::dummy(tcx.mk_region(ty::ReFree(ty::FreeRegion {
                     scope,
                     bound_region: ty::BrNamed(id, name),
-                }))
+                })))
 
                 // (*) -- not late-bound, won't change
             }
 
             None => {
-                self.re_infer(def, lifetime.span).unwrap_or_else(|| {
+                ty::Binder::dummy(self.re_infer(def, lifetime.span).unwrap_or_else(|| {
                     // This indicates an illegal lifetime
                     // elision. `resolve_lifetime` should have
                     // reported an error in this case -- but if
@@ -212,7 +225,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     // Supply some dummy value. We don't have an
                     // `re_error`, annoyingly, so use `'static`.
                     tcx.lifetimes.re_static
-                })
+                }))
             }
         };
 
@@ -358,7 +371,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             // Provide substitutions for parameters for which (valid) arguments have been provided.
             |param, arg| match (&param.kind, arg) {
                 (GenericParamDefKind::Lifetime, GenericArg::Lifetime(lt)) => {
-                    self.ast_region_to_region(&lt, Some(param)).into()
+                    self.ast_region_to_region(&lt, Some(param)).no_bound_vars().unwrap().into()
                 }
                 (GenericParamDefKind::Type { has_default, .. }, GenericArg::Type(ty)) => {
                     if *has_default {
@@ -779,7 +792,9 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         }
 
         bounds.region_bounds.extend(
-            region_bounds.into_iter().map(|r| (self.ast_region_to_region(r, None), r.span)),
+            region_bounds
+                .into_iter()
+                .map(|r| (self.ast_region_to_region(r, None).no_bound_vars().unwrap(), r.span)),
         );
     }
 
@@ -1213,11 +1228,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         // Use explicitly-specified region bound.
         let region_bound = if !lifetime.is_elided() {
-            self.ast_region_to_region(lifetime, None)
+            self.ast_region_to_region(lifetime, None).no_bound_vars().unwrap()
         } else {
             self.compute_object_lifetime_bound(span, existential_predicates).unwrap_or_else(|| {
                 if tcx.named_region(lifetime.hir_id).is_some() {
-                    self.ast_region_to_region(lifetime, None)
+                    self.ast_region_to_region(lifetime, None).no_bound_vars().unwrap()
                 } else {
                     self.re_infer(None, span).unwrap_or_else(|| {
                         let mut err = struct_span_err!(
@@ -2007,7 +2022,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 tcx.mk_ptr(ty::TypeAndMut { ty: self.ast_ty_to_ty(&mt.ty), mutbl: mt.mutbl })
             }
             hir::TyKind::Rptr(ref region, ref mt) => {
-                let r = self.ast_region_to_region(region, None);
+                let r = self.ast_region_to_region(region, None).no_bound_vars().unwrap();
                 debug!("ast_ty_to_ty: r={:?}", r);
                 let t = self.ast_ty_to_ty_inner(&mt.ty, true);
                 tcx.mk_ref(r, ty::TypeAndMut { ty: t, mutbl: mt.mutbl })
@@ -2114,7 +2129,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 match param.kind {
                     GenericParamDefKind::Lifetime => {
                         if let hir::GenericArg::Lifetime(lifetime) = &lifetimes[i] {
-                            self.ast_region_to_region(lifetime, None).into()
+                            self.ast_region_to_region(lifetime, None)
+                                .no_bound_vars()
+                                .unwrap()
+                                .into()
                         } else {
                             bug!()
                         }

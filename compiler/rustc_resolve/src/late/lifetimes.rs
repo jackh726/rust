@@ -1342,7 +1342,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         f(self)
     }
 
-    fn with<F>(&mut self, wrap_scope: Scope<'_>, f: F)
+    fn  with<F>(&mut self, wrap_scope: Scope<'_>, f: F)
     where
         F: for<'b> FnOnce(ScopeRef<'_>, &mut LifetimeContext<'b, 'tcx>),
     {

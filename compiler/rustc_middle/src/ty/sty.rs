@@ -1044,6 +1044,50 @@ where
         }
         Binder(value, self.1)
     }
+
+    /// Given two things that have the same binder level, appends the new
+    /// bound vars to the existing ones and folding over the new value to use
+    /// the new list.
+    ///
+    /// The `fuse` function, on the other hand, assumes that the binders are the
+    /// *same* between the two bound values.
+    pub fn combine_with<U: TypeFoldable<'tcx>>(
+        self,
+        u: Binder<'tcx, U>,
+        tcx: TyCtxt<'tcx>,
+    ) -> Binder<'tcx, (T, U)> {
+        let num_binders = self.bound_vars().len() as u32;
+        let (bound_u, _) = tcx.replace_bound_vars(
+            &u,
+            |r| match r {
+                ty::BrAnon(i) => {
+                    tcx.mk_region(ty::ReLateBound(ty::INNERMOST, ty::BrAnon(i + num_binders)))
+                }
+                _ => tcx.mk_region(ty::ReLateBound(ty::INNERMOST, r)),
+            },
+            |t| {
+                tcx.mk_ty(ty::Bound(
+                    ty::INNERMOST,
+                    ty::BoundTy {
+                        var: BoundVar::from_u32(t.var.as_u32() + num_binders),
+                        kind: t.kind,
+                    },
+                ))
+            },
+            |c, ty| {
+                tcx.mk_const(ty::Const {
+                    ty,
+                    val: ty::ConstKind::Bound(
+                        ty::INNERMOST,
+                        BoundVar::from_u32(c.as_u32() + num_binders),
+                    ),
+                })
+            },
+        );
+        let bound_vars =
+            tcx.mk_bound_variable_kinds(self.bound_vars().iter().chain(u.bound_vars().iter()));
+        Binder::bind_with_vars((self.skip_binder(), bound_u), bound_vars)
+    }
 }
 
 impl<'tcx, T> Binder<'tcx, T> {

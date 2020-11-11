@@ -327,7 +327,10 @@ impl<'a, 'tcx> ConfirmContext<'a, 'tcx> {
             // Provide substitutions for parameters for which (valid) arguments have been provided.
             |param, arg| match (&param.kind, arg) {
                 (GenericParamDefKind::Lifetime, GenericArg::Lifetime(lt)) => {
-                    AstConv::ast_region_to_region(self.fcx, lt, Some(param)).into()
+                    AstConv::ast_region_to_region(self.fcx, lt, Some(param))
+                        .no_bound_vars()
+                        .unwrap()
+                        .into()
                 }
                 (GenericParamDefKind::Type { .. }, GenericArg::Type(ty)) => self.to_ty(ty).into(),
                 (GenericParamDefKind::Const, GenericArg::Const(ct)) => {
