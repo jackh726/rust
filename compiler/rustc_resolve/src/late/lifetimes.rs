@@ -40,9 +40,9 @@ pub enum LifetimeUseSet<'tcx> {
 trait RegionExt {
     fn early(hir_map: &Map<'_>, index: &mut u32, param: &GenericParam<'_>) -> (ParamName, Region);
 
-    fn late(hir_map: &Map<'_>, param: &GenericParam<'_>) -> (ParamName, Region);
+    fn late(index: u32, hir_map: &Map<'_>, param: &GenericParam<'_>) -> (ParamName, Region);
 
-    fn late_anon(index: &Cell<u32>) -> Region;
+    fn late_anon(named_late_bound_vars: u32, anon_index: &Cell<u32>) -> Region;
 
     fn id(&self) -> Option<DefId>;
 
@@ -65,7 +65,7 @@ impl RegionExt for Region {
         (param.name.normalize_to_macros_2_0(), Region::EarlyBound(i, def_id.to_def_id(), origin))
     }
 
-    fn late(hir_map: &Map<'_>, param: &GenericParam<'_>) -> (ParamName, Region) {
+    fn late(idx: u32, hir_map: &Map<'_>, param: &GenericParam<'_>) -> (ParamName, Region) {
         let depth = ty::INNERMOST;
         let def_id = hir_map.local_def_id(param.hir_id);
         let origin = LifetimeDefOrigin::from_param(param);
@@ -73,21 +73,24 @@ impl RegionExt for Region {
             "Region::late: param={:?} depth={:?} def_id={:?} origin={:?}",
             param, depth, def_id, origin,
         );
-        (param.name.normalize_to_macros_2_0(), Region::LateBound(depth, def_id.to_def_id(), origin))
+        (
+            param.name.normalize_to_macros_2_0(),
+            Region::LateBound(depth, idx, def_id.to_def_id(), origin),
+        )
     }
 
-    fn late_anon(index: &Cell<u32>) -> Region {
+    fn late_anon(named_late_bound_vars: u32, index: &Cell<u32>) -> Region {
         let i = index.get();
         index.set(i + 1);
         let depth = ty::INNERMOST;
-        Region::LateBoundAnon(depth, i)
+        Region::LateBoundAnon(depth, named_late_bound_vars + i, i)
     }
 
     fn id(&self) -> Option<DefId> {
         match *self {
             Region::Static | Region::LateBoundAnon(..) => None,
 
-            Region::EarlyBound(_, id, _) | Region::LateBound(_, id, _) | Region::Free(_, id) => {
+            Region::EarlyBound(_, id, _) | Region::LateBound(_, _, id, _) | Region::Free(_, id) => {
                 Some(id)
             }
         }
@@ -95,11 +98,11 @@ impl RegionExt for Region {
 
     fn shifted(self, amount: u32) -> Region {
         match self {
-            Region::LateBound(debruijn, id, origin) => {
-                Region::LateBound(debruijn.shifted_in(amount), id, origin)
+            Region::LateBound(debruijn, idx, id, origin) => {
+                Region::LateBound(debruijn.shifted_in(amount), idx, id, origin)
             }
-            Region::LateBoundAnon(debruijn, index) => {
-                Region::LateBoundAnon(debruijn.shifted_in(amount), index)
+            Region::LateBoundAnon(debruijn, index, anon_index) => {
+                Region::LateBoundAnon(debruijn.shifted_in(amount), index, anon_index)
             }
             _ => self,
         }
@@ -107,11 +110,11 @@ impl RegionExt for Region {
 
     fn shifted_out_to_binder(self, binder: ty::DebruijnIndex) -> Region {
         match self {
-            Region::LateBound(debruijn, id, origin) => {
-                Region::LateBound(debruijn.shifted_out_to_binder(binder), id, origin)
+            Region::LateBound(debruijn, index, id, origin) => {
+                Region::LateBound(debruijn.shifted_out_to_binder(binder), index, id, origin)
             }
-            Region::LateBoundAnon(debruijn, index) => {
-                Region::LateBoundAnon(debruijn.shifted_out_to_binder(binder), index)
+            Region::LateBoundAnon(debruijn, index, anon_index) => {
+                Region::LateBoundAnon(debruijn.shifted_out_to_binder(binder), index, anon_index)
             }
             _ => self,
         }
@@ -222,6 +225,8 @@ enum Scope<'a> {
         /// of the resulting opaque type.
         opaque_type_parent: bool,
 
+        named_late_bound_vars: u32,
+
         s: ScopeRef<'a>,
     },
 
@@ -255,8 +260,9 @@ enum Scope<'a> {
 #[derive(Clone, Debug)]
 enum Elide {
     /// Use a fresh anonymous late-bound lifetime each time, by
-    /// incrementing the counter to generate sequential indices.
-    FreshLateAnon(Cell<u32>),
+    /// incrementing the counter to generate sequential indices. All
+    /// anonymous lifetimes must start *after* named bound vars.
+    FreshLateAnon(u32, Cell<u32>),
     /// Always use this one lifetime.
     Exact(Region),
     /// Less or more than one lifetime were found, error on unspecified.
@@ -468,6 +474,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     next_early_index: index + non_lifetime_count,
                     opaque_type_parent: true,
                     track_lifetime_uses,
+                    named_late_bound_vars: 0,
                     s: ROOT_SCOPE,
                 };
                 self.with(scope, |old_scope, this| {
@@ -519,9 +526,10 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     lifetimes: c
                         .generic_params
                         .iter()
-                        .filter_map(|param| match param.kind {
+                        .enumerate()
+                        .filter_map(|(idx, param)| match param.kind {
                             GenericParamKind::Lifetime { .. } => {
-                                Some(Region::late(&self.tcx.hir(), param))
+                                Some(Region::late(idx as u32, &self.tcx.hir(), param))
                             }
                             _ => None,
                         })
@@ -530,6 +538,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     next_early_index,
                     track_lifetime_uses: true,
                     opaque_type_parent: false,
+                    named_late_bound_vars: c.generic_params.len() as u32,
                 };
                 self.with(scope, |old_scope, this| {
                     // a bare fn has no bounds, so everything
@@ -564,7 +573,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         // resolved the same as the `'_` in `&'_ Foo`.
                         //
                         // cc #48468
-                        self.resolve_elided_lifetimes(vec![lifetime])
+                        self.resolve_elided_lifetimes(&[lifetime])
                     }
                     LifetimeName::Param(_) | LifetimeName::Static => {
                         // If the user wrote an explicit name, use that.
@@ -627,7 +636,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         // well-supported at the moment, so this doesn't work.
                         // In the future, this should be fixed and this error should be removed.
                         let def = self.map.defs.get(&lifetime.hir_id).cloned();
-                        if let Some(Region::LateBound(_, def_id, _)) = def {
+                        if let Some(Region::LateBound(_, _, def_id, _)) = def {
                             if let Some(def_id) = def_id.as_local() {
                                 let hir_id = self.tcx.hir().local_def_id_to_hir_id(def_id);
                                 // Ensure that the parent of the def is an item, not HRTB
@@ -703,6 +712,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             s: this.scope,
                             track_lifetime_uses: true,
                             opaque_type_parent: false,
+                            named_late_bound_vars: 0,
                         };
                         this.with(scope, |_old_scope, this| {
                             this.visit_generics(generics);
@@ -718,6 +728,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         s: self.scope,
                         track_lifetime_uses: true,
                         opaque_type_parent: false,
+                        named_late_bound_vars: 0,
                     };
                     self.with(scope, |_old_scope, this| {
                         this.visit_generics(generics);
@@ -770,6 +781,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     s: self.scope,
                     track_lifetime_uses: true,
                     opaque_type_parent: true,
+                    named_late_bound_vars: 0,
                 };
                 self.with(scope, |old_scope, this| {
                     this.check_lifetime_params(old_scope, &generics.params);
@@ -832,6 +844,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     s: self.scope,
                     track_lifetime_uses: true,
                     opaque_type_parent: true,
+                    named_late_bound_vars: 0,
                 };
                 self.with(scope, |old_scope, this| {
                     this.check_lifetime_params(old_scope, &generics.params);
@@ -853,7 +866,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
     fn visit_lifetime(&mut self, lifetime_ref: &'tcx hir::Lifetime) {
         debug!("visit_lifetime(lifetime_ref={:?})", lifetime_ref);
         if lifetime_ref.is_elided() {
-            self.resolve_elided_lifetimes(vec![lifetime_ref]);
+            self.resolve_elided_lifetimes(&[lifetime_ref]);
             return;
         }
         if lifetime_ref.is_static() {
@@ -914,9 +927,10 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 }) => {
                     let lifetimes: FxHashMap<_, _> = bound_generic_params
                         .iter()
-                        .filter_map(|param| match param.kind {
+                        .enumerate()
+                        .filter_map(|(idx, param)| match param.kind {
                             GenericParamKind::Lifetime { .. } => {
-                                Some(Region::late(&self.tcx.hir(), param))
+                                Some(Region::late(idx as u32, &self.tcx.hir(), param))
                             }
                             _ => None,
                         })
@@ -929,6 +943,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             next_early_index,
                             track_lifetime_uses: true,
                             opaque_type_parent: false,
+                            named_late_bound_vars: bound_generic_params.len() as u32,
                         };
                         let result = self.with(scope, |old_scope, this| {
                             this.check_lifetime_params(old_scope, &bound_generic_params);
@@ -972,6 +987,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     next_early_index: self.next_early_index(),
                     track_lifetime_uses: true,
                     opaque_type_parent: false,
+                    named_late_bound_vars: 0,
                 };
                 self.with(scope, |_, this| {
                     intravisit::walk_param_bound(this, bound);
@@ -1011,9 +1027,10 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 lifetimes: trait_ref
                     .bound_generic_params
                     .iter()
-                    .filter_map(|param| match param.kind {
+                    .enumerate()
+                    .filter_map(|(idx, param)| match param.kind {
                         GenericParamKind::Lifetime { .. } => {
-                            Some(Region::late(&self.tcx.hir(), param))
+                            Some(Region::late(idx as u32, &self.tcx.hir(), param))
                         }
                         _ => None,
                     })
@@ -1022,6 +1039,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 next_early_index,
                 track_lifetime_uses: true,
                 opaque_type_parent: false,
+                named_late_bound_vars: trait_ref.bound_generic_params.len() as u32,
             };
             self.with(scope, |old_scope, this| {
                 this.check_lifetime_params(old_scope, &trait_ref.bound_generic_params);
@@ -1539,7 +1557,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             .values()
             .flat_map(|region| match region {
                 Region::EarlyBound(_, def_id, _)
-                | Region::LateBound(_, def_id, _)
+                | Region::LateBound(_, _, def_id, _)
                 | Region::Free(_, def_id) => Some(*def_id),
 
                 Region::LateBoundAnon(..) | Region::Static => None,
@@ -1710,13 +1728,16 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         }
 
         let mut non_lifetime_count = 0;
+        let mut named_late_bound_vars = 0;
         let lifetimes = generics
             .params
             .iter()
-            .filter_map(|param| match param.kind {
+            .enumerate()
+            .filter_map(|(idx, param)| match param.kind {
                 GenericParamKind::Lifetime { .. } => {
                     if self.map.late_bound.contains(&param.hir_id) {
-                        Some(Region::late(&self.tcx.hir(), param))
+                        named_late_bound_vars += 1;
+                        Some(Region::late(idx as u32, &self.tcx.hir(), param))
                     } else {
                         Some(Region::early(&self.tcx.hir(), &mut index, param))
                     }
@@ -1735,6 +1756,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             s: self.scope,
             opaque_type_parent: true,
             track_lifetime_uses: false,
+            named_late_bound_vars,
         };
         self.with(scope, move |old_scope, this| {
             this.check_lifetime_params(old_scope, &generics.params);
@@ -1849,7 +1871,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             if self.is_in_fn_syntax {
                 match def {
                     Region::EarlyBound(_, _, LifetimeDefOrigin::InBand)
-                    | Region::LateBound(_, _, LifetimeDefOrigin::InBand) => {
+                    | Region::LateBound(_, _, _, LifetimeDefOrigin::InBand) => {
                         struct_span_err!(
                             self.tcx.sess,
                             lifetime_ref.span,
@@ -1868,6 +1890,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                         LifetimeDefOrigin::ExplicitOrElided | LifetimeDefOrigin::Error,
                     )
                     | Region::LateBound(
+                        _,
                         _,
                         _,
                         LifetimeDefOrigin::ExplicitOrElided | LifetimeDefOrigin::Error,
@@ -1903,7 +1926,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         }
 
         let mut elide_lifetimes = true;
-        let lifetimes = generic_args
+        let lifetimes: Vec<_> = generic_args
             .args
             .iter()
             .filter_map(|arg| match arg {
@@ -1917,7 +1940,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             })
             .collect();
         if elide_lifetimes {
-            self.resolve_elided_lifetimes(lifetimes);
+            self.resolve_elided_lifetimes(&lifetimes);
         } else {
             lifetimes.iter().for_each(|lt| self.visit_lifetime(lt));
         }
@@ -2083,7 +2106,12 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         output: Option<&'tcx hir::Ty<'tcx>>,
     ) {
         debug!("visit_fn_like_elision: enter");
-        let mut arg_elide = Elide::FreshLateAnon(Cell::new(0));
+        let named_late_bound_vars = match *self.scope {
+            Scope::Binder { named_late_bound_vars, .. } => named_late_bound_vars,
+            Scope::Body { .. } => 0,
+            _ => bug!("{:?}", self.scope),
+        };
+        let mut arg_elide = Elide::FreshLateAnon(named_late_bound_vars, Cell::new(0));
         let arg_scope = Scope::Elision { elide: arg_elide.clone(), s: self.scope };
         self.with(arg_scope, |_, this| {
             for input in inputs {
@@ -2346,7 +2374,8 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             fn visit_lifetime(&mut self, lifetime_ref: &hir::Lifetime) {
                 if let Some(&lifetime) = self.map.defs.get(&lifetime_ref.hir_id) {
                     match lifetime {
-                        Region::LateBound(debruijn, _, _) | Region::LateBoundAnon(debruijn, _)
+                        Region::LateBound(debruijn, _, _, _)
+                        | Region::LateBoundAnon(debruijn, _, _)
                             if debruijn < self.outer_index =>
                         {
                             self.have_bound_regions = true;
@@ -2360,7 +2389,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         }
     }
 
-    fn resolve_elided_lifetimes(&mut self, lifetime_refs: Vec<&'tcx hir::Lifetime>) {
+    fn resolve_elided_lifetimes(&mut self, lifetime_refs: &[&'tcx hir::Lifetime]) {
         debug!("resolve_elided_lifetimes(lifetime_refs={:?})", lifetime_refs);
 
         if lifetime_refs.is_empty() {
@@ -2393,9 +2422,10 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 
                 Scope::Elision { ref elide, ref s, .. } => {
                     let lifetime = match *elide {
-                        Elide::FreshLateAnon(ref counter) => {
+                        Elide::FreshLateAnon(named_late_bound_vars, ref counter) => {
                             for lifetime_ref in lifetime_refs {
-                                let lifetime = Region::late_anon(counter).shifted(late_depth);
+                                let lifetime = Region::late_anon(named_late_bound_vars, counter)
+                                    .shifted(late_depth);
                                 self.insert_lifetime(lifetime_ref, lifetime);
                             }
                             return;
@@ -2720,7 +2750,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 // A lifetime only used in a fn argument could as well
                 // be replaced with `'_`, as that would generate a
                 // fresh name, too.
-                Scope::Elision { elide: Elide::FreshLateAnon(_), .. } => break true,
+                Scope::Elision { elide: Elide::FreshLateAnon(_, _), .. } => break true,
 
                 // In the return type or other such place, `'_` is not
                 // going to make a fresh name, so we cannot
@@ -2750,7 +2780,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
 
             Region::Free(_, def_id)
-            | Region::LateBound(_, def_id, _)
+            | Region::LateBound(_, _, def_id, _)
             | Region::EarlyBound(_, def_id, _) => {
                 // A lifetime declared by the user.
                 let track_lifetime_uses = self.track_lifetime_uses();
