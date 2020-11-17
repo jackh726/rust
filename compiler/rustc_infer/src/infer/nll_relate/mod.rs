@@ -121,7 +121,7 @@ pub trait TypeRelatingDelegate<'tcx> {
 
 #[derive(Clone, Debug, Default)]
 struct BoundRegionScope<'tcx> {
-    map: FxHashMap<ty::BoundRegion, ty::Region<'tcx>>,
+    map: FxHashMap<u32, ty::Region<'tcx>>,
 }
 
 #[derive(Copy, Clone)]
@@ -176,13 +176,6 @@ where
                         universe
                     });
 
-                    let br = match br {
-                        ty::BoundRegion::BrAnon(idx) => match value.bound_vars()[idx as usize] {
-                            ty::BoundVariableKind::Region(r) => r,
-                            _ => bug!(),
-                        },
-                        _ => br,
-                    };
                     let placeholder = ty::PlaceholderRegion { universe, name: br };
                     delegate.next_placeholder_region(placeholder)
                 } else {
@@ -192,6 +185,7 @@ where
         };
 
         value.skip_binder().visit_with(&mut ScopeInstantiator {
+            binders: value.bound_vars(),
             next_region: &mut next_region,
             target_index: ty::INNERMOST,
             bound_region_scope: &mut scope,
@@ -210,7 +204,7 @@ where
     /// of ambient scopes `scopes`.
     fn lookup_bound_region(
         debruijn: ty::DebruijnIndex,
-        br: &ty::BoundRegion,
+        br: u32,
         first_free_index: ty::DebruijnIndex,
         scopes: &[BoundRegionScope<'tcx>],
     ) -> ty::Region<'tcx> {
@@ -222,7 +216,7 @@ where
 
         // Find this bound region in that scope to map to a
         // particular region.
-        scope.map[br]
+        scope.map[&br]
     }
 
     /// If `r` is a bound region, find the scope in which it is bound
@@ -236,7 +230,7 @@ where
     ) -> ty::Region<'tcx> {
         debug!("replace_bound_regions(scopes={:?})", scopes);
         if let ty::ReLateBound(debruijn, br) = r {
-            Self::lookup_bound_region(*debruijn, br, first_free_index, scopes)
+            Self::lookup_bound_region(*debruijn, *br, first_free_index, scopes)
         } else {
             r
         }
@@ -741,6 +735,7 @@ where
 /// `for<..`>.  For each of those, it creates an entry in
 /// `bound_region_scope`.
 struct ScopeInstantiator<'me, 'tcx> {
+    binders: &'tcx ty::List<ty::BoundVariableKind>,
     next_region: &'me mut dyn FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
     // The debruijn index of the scope we are instantiating.
     target_index: ty::DebruijnIndex,
@@ -764,7 +759,8 @@ impl<'me, 'tcx> TypeVisitor<'tcx> for ScopeInstantiator<'me, 'tcx> {
 
         match r {
             ty::ReLateBound(debruijn, br) if *debruijn == self.target_index => {
-                bound_region_scope.map.entry(*br).or_insert_with(|| next_region(*br));
+                let bound_region = self.binders[*br as usize].expect_region();
+                bound_region_scope.map.entry(*br).or_insert_with(|| next_region(bound_region));
             }
 
             _ => {}

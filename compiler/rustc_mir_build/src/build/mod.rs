@@ -243,7 +243,7 @@ fn liberated_closure_env_ty(
         std::iter::once(ty::BoundVariableKind::Region(ty::BrEnv)),
     );
     let env_region =
-        ty::ReLateBound(ty::INNERMOST, ty::BrAnon((bound_vars.len() as u32) - 1));
+        ty::ReLateBound(ty::INNERMOST, (bound_vars.len() as u32) - 1);
     let closure_env_ty = tcx.closure_env_ty(closure_def_id, closure_substs, env_region).unwrap();
     tcx.erase_late_bound_regions(ty::Binder::bind_with_vars(
         closure_env_ty,

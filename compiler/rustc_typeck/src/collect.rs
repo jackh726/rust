@@ -50,6 +50,7 @@ use rustc_span::{Span, DUMMY_SP};
 use rustc_target::spec::abi;
 use rustc_trait_selection::traits::error_reporting::suggestions::NextTypeParamName;
 
+use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 
 mod item_bounds;
@@ -252,6 +253,39 @@ impl Visitor<'tcx> for CollectItemTypesVisitor<'tcx> {
     fn visit_impl_item(&mut self, impl_item: &'tcx hir::ImplItem<'tcx>) {
         convert_impl_item(self.tcx, impl_item.hir_id);
         intravisit::walk_impl_item(self, impl_item);
+    }
+}
+
+crate struct LateBoundRegionsCollector<'tcx>(
+    crate TyCtxt<'tcx>,
+    crate BTreeMap<u32, ty::BoundRegion>,
+);
+
+impl<'v, 'tcx> Visitor<'v> for LateBoundRegionsCollector<'tcx> {
+    type Map = intravisit::ErasedMap<'v>;
+
+    fn nested_visit_map(&mut self) -> NestedVisitorMap<Self::Map> {
+        NestedVisitorMap::None
+    }
+
+    fn visit_lifetime(&mut self, lifetime: &'v hir::Lifetime) {
+        let tcx = self.0;
+        let lifetime_name = |def_id| tcx.hir().name(tcx.hir().local_def_id_to_hir_id(def_id));
+
+        match tcx.named_region(lifetime.hir_id) {
+            Some(rl::Region::LateBound(debruijn, idx, id, _)) if debruijn == ty::INNERMOST => {
+                let name = lifetime_name(id.expect_local());
+                self.1.insert(idx, ty::BrNamed(id, name));
+            }
+
+            Some(rl::Region::LateBoundAnon(debruijn, idx, anon_index))
+                if debruijn == ty::INNERMOST =>
+            {
+                self.1.insert(idx, ty::BrAnon(anon_index));
+            }
+
+            _ => {}
+        }
     }
 }
 

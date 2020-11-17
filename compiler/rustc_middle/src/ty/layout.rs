@@ -2446,8 +2446,7 @@ impl<'tcx> ty::Instance<'tcx> {
                         .iter()
                         .chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),
                 );
-                let env_region =
-                    ty::ReLateBound(ty::INNERMOST, ty::BrAnon((bound_vars.len() as u32) - 1));
+                let env_region = ty::ReLateBound(ty::INNERMOST, (bound_vars.len() as u32) - 1);
                 let env_ty = tcx.closure_env_ty(def_id, substs, env_region).unwrap();
 
                 ty::Binder::bind_with_vars(
@@ -2472,8 +2471,7 @@ impl<'tcx> ty::Instance<'tcx> {
                         .iter()
                         .chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),
                 );
-                let env_region =
-                    ty::ReLateBound(ty::INNERMOST, ty::BrAnon((bound_vars.len() as u32) - 1));
+                let env_region = ty::ReLateBound(ty::INNERMOST, (bound_vars.len() as u32) - 1);
                 let env_ty = tcx.mk_mut_ref(tcx.mk_region(env_region), ty);
 
                 let pin_did = tcx.require_lang_item(LangItem::Pin, None);

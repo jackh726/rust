@@ -1243,6 +1243,22 @@ impl<'tcx> PredicateAtom<'tcx> {
     }
 }
 
+impl<'tcx> Binder<'tcx, PredicateAtom<'tcx>> {
+    /// Wraps `self` with the given qualifier if this predicate has any unbound variables.
+    pub fn potentially_quantified(
+        self,
+        tcx: TyCtxt<'tcx>,
+        qualifier: impl FnOnce(Binder<'tcx, PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
+    ) -> Predicate<'tcx> {
+        if self.skip_binder().has_escaping_bound_vars() {
+            qualifier(self)
+        } else {
+            PredicateKind::Atom(self.skip_binder())
+        }
+        .to_predicate(tcx)
+    }
+}
+
 /// The crate outlives map is computed during typeck and contains the
 /// outlives of every item in the local crate. You should not use it
 /// directly, because to do so will make your pass dependent on the
@@ -1330,7 +1346,11 @@ impl<'tcx> Predicate<'tcx> {
         let substs = trait_ref.skip_binder().substs;
         let pred = self.skip_binders();
         let new = pred.subst(tcx, substs);
-        if new != pred { new.potentially_quantified(tcx, PredicateKind::ForAll) } else { self }
+        if new != pred {
+            trait_ref.rebind(new).potentially_quantified(tcx, PredicateKind::ForAll)
+        } else {
+            self
+        }
     }
 }
 
@@ -1470,28 +1490,29 @@ impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<TraitPredicate<'tcx>> {
 
 impl<'tcx> ToPredicate<'tcx> for ConstnessAnd<PolyTraitPredicate<'tcx>> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateAtom::Trait(self.value.skip_binder(), self.constness)
+        self.value
+            .map_bound(|value| PredicateAtom::Trait(value, self.constness))
             .potentially_quantified(tcx, PredicateKind::ForAll)
     }
 }
 
 impl<'tcx> ToPredicate<'tcx> for PolyRegionOutlivesPredicate<'tcx> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateAtom::RegionOutlives(self.skip_binder())
+        self.map_bound(|value| PredicateAtom::RegionOutlives(value))
             .potentially_quantified(tcx, PredicateKind::ForAll)
     }
 }
 
 impl<'tcx> ToPredicate<'tcx> for PolyTypeOutlivesPredicate<'tcx> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateAtom::TypeOutlives(self.skip_binder())
+        self.map_bound(|value| PredicateAtom::TypeOutlives(value))
             .potentially_quantified(tcx, PredicateKind::ForAll)
     }
 }
 
 impl<'tcx> ToPredicate<'tcx> for PolyProjectionPredicate<'tcx> {
     fn to_predicate(self, tcx: TyCtxt<'tcx>) -> Predicate<'tcx> {
-        PredicateAtom::Projection(self.skip_binder())
+        self.map_bound(|value| PredicateAtom::Projection(value))
             .potentially_quantified(tcx, PredicateKind::ForAll)
     }
 }
