@@ -494,14 +494,16 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 };
                 self.missing_named_lifetime_spots
                     .push(MissingLifetimeSpot::HigherRanked { span, span_type });
+                let mut named_late_bound_vars = 0;
                 let scope = Scope::Binder {
                     lifetimes: c
                         .generic_params
                         .iter()
-                        .enumerate()
-                        .filter_map(|(idx, param)| match param.kind {
+                        .filter_map(|param| match param.kind {
                             GenericParamKind::Lifetime { .. } => {
-                                Some(Region::late(idx as u32, &self.tcx.hir(), param))
+                                let late_bound_idx = named_late_bound_vars;
+                                named_late_bound_vars += 1;
+                                Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
                             }
                             _ => None,
                         })
@@ -510,7 +512,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     next_early_index,
                     track_lifetime_uses: true,
                     opaque_type_parent: false,
-                    named_late_bound_vars: c.generic_params.len() as u32,
+                    named_late_bound_vars,
                 };
                 self.with(scope, |old_scope, this| {
                     // a bare fn has no bounds, so everything
@@ -897,12 +899,14 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     ref bound_generic_params,
                     ..
                 }) => {
+                    let mut named_late_bound_vars = 0;
                     let lifetimes: FxHashMap<_, _> = bound_generic_params
                         .iter()
-                        .enumerate()
-                        .filter_map(|(idx, param)| match param.kind {
+                        .filter_map(|param| match param.kind {
                             GenericParamKind::Lifetime { .. } => {
-                                Some(Region::late(idx as u32, &self.tcx.hir(), param))
+                                let late_bound_idx = named_late_bound_vars;
+                                named_late_bound_vars += 1;
+                                Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
                             }
                             _ => None,
                         })
@@ -915,7 +919,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             next_early_index,
                             track_lifetime_uses: true,
                             opaque_type_parent: false,
-                            named_late_bound_vars: bound_generic_params.len() as u32,
+                            named_late_bound_vars,
                         };
                         let result = self.with(scope, |old_scope, this| {
                             this.check_lifetime_params(old_scope, &bound_generic_params);
@@ -995,14 +999,16 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 .emit();
             }
             let next_early_index = self.next_early_index();
+            let mut named_late_bound_vars = 0;
             let scope = Scope::Binder {
                 lifetimes: trait_ref
                     .bound_generic_params
                     .iter()
-                    .enumerate()
-                    .filter_map(|(idx, param)| match param.kind {
+                    .filter_map(|param| match param.kind {
                         GenericParamKind::Lifetime { .. } => {
-                            Some(Region::late(idx as u32, &self.tcx.hir(), param))
+                            let late_bound_idx = named_late_bound_vars;
+                            named_late_bound_vars += 1;
+                            Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
                         }
                         _ => None,
                     })
@@ -1011,7 +1017,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 next_early_index,
                 track_lifetime_uses: true,
                 opaque_type_parent: false,
-                named_late_bound_vars: trait_ref.bound_generic_params.len() as u32,
+                named_late_bound_vars,
             };
             self.with(scope, |old_scope, this| {
                 this.check_lifetime_params(old_scope, &trait_ref.bound_generic_params);
@@ -1707,12 +1713,12 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         let lifetimes = generics
             .params
             .iter()
-            .enumerate()
-            .filter_map(|(idx, param)| match param.kind {
+            .filter_map(|param| match param.kind {
                 GenericParamKind::Lifetime { .. } => {
                     if self.map.late_bound.contains(&param.hir_id) {
+                        let late_bound_idx = named_late_bound_vars;
                         named_late_bound_vars += 1;
-                        Some(Region::late(idx as u32, &self.tcx.hir(), param))
+                        Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
                     } else {
                         Some(Region::early(&self.tcx.hir(), &mut index, param))
                     }

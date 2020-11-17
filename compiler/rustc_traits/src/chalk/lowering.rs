@@ -36,7 +36,7 @@ use rustc_middle::traits::{ChalkEnvironmentAndGoal, ChalkRustInterner as RustInt
 use rustc_middle::ty::fold::TypeFolder;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, SubstsRef};
 use rustc_middle::ty::{
-    self, Binder, BoundRegion, Region, RegionKind, Ty, TyCtxt, TypeFoldable, TypeVisitor,
+    self, Binder, Region, RegionKind, Ty, TyCtxt, TyKind, TypeFoldable, TypeVisitor,
 };
 use rustc_span::def_id::DefId;
 
@@ -444,17 +444,11 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Lifetime<RustInterner<'tcx>>> for Region<'t
             ReEarlyBound(_) => {
                 panic!("Should have already been substituted.");
             }
-            ReLateBound(db, br) => match br {
-                ty::BoundRegion::BrAnon(var) => {
-                    chalk_ir::LifetimeData::BoundVar(chalk_ir::BoundVar::new(
-                        chalk_ir::DebruijnIndex::new(db.as_u32()),
-                        *var as usize,
-                    ))
-                    .intern(interner)
-                }
-                ty::BoundRegion::BrNamed(_def_id, _name) => unimplemented!(),
-                ty::BrEnv => unimplemented!(),
-            },
+            ReLateBound(db, br) => chalk_ir::LifetimeData::BoundVar(chalk_ir::BoundVar::new(
+                chalk_ir::DebruijnIndex::new(db.as_u32()),
+                *br as usize,
+            ))
+            .intern(interner),
             ReFree(_) => unimplemented!(),
             ReStatic => chalk_ir::LifetimeData::Static.intern(interner),
             ReVar(_) => unimplemented!(),
@@ -477,7 +471,7 @@ impl<'tcx> LowerInto<'tcx, Region<'tcx>> for &chalk_ir::Lifetime<RustInterner<'t
         let kind = match self.data(interner) {
             chalk_ir::LifetimeData::BoundVar(var) => ty::RegionKind::ReLateBound(
                 ty::DebruijnIndex::from_u32(var.debruijn.depth()),
-                ty::BoundRegion::BrAnon(var.index as u32),
+                var.index as u32,
             ),
             chalk_ir::LifetimeData::InferenceVar(_var) => unimplemented!(),
             chalk_ir::LifetimeData::Placeholder(p) => {
@@ -890,26 +884,6 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
 
     fn visit_region(&mut self, r: Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         match r {
-            ty::ReLateBound(index, br) if *index == self.binder_index => match br {
-                ty::BoundRegion::BrNamed(def_id, _name) => {
-                    if self.named_parameters.iter().find(|d| *d == def_id).is_none() {
-                        self.named_parameters.push(*def_id);
-                    }
-                }
-
-                ty::BoundRegion::BrAnon(var) => match self.parameters.entry(*var) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(chalk_ir::VariableKind::Lifetime);
-                    }
-                    Entry::Occupied(entry) => match entry.get() {
-                        chalk_ir::VariableKind::Lifetime => {}
-                        _ => panic!(),
-                    },
-                },
-
-                ty::BrEnv => unimplemented!(),
-            },
-
             ty::ReEarlyBound(_re) => {
                 // FIXME(chalk): jackh726 - I think we should always have already
                 // substituted away `ReEarlyBound`s for `ReLateBound`s, but need to confirm.
@@ -929,12 +903,16 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
 struct NamedBoundVarSubstitutor<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     binder_index: ty::DebruijnIndex,
-    named_parameters: &'a BTreeMap<DefId, u32>,
+    _named_parameters: &'a BTreeMap<DefId, u32>,
 }
 
 impl<'a, 'tcx> NamedBoundVarSubstitutor<'a, 'tcx> {
     fn new(tcx: TyCtxt<'tcx>, named_parameters: &'a BTreeMap<DefId, u32>) -> Self {
-        NamedBoundVarSubstitutor { tcx, binder_index: ty::INNERMOST, named_parameters }
+        NamedBoundVarSubstitutor {
+            tcx,
+            binder_index: ty::INNERMOST,
+            _named_parameters: named_parameters,
+        }
     }
 }
 
@@ -948,29 +926,6 @@ impl<'a, 'tcx> TypeFolder<'tcx> for NamedBoundVarSubstitutor<'a, 'tcx> {
         let result = t.super_fold_with(self);
         self.binder_index.shift_out(1);
         result
-    }
-
-    fn fold_region(&mut self, r: Region<'tcx>) -> Region<'tcx> {
-        match r {
-            ty::ReLateBound(index, br) if *index == self.binder_index => match br {
-                ty::BoundRegion::BrNamed(def_id, _name) => {
-                    match self.named_parameters.get(def_id) {
-                        Some(idx) => {
-                            return self.tcx.mk_region(RegionKind::ReLateBound(
-                                *index,
-                                BoundRegion::BrAnon(*idx),
-                            ));
-                        }
-                        None => panic!("Missing `BrNamed`."),
-                    }
-                }
-                ty::BrEnv => unimplemented!(),
-                ty::BoundRegion::BrAnon(_) => {}
-            },
-            _ => (),
-        };
-
-        r.super_fold_with(self)
     }
 }
 
@@ -1041,17 +996,11 @@ impl<'tcx> TypeFolder<'tcx> for ParamsSubstitutor<'tcx> {
             // FIXME(chalk) - jackh726 - this currently isn't hit in any tests.
             // This covers any region variables in a goal, right?
             ty::ReEarlyBound(_re) => match self.named_regions.get(&_re.def_id) {
-                Some(idx) => self.tcx.mk_region(RegionKind::ReLateBound(
-                    self.binder_index,
-                    BoundRegion::BrAnon(*idx),
-                )),
+                Some(idx) => self.tcx.mk_region(RegionKind::ReLateBound(self.binder_index, *idx)),
                 None => {
                     let idx = self.named_regions.len() as u32;
                     self.named_regions.insert(_re.def_id, idx);
-                    self.tcx.mk_region(RegionKind::ReLateBound(
-                        self.binder_index,
-                        BoundRegion::BrAnon(idx),
-                    ))
+                    self.tcx.mk_region(RegionKind::ReLateBound(self.binder_index, idx))
                 }
             },
 

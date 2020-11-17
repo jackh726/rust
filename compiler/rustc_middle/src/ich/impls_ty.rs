@@ -70,17 +70,9 @@ impl<'a> HashStable<StableHashingContext<'a>> for ty::RegionKind {
             ty::ReEmpty(universe) => {
                 universe.hash_stable(hcx, hasher);
             }
-            ty::ReLateBound(db, ty::BrAnon(i)) => {
+            ty::ReLateBound(db, i) => {
                 db.hash_stable(hcx, hasher);
                 i.hash_stable(hcx, hasher);
-            }
-            ty::ReLateBound(db, ty::BrNamed(def_id, name)) => {
-                db.hash_stable(hcx, hasher);
-                def_id.hash_stable(hcx, hasher);
-                name.hash_stable(hcx, hasher);
-            }
-            ty::ReLateBound(db, ty::BrEnv) => {
-                db.hash_stable(hcx, hasher);
             }
             ty::ReEarlyBound(ty::EarlyBoundRegion { def_id, index, name }) => {
                 def_id.hash_stable(hcx, hasher);

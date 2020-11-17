@@ -186,7 +186,7 @@ pub fn resolve_interior<'a, 'tcx>(
                 // which means that none of the regions inside relate to any other, even if
                 // typeck had previously found constraints that would cause them to be related.
                 let folded = fcx.tcx.fold_regions(erased, &mut false, |_, current_depth| {
-                    let r = fcx.tcx.mk_region(ty::ReLateBound(current_depth, ty::BrAnon(counter)));
+                    let r = fcx.tcx.mk_region(ty::ReLateBound(current_depth, counter));
                     counter += 1;
                     r
                 });
@@ -201,7 +201,10 @@ pub fn resolve_interior<'a, 'tcx>(
 
     // Extract type components to build the witness type.
     let type_list = fcx.tcx.mk_type_list(type_causes.iter().map(|cause| cause.ty));
-    let witness = fcx.tcx.mk_generator_witness(ty::Binder::bind(type_list, fcx.tcx));
+    let bound_vars = fcx.tcx.mk_bound_variable_kinds(
+        (0..counter).map(|i| ty::BoundVariableKind::Region(ty::BrAnon(i))),
+    );
+    let witness = fcx.tcx.mk_generator_witness(ty::Binder::bind_with_vars(type_list, bound_vars));
 
     // Store the generator types and spans into the typeck results for this generator.
     visitor.fcx.inh.typeck_results.borrow_mut().generator_interior_types = type_causes;
