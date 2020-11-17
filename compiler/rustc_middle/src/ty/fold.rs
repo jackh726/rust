@@ -443,7 +443,7 @@ struct BoundVarReplacer<'a, 'tcx> {
     /// the ones we have visited.
     current_index: ty::DebruijnIndex,
 
-    fld_r: &'a mut (dyn FnMut(ty::BoundRegion) -> ty::Region<'tcx> + 'a),
+    fld_r: &'a mut (dyn FnMut(u32) -> ty::Region<'tcx> + 'a),
     fld_t: &'a mut (dyn FnMut(ty::BoundTy) -> Ty<'tcx> + 'a),
     fld_c: &'a mut (dyn FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx> + 'a),
 }
@@ -451,7 +451,7 @@ struct BoundVarReplacer<'a, 'tcx> {
 impl<'a, 'tcx> BoundVarReplacer<'a, 'tcx> {
     fn new<F, G, H>(tcx: TyCtxt<'tcx>, fld_r: &'a mut F, fld_t: &'a mut G, fld_c: &'a mut H) -> Self
     where
-        F: FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
+        F: FnMut(u32) -> ty::Region<'tcx>,
         G: FnMut(ty::BoundTy) -> Ty<'tcx>,
         H: FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx>,
     {
@@ -551,18 +551,30 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn replace_late_bound_regions<T, F>(
         self,
         value: Binder<'tcx, T>,
-        fld_r: F,
+        mut fld_r: F,
     ) -> (T, BTreeMap<ty::BoundRegion, ty::Region<'tcx>>)
     where
         F: FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
         T: TypeFoldable<'tcx>,
     {
+        // FIXME: BoundVarReplacer could be changed to accept `None` to be noop
         // identity for bound types and consts
         let fld_t = |bound_ty| self.mk_ty(ty::Bound(ty::INNERMOST, bound_ty));
         let fld_c = |bound_ct, ty| {
             self.mk_const(ty::Const { val: ty::ConstKind::Bound(ty::INNERMOST, bound_ct), ty })
         };
-        self.replace_escaping_bound_vars(value.skip_binder(), fld_r, fld_t, fld_c)
+        let mut region_map = BTreeMap::new();
+        let real_fld_r = |br| {
+            let br = value.bound_vars()[br as usize].expect_region();
+            *region_map.entry(br).or_insert_with(|| fld_r(br))
+        };
+        let value = self.replace_escaping_bound_vars(
+            value.skip_binder(),
+            real_fld_r,
+            fld_t,
+            fld_c,
+        );
+        (value, region_map)
     }
 
     /// Replaces all escaping bound vars. The `fld_r` closure replaces escaping
@@ -574,34 +586,18 @@ impl<'tcx> TyCtxt<'tcx> {
         mut fld_r: F,
         mut fld_t: G,
         mut fld_c: H,
-    ) -> (T, BTreeMap<ty::BoundRegion, ty::Region<'tcx>>)
+    ) -> T
     where
-        F: FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
+        F: FnMut(u32) -> ty::Region<'tcx>,
         G: FnMut(ty::BoundTy) -> Ty<'tcx>,
         H: FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx>,
         T: TypeFoldable<'tcx>,
     {
-        use rustc_data_structures::fx::FxHashMap;
-
-        let mut region_map = BTreeMap::new();
-        let mut type_map = FxHashMap::default();
-        let mut const_map = FxHashMap::default();
-
         if !value.has_escaping_bound_vars() {
-            (value, region_map)
+            value
         } else {
-            let mut real_fld_r = |br| *region_map.entry(br).or_insert_with(|| fld_r(br));
-
-            let mut real_fld_t =
-                |bound_ty| *type_map.entry(bound_ty).or_insert_with(|| fld_t(bound_ty));
-
-            let mut real_fld_c =
-                |bound_ct, ty| *const_map.entry(bound_ct).or_insert_with(|| fld_c(bound_ct, ty));
-
-            let mut replacer =
-                BoundVarReplacer::new(self, &mut real_fld_r, &mut real_fld_t, &mut real_fld_c);
-            let result = value.fold_with(&mut replacer);
-            (result, region_map)
+            let mut replacer = BoundVarReplacer::new(self, &mut fld_r, &mut fld_t, &mut fld_c);
+            value.fold_with(&mut replacer)
         }
     }
 
@@ -611,7 +607,7 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn replace_bound_vars<T, F, G, H>(
         self,
         value: Binder<'tcx, T>,
-        fld_r: F,
+        mut fld_r: F,
         fld_t: G,
         fld_c: H,
     ) -> (T, BTreeMap<ty::BoundRegion, ty::Region<'tcx>>)
@@ -621,7 +617,18 @@ impl<'tcx> TyCtxt<'tcx> {
         H: FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx>,
         T: TypeFoldable<'tcx>,
     {
-        self.replace_escaping_bound_vars(value.skip_binder(), fld_r, fld_t, fld_c)
+        let mut region_map = BTreeMap::new();
+        let real_fld_r = |br| {
+            let br = value.bound_vars()[br as usize].expect_region();
+            *region_map.entry(br).or_insert_with(|| fld_r(br))
+        };
+        let value = self.replace_escaping_bound_vars(
+            value.skip_binder(),
+            real_fld_r,
+            fld_t,
+            fld_c,
+        );
+        (value, region_map)
     }
 
     /// Replaces any late-bound regions bound in `value` with
@@ -635,13 +642,6 @@ impl<'tcx> TyCtxt<'tcx> {
         T: TypeFoldable<'tcx>,
     {
         self.replace_late_bound_regions(value, |br| {
-            let br = match br {
-                ty::BoundRegion::BrAnon(idx) => match value.bound_vars()[idx as usize] {
-                    ty::BoundVariableKind::Region(r) => r,
-                    _ => bug!(),
-                },
-                _ => br,
-            };
             self.mk_region(ty::ReFree(ty::FreeRegion {
                 scope: all_outlive_scope,
                 bound_region: br,
@@ -683,7 +683,7 @@ impl<'tcx> TyCtxt<'tcx> {
     where
         T: TypeFoldable<'tcx>,
     {
-        let mut collector = LateBoundRegionsCollector::new(just_constraint);
+        let mut collector = LateBoundRegionsCollector::new(value.bound_vars(), just_constraint);
         let result = value.as_ref().skip_binder().visit_with(&mut collector);
         assert!(result.is_continue()); // should never have stopped early
         collector.regions
@@ -711,15 +711,17 @@ impl<'tcx> TyCtxt<'tcx> {
         T: TypeFoldable<'tcx>,
     {
         let mut counter = 0;
-        Binder::bind(
-            self.replace_late_bound_regions(sig, |_| {
-                let r = self.mk_region(ty::ReLateBound(ty::INNERMOST, ty::BrAnon(counter)));
+        let inner = self
+            .replace_late_bound_regions(sig, |_| {
+                let r = self.mk_region(ty::ReLateBound(ty::INNERMOST, counter));
                 counter += 1;
                 r
             })
-            .0,
-            self,
-        )
+            .0;
+        let bound_vars = self.mk_bound_variable_kinds(
+            (0..counter).map(|i| ty::BoundVariableKind::Region(ty::BrAnon(i))),
+        );
+        Binder::bind_with_vars(inner, bound_vars)
     }
 }
 
@@ -749,25 +751,23 @@ impl<'tcx> BoundVarsCollector<'tcx> {
 
         tcx.mk_bound_variable_kinds(self.vars.into_iter().map(|(_, v)| v))
     }
-
-    pub(crate) fn into_inner(self) -> BTreeMap<u32, ty::BoundVariableKind> {
-        self.vars
-    }
 }
 
 impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
-    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> bool {
+    type BreakTy = ();
+
+    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> ControlFlow<Self::BreakTy> {
         self.binder_index.shift_in(1);
         let result = t.super_visit_with(self);
         self.binder_index.shift_out(1);
         result
     }
 
-    fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
+    fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
         if t.outer_exclusive_binder < self.binder_index
             || !self.visited.insert((self.binder_index, t))
         {
-            return false;
+            return ControlFlow::BREAK;
         }
         use std::collections::btree_map::Entry;
         match *t.kind() {
@@ -789,26 +789,93 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
         t.super_visit_with(self)
     }
 
-    fn visit_region(&mut self, r: ty::Region<'tcx>) -> bool {
-        use std::collections::btree_map::Entry;
+    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         match r {
-            ty::ReLateBound(index, br) if *index == self.binder_index => match br {
-                ty::BoundRegion::BrNamed(_def_id, _name) => {
-                    // FIXME
+            ty::ReLateBound(index, _br) if *index == self.binder_index => bug!(),
+
+            _ => (),
+        };
+
+        r.super_visit_with(self)
+    }
+}
+
+pub struct ValidateBoundVars<'tcx> {
+    bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
+    binder_index: ty::DebruijnIndex,
+    visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
+}
+
+impl<'tcx> ValidateBoundVars<'tcx> {
+    pub fn new(bound_vars: &'tcx ty::List<ty::BoundVariableKind>) -> Self {
+        ValidateBoundVars {
+            bound_vars,
+            binder_index: ty::INNERMOST,
+            // We may encounter the same variable at different levels of binding
+            visited: SsoHashSet::default(),
+        }
+    }
+}
+
+impl<'tcx> TypeVisitor<'tcx> for ValidateBoundVars<'tcx> {
+    type BreakTy = ();
+
+    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> ControlFlow<Self::BreakTy> {
+        self.binder_index.shift_in(1);
+        let result = t.super_visit_with(self);
+        self.binder_index.shift_out(1);
+        result
+    }
+
+    fn visit_ty(&mut self, t: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
+        if t.outer_exclusive_binder < self.binder_index
+            || !self.visited.insert((self.binder_index, t))
+        {
+            return ControlFlow::BREAK;
+        }
+        match *t.kind() {
+            ty::Bound(debruijn, bound_ty) if debruijn == self.binder_index => {
+                if self.bound_vars.len() <= bound_ty.var.as_usize() {
+                    panic!("Not enough bound vars: {:?} not found in {:?}", t, self.bound_vars);
                 }
-
-                ty::BoundRegion::BrAnon(var) => match self.vars.entry(*var) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(ty::BoundVariableKind::Region(*br));
+                let list_var = self.bound_vars[bound_ty.var.as_usize()];
+                match list_var {
+                    ty::BoundVariableKind::Ty(kind) => {
+                        if kind != bound_ty.kind {
+                            panic!(
+                                "Mismatched type kinds: {:?} doesn't var in list {:?}",
+                                bound_ty.kind, list_var
+                            );
+                        }
                     }
-                    Entry::Occupied(entry) => match entry.get() {
-                        ty::BoundVariableKind::Region(_) => {}
-                        _ => bug!("Conflicting bound vars"),
-                    },
-                },
+                    _ => panic!(
+                        "Mismatched bound variable kinds! Expected type, found {:?}",
+                        list_var
+                    ),
+                }
+            }
 
-                ty::BrEnv => bug!(),
-            },
+            _ => (),
+        };
+
+        t.super_visit_with(self)
+    }
+
+    fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
+        match r {
+            ty::ReLateBound(index, br) if *index == self.binder_index => {
+                if self.bound_vars.len() <= *br as usize {
+                    panic!("Not enough bound vars: {:?} not found in {:?}", *br, self.bound_vars);
+                }
+                let list_var = self.bound_vars[*br as usize];
+                match list_var {
+                    ty::BoundVariableKind::Region(_) => {}
+                    _ => panic!(
+                        "Mismatched bound variable kinds! Expected region, found {:?}",
+                        list_var
+                    ),
+                }
+            }
 
             _ => (),
         };
@@ -1012,52 +1079,6 @@ impl<'tcx> TypeVisitor<'tcx> for HasEscapingVarsVisitor {
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 struct FoundFlags;
 
-crate struct CountBoundVars {
-    crate outer_index: ty::DebruijnIndex,
-    crate bound_tys: FxHashSet<ty::BoundTy>,
-    crate bound_regions: FxHashSet<ty::BoundRegion>,
-    crate bound_consts: FxHashSet<ty::BoundVar>,
-}
-
-impl<'tcx> TypeVisitor<'tcx> for CountBoundVars {
-    fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> bool {
-        self.outer_index.shift_in(1);
-        let result = t.super_visit_with(self);
-        self.outer_index.shift_out(1);
-        result
-    }
-
-    fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
-        match t.kind {
-            ty::Bound(debruijn, ty) if debruijn == self.outer_index => {
-                self.bound_tys.insert(ty);
-                false
-            }
-            _ => t.super_visit_with(self),
-        }
-    }
-
-    fn visit_region(&mut self, r: ty::Region<'tcx>) -> bool {
-        match r {
-            ty::ReLateBound(debruijn, re) if *debruijn == self.outer_index => {
-                self.bound_regions.insert(*re);
-                false
-            }
-            _ => r.super_visit_with(self),
-        }
-    }
-
-    fn visit_const(&mut self, ct: &'tcx ty::Const<'tcx>) -> bool {
-        match ct.val {
-            ty::ConstKind::Bound(debruijn, c) if debruijn == self.outer_index => {
-                self.bound_consts.insert(c);
-                false
-            }
-            _ => ct.super_visit_with(self),
-        }
-    }
-}
-
 // FIXME: Optimize for checking for infer flags
 struct HasTypeFlagsVisitor {
     flags: ty::TypeFlags,
@@ -1115,7 +1136,8 @@ impl<'tcx> TypeVisitor<'tcx> for HasTypeFlagsVisitor {
 
 /// Collects all the late-bound regions at the innermost binding level
 /// into a hash set.
-struct LateBoundRegionsCollector {
+struct LateBoundRegionsCollector<'tcx> {
+    binders: &'tcx ty::List<ty::BoundVariableKind>,
     current_index: ty::DebruijnIndex,
     regions: FxHashSet<ty::BoundRegion>,
 
@@ -1129,9 +1151,10 @@ struct LateBoundRegionsCollector {
     just_constrained: bool,
 }
 
-impl LateBoundRegionsCollector {
-    fn new(just_constrained: bool) -> Self {
+impl<'tcx> LateBoundRegionsCollector<'tcx> {
+    fn new(binders: &'tcx ty::List<ty::BoundVariableKind>, just_constrained: bool) -> Self {
         LateBoundRegionsCollector {
+            binders,
             current_index: ty::INNERMOST,
             regions: Default::default(),
             just_constrained,
@@ -1139,7 +1162,7 @@ impl LateBoundRegionsCollector {
     }
 }
 
-impl<'tcx> TypeVisitor<'tcx> for LateBoundRegionsCollector {
+impl<'tcx> TypeVisitor<'tcx> for LateBoundRegionsCollector<'tcx> {
     fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> ControlFlow<Self::BreakTy> {
         self.current_index.shift_in(1);
         let result = t.super_visit_with(self);
@@ -1176,7 +1199,7 @@ impl<'tcx> TypeVisitor<'tcx> for LateBoundRegionsCollector {
     fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         if let ty::ReLateBound(debruijn, br) = *r {
             if debruijn == self.current_index {
-                self.regions.insert(br);
+                self.regions.insert(self.binders[br as usize].expect_region());
             }
         }
         ControlFlow::CONTINUE

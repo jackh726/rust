@@ -6,6 +6,7 @@ mod errors;
 mod generics;
 
 use crate::bounds::Bounds;
+use crate::collect::LateBoundRegionsCollector;
 use crate::collect::PlaceholderHirTyCollector;
 use crate::errors::{
     AmbiguousLifetimeBound, MultipleRelaxedDefaultBounds, TraitObjectDeclaredWithNoTraits,
@@ -36,7 +37,7 @@ use rustc_trait_selection::traits::wf::object_region_bounds;
 
 use smallvec::SmallVec;
 use std::array;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::slice;
 
 #[derive(Debug)]
@@ -194,13 +195,12 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let r = match tcx.named_region(lifetime.hir_id) {
             Some(rl::Region::Static) => tcx.lifetimes.re_static,
 
-            Some(rl::Region::LateBound(debruijn, _, id, _)) => {
-                let name = lifetime_name(id.expect_local());
-                tcx.mk_region(ty::ReLateBound(debruijn, ty::BrNamed(id, name)))
+            Some(rl::Region::LateBound(debruijn, index, _, _)) => {
+                tcx.mk_region(ty::ReLateBound(debruijn, index))
             }
 
-            Some(rl::Region::LateBoundAnon(debruijn, _index, anon_index)) => {
-                tcx.mk_region(ty::ReLateBound(debruijn, ty::BrAnon(anon_index)))
+            Some(rl::Region::LateBoundAnon(debruijn, index, _anon_index)) => {
+                tcx.mk_region(ty::ReLateBound(debruijn, index))
             }
 
             Some(rl::Region::EarlyBound(index, id, _)) => {
@@ -625,7 +625,29 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             self_ty,
             trait_ref.path.segments.last().unwrap(),
         );
-        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs), self.tcx());
+
+        let tcx = self.tcx();
+        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
+        late_bound_vars_visitor
+            .visit_path_segment(trait_ref.path.span, trait_ref.path.segments.last().unwrap());
+        let bound_vars = {
+            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+            for i in 0..max {
+                if let None = late_bound_vars_visitor.1.get(&i) {
+                    panic!("Unknown variable: {:?}", i);
+                }
+            }
+
+            tcx.mk_bound_variable_kinds(
+                late_bound_vars_visitor
+                    .1
+                    .into_iter()
+                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
+            )
+        };
+
+        let poly_trait_ref =
+            ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
 
         bounds.trait_bounds.push((poly_trait_ref, span, constness));
 
@@ -701,7 +723,26 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         let (substs, assoc_bindings, _) =
             self.create_substs_for_ast_path(span, trait_def_id, &[], args, false, Some(self_ty));
-        let poly_trait_ref = ty::Binder::bind(ty::TraitRef::new(trait_def_id, substs), self.tcx());
+        let tcx = self.tcx();
+        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
+        late_bound_vars_visitor.visit_generic_args(span, args);
+        let bound_vars = {
+            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+            for i in 0..max {
+                if let None = late_bound_vars_visitor.1.get(&i) {
+                    panic!("Unknown variable: {:?}", i);
+                }
+            }
+
+            tcx.mk_bound_variable_kinds(
+                late_bound_vars_visitor
+                    .1
+                    .into_iter()
+                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
+            )
+        };
+        let poly_trait_ref =
+            ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
         bounds.trait_bounds.push((poly_trait_ref, span, Constness::NotConst));
 
         let mut dup_bindings = FxHashMap::default();
@@ -927,7 +968,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 let late_bound_in_trait_ref =
                     tcx.collect_constrained_late_bound_regions(&trait_ref);
                 let late_bound_in_ty =
-                    tcx.collect_referenced_late_bound_regions(&ty::Binder::bind(ty, tcx));
+                    tcx.collect_referenced_late_bound_regions(&trait_ref.rebind(ty));
                 debug!("late_bound_in_trait_ref = {:?}", late_bound_in_trait_ref);
                 debug!("late_bound_in_ty = {:?}", late_bound_in_ty);
 
@@ -2234,17 +2275,21 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         let tcx = self.tcx();
 
+        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
         // We proactively collect all the inferred type params to emit a single error per fn def.
         let mut visitor = PlaceholderHirTyCollector::default();
         for ty in decl.inputs {
             visitor.visit_ty(ty);
+            late_bound_vars_visitor.visit_ty(ty);
         }
         walk_generics(&mut visitor, generics);
+        walk_generics(&mut late_bound_vars_visitor, generics);
 
         let input_tys = decl.inputs.iter().map(|a| self.ty_of_arg(a, None));
         let output_ty = match decl.output {
             hir::FnRetTy::Return(ref output) => {
                 visitor.visit_ty(output);
+                late_bound_vars_visitor.visit_ty(output);
                 self.ast_ty_to_ty(output)
             }
             hir::FnRetTy::DefaultReturn(..) => tcx.mk_unit(),
@@ -2252,10 +2297,23 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         debug!("ty_of_fn: output_ty={:?}", output_ty);
 
-        let bare_fn_ty = ty::Binder::bind(
-            tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi),
-            tcx,
-        );
+        let bound_vars = {
+            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+            for i in 0..max {
+                if let None = late_bound_vars_visitor.1.get(&i) {
+                    panic!("Unknown variable: {:?}", i);
+                }
+            }
+
+            tcx.mk_bound_variable_kinds(
+                late_bound_vars_visitor
+                    .1
+                    .into_iter()
+                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
+            )
+        };
+        let fn_ty = tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi);
+        let bare_fn_ty = ty::Binder::bind_with_vars(fn_ty, bound_vars);
 
         if !self.allow_ty_infer() {
             // We always collect the spans for placeholder types when evaluating `fn`s, but we

@@ -1584,8 +1584,7 @@ impl<F: fmt::Write> PrettyPrinter<'tcx> for FmtPrinter<'_, 'tcx, F> {
                 data.name != kw::Invalid && data.name != kw::UnderscoreLifetime
             }
 
-            ty::ReLateBound(_, br)
-            | ty::ReFree(ty::FreeRegion { bound_region: br, .. })
+            ty::ReFree(ty::FreeRegion { bound_region: br, .. })
             | ty::RePlaceholder(ty::Placeholder { name: br, .. }) => {
                 if let ty::BrNamed(_, name) = br {
                     if name != kw::Invalid && name != kw::UnderscoreLifetime {
@@ -1601,6 +1600,8 @@ impl<F: fmt::Write> PrettyPrinter<'tcx> for FmtPrinter<'_, 'tcx, F> {
 
                 false
             }
+
+            ty::ReLateBound(_, _br) => todo!(),
 
             ty::ReVar(_) if identify_regions => true,
 
@@ -1663,8 +1664,7 @@ impl<F: fmt::Write> FmtPrinter<'_, '_, F> {
                     return Ok(self);
                 }
             }
-            ty::ReLateBound(_, br)
-            | ty::ReFree(ty::FreeRegion { bound_region: br, .. })
+            ty::ReFree(ty::FreeRegion { bound_region: br, .. })
             | ty::RePlaceholder(ty::Placeholder { name: br, .. }) => {
                 if let ty::BrNamed(_, name) = br {
                     if name != kw::Invalid && name != kw::UnderscoreLifetime {
@@ -1680,6 +1680,9 @@ impl<F: fmt::Write> FmtPrinter<'_, '_, F> {
                     }
                 }
             }
+
+            ty::ReLateBound(_, _br) => todo!(),
+
             ty::ReVar(region_vid) if identify_regions => {
                 p!(write("{:?}", region_vid));
                 return Ok(self);
@@ -1752,7 +1755,7 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
         let mut region_index = self.region_index;
         let new_value = self.tcx.replace_late_bound_regions(value.clone(), |br| {
             let _ = start_or_continue(&mut self, "for<", ", ");
-            let br = match br {
+            let _br = match br {
                 ty::BrNamed(_, name) => {
                     let _ = write!(self, "{}", name);
                     br
@@ -1769,7 +1772,9 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
                     ty::BrNamed(DefId::local(CRATE_DEF_INDEX), name)
                 }
             };
-            self.tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
+            // FIXME
+            //self.tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
+            self.tcx.mk_region(ty::ReLateBound(ty::INNERMOST, 0))
         });
         start_or_continue(&mut self, "", "> ")?;
 
@@ -1803,13 +1808,6 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
                     }
                 }
                 t.as_ref().skip_binder().visit_with(self)
-            }
-
-            fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
-                if let ty::ReLateBound(_, ty::BrNamed(_, name)) = *r {
-                    self.0.insert(name);
-                }
-                r.super_visit_with(self)
             }
         }
 
