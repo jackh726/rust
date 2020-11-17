@@ -3,8 +3,10 @@
 use super::{check_fn, Expectation, FnCtxt, GeneratorTypes};
 
 use crate::astconv::AstConv;
+use crate::collect::LateBoundRegionsCollector;
 use rustc_hir as hir;
 use rustc_hir::def_id::DefId;
+use rustc_hir::intravisit::Visitor;
 use rustc_hir::lang_items::LangItem;
 use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use rustc_infer::infer::LateBoundRegionConversionTime;
@@ -17,6 +19,7 @@ use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::traits::error_reporting::ArgKind;
 use rustc_trait_selection::traits::error_reporting::InferCtxtExt as _;
 use std::cmp;
+use std::collections::BTreeMap;
 use std::iter;
 
 /// What signature do we *expect* the closure to have from context?
@@ -571,7 +574,26 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             },
         };
 
-        let result = ty::Binder::bind(
+        let tcx = self.tcx();
+        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
+        late_bound_vars_visitor.visit_fn_decl(decl);
+        let bound_vars = {
+            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
+            for i in 0..max {
+                if let None = late_bound_vars_visitor.1.get(&i) {
+                    panic!("Unknown variable: {:?}", i);
+                }
+            }
+
+            tcx.mk_bound_variable_kinds(
+                late_bound_vars_visitor
+                    .1
+                    .into_iter()
+                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
+            )
+        };
+
+        let result = ty::Binder::bind_with_vars(
             self.tcx.mk_fn_sig(
                 supplied_arguments,
                 supplied_return,
@@ -579,7 +601,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 hir::Unsafety::Normal,
                 Abi::RustCall,
             ),
-            self.tcx,
+            bound_vars,
         );
 
         debug!("supplied_sig_of_closure: result={:?}", result);

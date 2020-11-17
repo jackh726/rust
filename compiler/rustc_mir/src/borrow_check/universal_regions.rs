@@ -602,8 +602,7 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
                         .iter()
                         .chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),
                 );
-                let env_region =
-                    ty::ReLateBound(ty::INNERMOST, ty::BrAnon((bound_vars.len() as u32) - 1));
+                let env_region = ty::ReLateBound(ty::INNERMOST, (bound_vars.len() as u32) - 1);
                 let closure_ty = tcx.closure_env_ty(def_id, substs, env_region).unwrap();
 
                 // The "inputs" of the closure in the
@@ -707,15 +706,7 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
             "replace_bound_regions_with_nll_infer_vars(value={:?}, all_outlive_scope={:?})",
             value, all_outlive_scope,
         );
-        let bound_vars = value.bound_vars();
-        let (value, _map) = self.tcx.replace_late_bound_regions(value, |br| {
-            let br = match br {
-                ty::BoundRegion::BrAnon(idx) => match bound_vars[idx as usize] {
-                    ty::BoundVariableKind::Region(r) => r,
-                    _ => bug!(),
-                },
-                _ => br,
-            };
+        let (value, _) = self.tcx.replace_late_bound_regions(value, |br| {
             debug!("replace_bound_regions_with_nll_infer_vars: br={:?}", br);
             let liberated_region = self.tcx.mk_region(ty::ReFree(ty::FreeRegion {
                 scope: all_outlive_scope.to_def_id(),

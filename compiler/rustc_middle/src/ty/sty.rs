@@ -7,6 +7,7 @@ use self::TyKind::*;
 
 use crate::infer::canonical::Canonical;
 use crate::ty::fold::BoundVarsCollector;
+use crate::ty::fold::ValidateBoundVars;
 use crate::ty::subst::{GenericArg, InternalSubsts, Subst, SubstsRef};
 use crate::ty::{
     self, AdtDef, DefIdTree, Discr, Ty, TyCtxt, TypeFlags, TypeFoldable, WithConstness,
@@ -62,16 +63,6 @@ pub enum BoundRegion {
 }
 
 impl BoundRegion {
-    pub fn extract_bound<'a, 'tcx: 'a>(
-        &'a self,
-        binders: &'tcx List<BoundVariableKind>,
-    ) -> &'a Self {
-        match self {
-            BoundRegion::BrAnon(idx) => binders[*idx as usize].expect_region(),
-            _ => self,
-        }
-    }
-
     pub fn is_named(&self) -> bool {
         match *self {
             BoundRegion::BrNamed(_, name) => name != kw::UnderscoreLifetime,
@@ -968,7 +959,7 @@ pub enum BoundVariableKind {
 }
 
 impl BoundVariableKind {
-    fn expect_region(&self) -> &BoundRegion {
+    pub fn expect_region(self) -> BoundRegion {
         match self {
             BoundVariableKind::Region(region) => region,
             _ => bug!(),
@@ -1028,36 +1019,22 @@ where
         U: TypeFoldable<'tcx>,
     {
         if cfg!(debug_assertions) {
-            let mut collector = BoundVarsCollector::new();
-            value.visit_with(&mut collector);
-            let new_var_map = collector.into_inner();
-            // The previous bound variables don't need to be in the new type,
-            // but any that are need to be compatible.
-            for (i, var_a) in new_var_map.iter() {
-                let var_b = self.1.get(*i as usize).unwrap_or_else(|| {
-                    bug!("{:?} (from {:?}) not found in {:?}", var_a, value, self.1)
-                });
-                match (*var_a, var_b) {
-                    (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
-                        debug_assert_eq!(kind_a, *kind_b)
-                    }
-                    (BoundVariableKind::Region(region_a), BoundVariableKind::Region(region_b)) => {
-                        debug_assert_eq!(region_a, *region_b)
-                    }
-                    (BoundVariableKind::Const, BoundVariableKind::Const) => continue,
-                    (_, _) => bug!("Mismatched bound vars: {:?} and {:?}", var_a, var_b),
-                }
-            }
+            let mut validator = ValidateBoundVars::new(self.bound_vars());
+            value.visit_with(&mut validator);
         }
         Binder(value, self.1)
+    }
+
+    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(vars);
+            value.visit_with(&mut validator);
+        }
+        Binder(value, vars)
     }
 }
 
 impl<'tcx, T> Binder<'tcx, T> {
-    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
-        Binder(value, vars)
-    }
-
     /// Skips the binder and returns the "bound" value. This is a
     /// risky thing to do because it's easy to get confused about
     /// De Bruijn indices and the like. It is usually better to
@@ -1503,7 +1480,7 @@ pub enum RegionKind {
 
     /// Region bound in a function scope, which will be substituted when the
     /// function is called.
-    ReLateBound(ty::DebruijnIndex, BoundRegion),
+    ReLateBound(ty::DebruijnIndex, u32),
 
     /// When checking a function body, the types of all arguments and so forth
     /// that refer to bound region parameters are modified to refer to free
@@ -1673,7 +1650,7 @@ impl RegionKind {
     pub fn has_name(&self, binders: &List<BoundVariableKind>) -> bool {
         match *self {
             RegionKind::ReEarlyBound(ebr) => ebr.has_name(),
-            RegionKind::ReLateBound(_, br) => br.extract_bound(binders).is_named(),
+            RegionKind::ReLateBound(_, br) => binders[br as usize].expect_region().is_named(),
             RegionKind::ReFree(fr) => fr.bound_region.is_named(),
             RegionKind::ReStatic => true,
             RegionKind::ReVar(..) => false,

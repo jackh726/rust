@@ -437,7 +437,7 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
 
                         // We only allow a `ty::INNERMOST` index in substitutions.
                         assert_eq!(debruijn, ty::INNERMOST);
-                        opt_values[br.assert_bound_var()] = Some(*original_value);
+                        opt_values[BoundVar::from_u32(br)] = Some(*original_value);
                     }
                 }
                 GenericArgKind::Const(result_value) => {
