@@ -2631,6 +2631,30 @@ impl<'tcx> TyCtxt<'tcx> {
         self.object_lifetime_defaults_map(id.owner)
             .and_then(|map| map.get(&id.local_id).map(|v| &**v))
     }
+
+    pub fn late_bound_vars(self, id: HirId) -> &'tcx List<ty::BoundVariableKind> {
+        self.mk_bound_variable_kinds(
+            self.late_bound_vars_map(id.owner)
+                .and_then(|map| map.get(&id.local_id).cloned())
+                .unwrap_or_else(|| {
+                    panic!("No bound vars found for {:?} ({:?})", self.hir().node_to_string(id), id)
+                })
+                //.unwrap_or_default()
+                .iter()
+                .map(|b| match b {
+                    resolve_lifetime::Region::LateBound(_, _, def_id, _) => {
+                        let name = self
+                            .hir()
+                            .name(self.hir().local_def_id_to_hir_id(def_id.expect_local()));
+                        ty::BoundVariableKind::Region(ty::BoundRegion::BrNamed(*def_id, name))
+                    }
+                    resolve_lifetime::Region::LateBoundAnon(_, _, anon_idx) => {
+                        ty::BoundVariableKind::Region(ty::BoundRegion::BrAnon(*anon_idx))
+                    }
+                    _ => bug!(),
+                }),
+        )
+    }
 }
 
 impl TyCtxtAt<'tcx> {
