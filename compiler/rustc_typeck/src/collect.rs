@@ -1592,6 +1592,7 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
                 }
                 None => AstConv::ty_of_fn(
                     &icx,
+                    hir_id,
                     sig.header.unsafety,
                     sig.header.abi,
                     &sig.decl,
@@ -1605,10 +1606,17 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
             kind: TraitItemKind::Fn(FnSig { header, decl, span: _ }, _),
             ident,
             generics,
+            hir_id,
             ..
-        }) => {
-            AstConv::ty_of_fn(&icx, header.unsafety, header.abi, decl, &generics, Some(ident.span))
-        }
+        }) => AstConv::ty_of_fn(
+            &icx,
+            *hir_id,
+            header.unsafety,
+            header.abi,
+            decl,
+            &generics,
+            Some(ident.span),
+        ),
 
         ForeignItem(&hir::ForeignItem {
             kind: ForeignItemKind::Fn(ref fn_decl, _, _),
@@ -2298,8 +2306,10 @@ fn compute_sig_of_foreign_fn_decl<'tcx>(
     } else {
         hir::Unsafety::Unsafe
     };
+    let hir_id = tcx.hir().local_def_id_to_hir_id(def_id.expect_local());
     let fty = AstConv::ty_of_fn(
         &ItemCtxt::new(tcx, def_id),
+        hir_id,
         unsafety,
         abi,
         decl,

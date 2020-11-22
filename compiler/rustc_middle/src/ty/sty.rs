@@ -1087,18 +1087,31 @@ impl<'tcx, T> Binder<'tcx, T> {
         Binder(&self.0, self.1)
     }
 
-    pub fn map_bound_ref<F, U>(&self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound_ref_unchecked<F, U>(&self, f: F) -> Binder<'tcx, U>
+    where
+        F: FnOnce(&T) -> U,
+    {
+        let value = f(&self.0);
+        Binder(value, self.1)
+    }
+
+    pub fn map_bound_ref<F, U: TypeFoldable<'tcx>>(&self, f: F) -> Binder<'tcx, U>
     where
         F: FnOnce(&T) -> U,
     {
         self.as_ref().map_bound(f)
     }
 
-    pub fn map_bound<F, U>(self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound<F, U: TypeFoldable<'tcx>>(self, f: F) -> Binder<'tcx, U>
     where
         F: FnOnce(T) -> U,
     {
-        Binder(f(self.0), self.1)
+        let value = f(self.0);
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(self.1);
+            value.visit_with(&mut validator);
+        }
+        Binder(value, self.1)
     }
 
     /// Wraps a `value` in a binder, using the same bound variables as the
@@ -1114,6 +1127,10 @@ impl<'tcx, T> Binder<'tcx, T> {
     where
         U: TypeFoldable<'tcx>,
     {
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(self.bound_vars());
+            value.visit_with(&mut validator);
+        }
         Binder(value, self.1)
     }
 
@@ -1317,7 +1334,7 @@ pub type PolyFnSig<'tcx> = Binder<'tcx, FnSig<'tcx>>;
 impl<'tcx> PolyFnSig<'tcx> {
     #[inline]
     pub fn inputs(&self) -> Binder<'tcx, &'tcx [Ty<'tcx>]> {
-        self.map_bound_ref(|fn_sig| fn_sig.inputs())
+        self.map_bound_ref_unchecked(|fn_sig| fn_sig.inputs())
     }
     #[inline]
     pub fn input(&self, index: usize) -> ty::Binder<'tcx, Ty<'tcx>> {

@@ -18,6 +18,7 @@ use rustc_target::spec::abi::Abi;
 use std::cell::Cell;
 use std::char;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::{self, Write as _};
 use std::ops::{ControlFlow, Deref, DerefMut};
@@ -1235,6 +1236,8 @@ pub struct FmtPrinterData<'a, 'tcx, F> {
     pub region_highlight_mode: RegionHighlightMode,
 
     pub name_resolver: Option<Box<&'a dyn Fn(ty::sty::TyVid) -> Option<String>>>,
+
+    pub binders: VecDeque<&'tcx ty::List<ty::BoundVariableKind>>,
 }
 
 impl<F> Deref for FmtPrinter<'a, 'tcx, F> {
@@ -1264,6 +1267,7 @@ impl<F> FmtPrinter<'a, 'tcx, F> {
             printed_type_count: 0,
             region_highlight_mode: RegionHighlightMode::default(),
             name_resolver: None,
+            binders: Default::default(),
         }))
     }
 }
@@ -1530,11 +1534,14 @@ impl<F: fmt::Write> PrettyPrinter<'tcx> for FmtPrinter<'_, 'tcx, F> {
         Ok(self)
     }
 
-    fn in_binder<T>(self, value: &ty::Binder<'tcx, T>) -> Result<Self, Self::Error>
+    fn in_binder<T>(mut self, value: &ty::Binder<'tcx, T>) -> Result<Self, Self::Error>
     where
         T: Print<'tcx, Self, Output = Self, Error = Self::Error> + TypeFoldable<'tcx>,
     {
-        self.pretty_in_binder(value)
+        self.binders.push_front(value.bound_vars());
+        let mut r = self.pretty_in_binder(value)?;
+        r.binders.pop_front();
+        Ok(r)
     }
 
     fn typed_value(
@@ -1601,7 +1608,22 @@ impl<F: fmt::Write> PrettyPrinter<'tcx> for FmtPrinter<'_, 'tcx, F> {
                 false
             }
 
-            ty::ReLateBound(_, _br) => todo!(),
+            ty::ReLateBound(db, br) => {
+                let br = self.binders[db.as_usize()][br as usize].expect_region();
+                if let ty::BrNamed(_, name) = br {
+                    if name != kw::Invalid && name != kw::UnderscoreLifetime {
+                        return true;
+                    }
+                }
+
+                if let Some((region, _)) = highlight.highlight_bound_region {
+                    if br == region {
+                        return true;
+                    }
+                }
+
+                false
+            }
 
             ty::ReVar(_) if identify_regions => true,
 
@@ -1681,7 +1703,28 @@ impl<F: fmt::Write> FmtPrinter<'_, '_, F> {
                 }
             }
 
-            ty::ReLateBound(_, _br) => todo!(),
+            ty::ReLateBound(db, br) => {
+                if self.binders.len() <= db.as_usize() {
+                    eprintln!("{:?} not long enough for {:?}", self.binders, db);
+                } else if self.binders[db.as_usize()].len() <= br as usize {
+                    eprintln!("{:?} is not long enough for {:?}", self.binders[db.as_usize()], br);
+                } else {
+                    let br = self.binders[db.as_usize()][br as usize].expect_region();
+                    if let ty::BrNamed(_, name) = br {
+                        if name != kw::Invalid && name != kw::UnderscoreLifetime {
+                            p!(write("{}", name));
+                            return Ok(self);
+                        }
+                    }
+
+                    if let Some((region, counter)) = highlight.highlight_bound_region {
+                        if br == region {
+                            p!(write("'{}", counter));
+                            return Ok(self);
+                        }
+                    }
+                }
+            }
 
             ty::ReVar(region_vid) if identify_regions => {
                 p!(write("{:?}", region_vid));

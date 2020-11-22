@@ -6,7 +6,6 @@ mod errors;
 mod generics;
 
 use crate::bounds::Bounds;
-use crate::collect::LateBoundRegionsCollector;
 use crate::collect::PlaceholderHirTyCollector;
 use crate::errors::{
     AmbiguousLifetimeBound, MultipleRelaxedDefaultBounds, TraitObjectDeclaredWithNoTraits,
@@ -37,7 +36,7 @@ use rustc_trait_selection::traits::wf::object_region_bounds;
 
 use smallvec::SmallVec;
 use std::array;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::slice;
 
 #[derive(Debug)]
@@ -627,25 +626,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         );
 
         let tcx = self.tcx();
-        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
-        late_bound_vars_visitor
-            .visit_path_segment(trait_ref.path.span, trait_ref.path.segments.last().unwrap());
-        let bound_vars = {
-            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
-            for i in 0..max {
-                if let None = late_bound_vars_visitor.1.get(&i) {
-                    panic!("Unknown variable: {:?}", i);
-                }
-            }
-
-            tcx.mk_bound_variable_kinds(
-                late_bound_vars_visitor
-                    .1
-                    .into_iter()
-                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
-            )
-        };
-
+        let bound_vars = tcx.late_bound_vars(trait_ref.hir_ref_id);
         let poly_trait_ref =
             ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
 
@@ -724,23 +705,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let (substs, assoc_bindings, _) =
             self.create_substs_for_ast_path(span, trait_def_id, &[], args, false, Some(self_ty));
         let tcx = self.tcx();
-        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
-        late_bound_vars_visitor.visit_generic_args(span, args);
-        let bound_vars = {
-            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
-            for i in 0..max {
-                if let None = late_bound_vars_visitor.1.get(&i) {
-                    panic!("Unknown variable: {:?}", i);
-                }
-            }
-
-            tcx.mk_bound_variable_kinds(
-                late_bound_vars_visitor
-                    .1
-                    .into_iter()
-                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
-            )
-        };
+        let bound_vars = tcx.late_bound_vars(hir_id);
         let poly_trait_ref =
             ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
         bounds.trait_bounds.push((poly_trait_ref, span, Constness::NotConst));
@@ -1162,6 +1127,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             return tcx.ty_error();
         }
 
+        let bound_vars = regular_traits
+            .first()
+            .map(|f| f.trait_ref().bound_vars())
+            .unwrap_or_else(|| auto_traits.first().unwrap().trait_ref().bound_vars());
+
         // Check that there are no gross object safety violations;
         // most importantly, that the supertraits don't contain `Self`,
         // to avoid ICEs.
@@ -1311,7 +1281,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         v.sort_by(|a, b| a.stable_cmp(tcx, b));
         v.dedup();
         let existential_predicates =
-            ty::Binder::bind(tcx.mk_existential_predicates(v.into_iter()), tcx);
+            ty::Binder::bind_with_vars(tcx.mk_existential_predicates(v.into_iter()), bound_vars);
 
         // Use explicitly-specified region bound.
         let region_bound = if !lifetime.is_elided() {
@@ -2127,6 +2097,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             hir::TyKind::BareFn(ref bf) => {
                 require_c_abi_if_c_variadic(tcx, &bf.decl, bf.abi, ast_ty.span);
                 tcx.mk_fn_ptr(self.ty_of_fn(
+                    ast_ty.hir_id,
                     bf.unsafety,
                     bf.abi,
                     &bf.decl,
@@ -2265,6 +2236,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
     pub fn ty_of_fn(
         &self,
+        hir_id: hir::HirId,
         unsafety: hir::Unsafety,
         abi: abi::Abi,
         decl: &hir::FnDecl<'_>,
@@ -2274,22 +2246,19 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         debug!("ty_of_fn");
 
         let tcx = self.tcx();
+        let bound_vars = tcx.late_bound_vars(hir_id);
 
-        let mut late_bound_vars_visitor = LateBoundRegionsCollector(tcx, BTreeMap::default());
         // We proactively collect all the inferred type params to emit a single error per fn def.
         let mut visitor = PlaceholderHirTyCollector::default();
         for ty in decl.inputs {
             visitor.visit_ty(ty);
-            late_bound_vars_visitor.visit_ty(ty);
         }
         walk_generics(&mut visitor, generics);
-        walk_generics(&mut late_bound_vars_visitor, generics);
 
         let input_tys = decl.inputs.iter().map(|a| self.ty_of_arg(a, None));
         let output_ty = match decl.output {
             hir::FnRetTy::Return(ref output) => {
                 visitor.visit_ty(output);
-                late_bound_vars_visitor.visit_ty(output);
                 self.ast_ty_to_ty(output)
             }
             hir::FnRetTy::DefaultReturn(..) => tcx.mk_unit(),
@@ -2297,21 +2266,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         debug!("ty_of_fn: output_ty={:?}", output_ty);
 
-        let bound_vars = {
-            let max = late_bound_vars_visitor.1.iter().map(|(k, _)| *k).max().unwrap_or_else(|| 0);
-            for i in 0..max {
-                if let None = late_bound_vars_visitor.1.get(&i) {
-                    panic!("Unknown variable: {:?}", i);
-                }
-            }
-
-            tcx.mk_bound_variable_kinds(
-                late_bound_vars_visitor
-                    .1
-                    .into_iter()
-                    .map(|(_, v)| ty::BoundVariableKind::Region(v)),
-            )
-        };
         let fn_ty = tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi);
         let bare_fn_ty = ty::Binder::bind_with_vars(fn_ty, bound_vars);
 

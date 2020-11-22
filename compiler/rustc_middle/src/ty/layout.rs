@@ -2449,17 +2449,15 @@ impl<'tcx> ty::Instance<'tcx> {
                 let env_region = ty::ReLateBound(ty::INNERMOST, (bound_vars.len() as u32) - 1);
                 let env_ty = tcx.closure_env_ty(def_id, substs, env_region).unwrap();
 
+                let sig = sig.skip_binder();
                 ty::Binder::bind_with_vars(
-                    sig.map_bound(|sig| {
-                        tcx.mk_fn_sig(
-                            iter::once(env_ty).chain(sig.inputs().iter().cloned()),
-                            sig.output(),
-                            sig.c_variadic,
-                            sig.unsafety,
-                            sig.abi,
-                        )
-                    })
-                    .skip_binder(),
+                    tcx.mk_fn_sig(
+                        iter::once(env_ty).chain(sig.inputs().iter().cloned()),
+                        sig.output(),
+                        sig.c_variadic,
+                        sig.unsafety,
+                        sig.abi,
+                    ),
                     bound_vars,
                 )
             }
@@ -2479,23 +2477,19 @@ impl<'tcx> ty::Instance<'tcx> {
                 let pin_substs = tcx.intern_substs(&[env_ty.into()]);
                 let env_ty = tcx.mk_adt(pin_adt_ref, pin_substs);
 
+                let sig = sig.skip_binder();
+                let state_did = tcx.require_lang_item(LangItem::GeneratorState, None);
+                let state_adt_ref = tcx.adt_def(state_did);
+                let state_substs = tcx.intern_substs(&[sig.yield_ty.into(), sig.return_ty.into()]);
+                let ret_ty = tcx.mk_adt(state_adt_ref, state_substs);
                 ty::Binder::bind_with_vars(
-                    sig.map_bound(|sig| {
-                        let state_did = tcx.require_lang_item(LangItem::GeneratorState, None);
-                        let state_adt_ref = tcx.adt_def(state_did);
-                        let state_substs =
-                            tcx.intern_substs(&[sig.yield_ty.into(), sig.return_ty.into()]);
-                        let ret_ty = tcx.mk_adt(state_adt_ref, state_substs);
-
-                        tcx.mk_fn_sig(
-                            [env_ty, sig.resume_ty].iter(),
-                            &ret_ty,
-                            false,
-                            hir::Unsafety::Normal,
-                            rustc_target::spec::abi::Abi::Rust,
-                        )
-                    })
-                    .skip_binder(),
+                    tcx.mk_fn_sig(
+                        [env_ty, sig.resume_ty].iter(),
+                        &ret_ty,
+                        false,
+                        hir::Unsafety::Normal,
+                        rustc_target::spec::abi::Abi::Rust,
+                    ),
                     bound_vars,
                 )
             }
