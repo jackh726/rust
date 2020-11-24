@@ -437,7 +437,7 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
 
                         // We only allow a `ty::INNERMOST` index in substitutions.
                         assert_eq!(debruijn, ty::INNERMOST);
-                        opt_values[BoundVar::from_u32(br)] = Some(*original_value);
+                        opt_values[br.var] = Some(*original_value);
                     }
                 }
                 GenericArgKind::Const(result_value) => {
@@ -525,23 +525,24 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
         result_subst: &'a CanonicalVarValues<'tcx>,
     ) -> impl Iterator<Item = PredicateObligation<'tcx>> + 'a + Captures<'tcx> {
         unsubstituted_region_constraints.iter().map(move |&constraint| {
-            let ty::OutlivesPredicate(k1, r2) =
-                substitute_value(self.tcx, result_subst, constraint).skip_binder();
+            let predicate = substitute_value(self.tcx, result_subst, constraint);
+            let ty::OutlivesPredicate(k1, r2) = predicate.skip_binder();
 
-            let predicate = match k1.unpack() {
-                GenericArgKind::Lifetime(r1) => {
-                    ty::PredicateAtom::RegionOutlives(ty::OutlivesPredicate(r1, r2))
-                }
-                GenericArgKind::Type(t1) => {
-                    ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(t1, r2))
-                }
-                GenericArgKind::Const(..) => {
-                    // Consts cannot outlive one another, so we don't expect to
-                    // encounter this branch.
-                    span_bug!(cause.span, "unexpected const outlives {:?}", constraint);
-                }
-            }
-            .potentially_quantified(self.tcx, ty::PredicateKind::ForAll);
+            let predicate = predicate
+                .rebind(match k1.unpack() {
+                    GenericArgKind::Lifetime(r1) => {
+                        ty::PredicateAtom::RegionOutlives(ty::OutlivesPredicate(r1, r2))
+                    }
+                    GenericArgKind::Type(t1) => {
+                        ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(t1, r2))
+                    }
+                    GenericArgKind::Const(..) => {
+                        // Consts cannot outlive one another, so we don't expect to
+                        // encounter this branch.
+                        span_bug!(cause.span, "unexpected const outlives {:?}", constraint);
+                    }
+                })
+                .potentially_quantified(self.tcx, ty::PredicateKind::ForAll);
 
             Obligation::new(cause.clone(), param_env, predicate)
         })

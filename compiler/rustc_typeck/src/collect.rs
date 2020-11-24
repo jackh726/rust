@@ -1,3 +1,4 @@
+// ignore-tidy-filelength
 //! "Collection" is the process of determining the type and other external
 //! details of each item in Rust. Collection is specifically concerned
 //! with *inter-procedural* things -- for example, for a function
@@ -258,7 +259,7 @@ impl Visitor<'tcx> for CollectItemTypesVisitor<'tcx> {
 
 crate struct LateBoundRegionsCollector<'tcx>(
     crate TyCtxt<'tcx>,
-    crate BTreeMap<u32, ty::BoundRegion>,
+    crate BTreeMap<u32, ty::BoundRegionKind>,
 );
 
 impl<'v, 'tcx> Visitor<'v> for LateBoundRegionsCollector<'tcx> {
@@ -495,7 +496,7 @@ fn get_new_lifetime_name<'tcx>(
         .collect_referenced_late_bound_regions(&poly_trait_ref)
         .into_iter()
         .filter_map(|lt| {
-            if let ty::BoundRegion::BrNamed(_, name) = lt {
+            if let ty::BoundRegionKind::BrNamed(_, name) = lt {
                 Some(name.as_str().to_string())
             } else {
                 None
@@ -1953,6 +1954,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
         match predicate {
             &hir::WherePredicate::BoundPredicate(ref bound_pred) => {
                 let ty = icx.to_ty(&bound_pred.bounded_ty);
+                let bound_vars = icx.tcx.late_bound_vars(bound_pred.bounded_ty.hir_id);
 
                 // Keep the type around in a dummy predicate, in case of no bounds.
                 // That way, `where Ty:` is not a complete noop (see #53696) and `Ty`
@@ -1968,10 +1970,16 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                     } else {
                         let span = bound_pred.bounded_ty.span;
                         let re_root_empty = tcx.lifetimes.re_root_empty;
-                        let predicate = ty::OutlivesPredicate(ty, re_root_empty);
+                        let predicate = ty::Binder::bind_with_vars(
+                            ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(
+                                ty,
+                                re_root_empty,
+                            )),
+                            bound_vars,
+                        );
+
                         predicates.insert((
-                            ty::PredicateAtom::TypeOutlives(predicate)
-                                .potentially_quantified(tcx, ty::PredicateKind::ForAll),
+                            predicate.potentially_quantified(tcx, ty::PredicateKind::ForAll),
                             span,
                         ));
                     }
@@ -2014,8 +2022,13 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                         &hir::GenericBound::Outlives(ref lifetime) => {
                             let region = AstConv::ast_region_to_region(&icx, lifetime, None);
                             predicates.insert((
-                                ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(ty, region))
-                                    .potentially_quantified(tcx, ty::PredicateKind::ForAll),
+                                ty::Binder::bind_with_vars(
+                                    ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(
+                                        ty, region,
+                                    )),
+                                    bound_vars,
+                                )
+                                .potentially_quantified(tcx, ty::PredicateKind::ForAll),
                                 lifetime.span,
                             ));
                         }
@@ -2032,7 +2045,9 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                         }
                         _ => bug!(),
                     };
-                    let pred = ty::PredicateAtom::RegionOutlives(ty::OutlivesPredicate(r1, r2));
+                    let pred = ty::Binder::dummy(ty::PredicateAtom::RegionOutlives(
+                        ty::OutlivesPredicate(r1, r2),
+                    ));
 
                     (pred.potentially_quantified(icx.tcx, ty::PredicateKind::ForAll), span)
                 }))
@@ -2287,8 +2302,10 @@ fn predicates_from_bound<'tcx>(
         }
         hir::GenericBound::Outlives(ref lifetime) => {
             let region = astconv.ast_region_to_region(lifetime, None);
-            let pred = ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(param_ty, region))
-                .potentially_quantified(astconv.tcx(), ty::PredicateKind::ForAll);
+            let pred = ty::Binder::dummy(ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(
+                param_ty, region,
+            )))
+            .potentially_quantified(astconv.tcx(), ty::PredicateKind::ForAll);
             vec![(pred, lifetime.span)]
         }
     }
