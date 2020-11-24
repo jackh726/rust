@@ -1023,6 +1023,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         });
                         result
                     } else {
+                        self.map.ty_binders.insert(bounded_ty.hir_id, Vec::default());
                         self.visit_ty(&bounded_ty);
                         walk_list!(self, visit_param_bound, bounds);
                     }
