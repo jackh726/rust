@@ -443,7 +443,7 @@ struct BoundVarReplacer<'a, 'tcx> {
     /// the ones we have visited.
     current_index: ty::DebruijnIndex,
 
-    fld_r: &'a mut (dyn FnMut(u32) -> ty::Region<'tcx> + 'a),
+    fld_r: &'a mut (dyn FnMut(ty::BoundRegion) -> ty::Region<'tcx> + 'a),
     fld_t: &'a mut (dyn FnMut(ty::BoundTy) -> Ty<'tcx> + 'a),
     fld_c: &'a mut (dyn FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx> + 'a),
 }
@@ -451,7 +451,7 @@ struct BoundVarReplacer<'a, 'tcx> {
 impl<'a, 'tcx> BoundVarReplacer<'a, 'tcx> {
     fn new<F, G, H>(tcx: TyCtxt<'tcx>, fld_r: &'a mut F, fld_t: &'a mut G, fld_c: &'a mut H) -> Self
     where
-        F: FnMut(u32) -> ty::Region<'tcx>,
+        F: FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
         G: FnMut(ty::BoundTy) -> Ty<'tcx>,
         H: FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx>,
     {
@@ -541,8 +541,8 @@ impl<'tcx> TyCtxt<'tcx> {
     /// results returned by the closure; the closure is expected to
     /// return a free region (relative to this binder), and hence the
     /// binder is removed in the return type. The closure is invoked
-    /// once for each unique `BoundRegion`; multiple references to the
-    /// same `BoundRegion` will reuse the previous result. A map is
+    /// once for each unique `BoundRegionKind`; multiple references to the
+    /// same `BoundRegionKind` will reuse the previous result. A map is
     /// returned at the end with each bound region and the free region
     /// that replaced it.
     ///
@@ -564,10 +564,7 @@ impl<'tcx> TyCtxt<'tcx> {
             self.mk_const(ty::Const { val: ty::ConstKind::Bound(ty::INNERMOST, bound_ct), ty })
         };
         let mut region_map = BTreeMap::new();
-        let real_fld_r = |br| {
-            let br = value.bound_vars()[br as usize].expect_region();
-            *region_map.entry(br).or_insert_with(|| fld_r(br))
-        };
+        let real_fld_r = |br: ty::BoundRegion| *region_map.entry(br).or_insert_with(|| fld_r(br));
         let value = self.replace_escaping_bound_vars(
             value.skip_binder(),
             real_fld_r,
@@ -588,7 +585,7 @@ impl<'tcx> TyCtxt<'tcx> {
         mut fld_c: H,
     ) -> T
     where
-        F: FnMut(u32) -> ty::Region<'tcx>,
+        F: FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
         G: FnMut(ty::BoundTy) -> Ty<'tcx>,
         H: FnMut(ty::BoundVar, Ty<'tcx>) -> &'tcx ty::Const<'tcx>,
         T: TypeFoldable<'tcx>,
@@ -618,10 +615,7 @@ impl<'tcx> TyCtxt<'tcx> {
         T: TypeFoldable<'tcx>,
     {
         let mut region_map = BTreeMap::new();
-        let real_fld_r = |br| {
-            let br = value.bound_vars()[br as usize].expect_region();
-            *region_map.entry(br).or_insert_with(|| fld_r(br))
-        };
+        let real_fld_r = |br: ty::BoundRegion| *region_map.entry(br).or_insert_with(|| fld_r(br));
         let value = self.replace_escaping_bound_vars(
             value.skip_binder(),
             real_fld_r,
@@ -644,7 +638,7 @@ impl<'tcx> TyCtxt<'tcx> {
         self.replace_late_bound_regions(value, |br| {
             self.mk_region(ty::ReFree(ty::FreeRegion {
                 scope: all_outlive_scope,
-                bound_region: br,
+                bound_region: br.kind,
             }))
         })
         .0
@@ -657,7 +651,7 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn collect_constrained_late_bound_regions<T>(
         self,
         value: &Binder<'tcx, T>,
-    ) -> FxHashSet<ty::BoundRegion>
+    ) -> FxHashSet<ty::BoundRegionKind>
     where
         T: TypeFoldable<'tcx>,
     {
@@ -668,7 +662,7 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn collect_referenced_late_bound_regions<T>(
         self,
         value: &Binder<'tcx, T>,
-    ) -> FxHashSet<ty::BoundRegion>
+    ) -> FxHashSet<ty::BoundRegionKind>
     where
         T: TypeFoldable<'tcx>,
     {
@@ -679,11 +673,11 @@ impl<'tcx> TyCtxt<'tcx> {
         self,
         value: &Binder<'tcx, T>,
         just_constraint: bool,
-    ) -> FxHashSet<ty::BoundRegion>
+    ) -> FxHashSet<ty::BoundRegionKind>
     where
         T: TypeFoldable<'tcx>,
     {
-        let mut collector = LateBoundRegionsCollector::new(value.bound_vars(), just_constraint);
+        let mut collector = LateBoundRegionsCollector::new(just_constraint);
         let result = value.as_ref().skip_binder().visit_with(&mut collector);
         assert!(result.is_continue()); // should never have stopped early
         collector.regions
@@ -713,7 +707,11 @@ impl<'tcx> TyCtxt<'tcx> {
         let mut counter = 0;
         let inner = self
             .replace_late_bound_regions(sig, |_| {
-                let r = self.mk_region(ty::ReLateBound(ty::INNERMOST, counter));
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(counter),
+                    kind: ty::BoundRegionKind::BrAnon(counter),
+                };
+                let r = self.mk_region(ty::ReLateBound(ty::INNERMOST, br));
                 counter += 1;
                 r
             })
@@ -864,10 +862,10 @@ impl<'tcx> TypeVisitor<'tcx> for ValidateBoundVars<'tcx> {
     fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         match r {
             ty::ReLateBound(index, br) if *index == self.binder_index => {
-                if self.bound_vars.len() <= *br as usize {
+                if self.bound_vars.len() <= br.var.as_usize() {
                     panic!("Not enough bound vars: {:?} not found in {:?}", *br, self.bound_vars);
                 }
-                let list_var = self.bound_vars[*br as usize];
+                let list_var = self.bound_vars[br.var.as_usize()];
                 match list_var {
                     ty::BoundVariableKind::Region(_) => {}
                     _ => panic!(
@@ -1136,10 +1134,9 @@ impl<'tcx> TypeVisitor<'tcx> for HasTypeFlagsVisitor {
 
 /// Collects all the late-bound regions at the innermost binding level
 /// into a hash set.
-struct LateBoundRegionsCollector<'tcx> {
-    binders: &'tcx ty::List<ty::BoundVariableKind>,
+struct LateBoundRegionsCollector {
     current_index: ty::DebruijnIndex,
-    regions: FxHashSet<ty::BoundRegion>,
+    regions: FxHashSet<ty::BoundRegionKind>,
 
     /// `true` if we only want regions that are known to be
     /// "constrained" when you equate this type with another type. In
@@ -1151,10 +1148,9 @@ struct LateBoundRegionsCollector<'tcx> {
     just_constrained: bool,
 }
 
-impl<'tcx> LateBoundRegionsCollector<'tcx> {
-    fn new(binders: &'tcx ty::List<ty::BoundVariableKind>, just_constrained: bool) -> Self {
+impl LateBoundRegionsCollector {
+    fn new(just_constrained: bool) -> Self {
         LateBoundRegionsCollector {
-            binders,
             current_index: ty::INNERMOST,
             regions: Default::default(),
             just_constrained,
@@ -1162,7 +1158,7 @@ impl<'tcx> LateBoundRegionsCollector<'tcx> {
     }
 }
 
-impl<'tcx> TypeVisitor<'tcx> for LateBoundRegionsCollector<'tcx> {
+impl<'tcx> TypeVisitor<'tcx> for LateBoundRegionsCollector {
     fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &Binder<'tcx, T>) -> ControlFlow<Self::BreakTy> {
         self.current_index.shift_in(1);
         let result = t.super_visit_with(self);
@@ -1199,7 +1195,7 @@ impl<'tcx> TypeVisitor<'tcx> for LateBoundRegionsCollector<'tcx> {
     fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         if let ty::ReLateBound(debruijn, br) = *r {
             if debruijn == self.current_index {
-                self.regions.insert(self.binders[br as usize].expect_region());
+                self.regions.insert(br.kind);
             }
         }
         ControlFlow::CONTINUE

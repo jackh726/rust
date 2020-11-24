@@ -71,7 +71,7 @@ where
     if var_values.var_values.is_empty() {
         value
     } else {
-        let fld_r = |br: u32| match var_values.var_values[ty::BoundVar::from_u32(br)].unpack() {
+        let fld_r = |br: ty::BoundRegion| match var_values.var_values[br.var].unpack() {
             GenericArgKind::Lifetime(l) => l,
             r => bug!("{:?} is a region but value is {:?}", br, r),
         };
