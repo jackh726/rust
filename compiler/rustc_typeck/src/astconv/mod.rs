@@ -194,12 +194,21 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let r = match tcx.named_region(lifetime.hir_id) {
             Some(rl::Region::Static) => tcx.lifetimes.re_static,
 
-            Some(rl::Region::LateBound(debruijn, index, _, _)) => {
-                tcx.mk_region(ty::ReLateBound(debruijn, index))
+            Some(rl::Region::LateBound(debruijn, index, def_id, _)) => {
+                let name = lifetime_name(def_id.expect_local());
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(index),
+                    kind: ty::BrNamed(def_id, name),
+                };
+                tcx.mk_region(ty::ReLateBound(debruijn, br))
             }
 
-            Some(rl::Region::LateBoundAnon(debruijn, index, _anon_index)) => {
-                tcx.mk_region(ty::ReLateBound(debruijn, index))
+            Some(rl::Region::LateBoundAnon(debruijn, index, anon_index)) => {
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(index),
+                    kind: ty::BrAnon(anon_index),
+                };
+                tcx.mk_region(ty::ReLateBound(debruijn, br))
             }
 
             Some(rl::Region::EarlyBound(index, id, _)) => {
@@ -1022,6 +1031,71 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 // the "projection predicate" for:
                 //
                 // `<T as Iterator>::Item = u32`
+                // FIXME: this fails (I think) for things like
+                // ```
+                // trait A<'a> { type Foo; }
+                // trait B: for<'a> A<'a> {}
+                // T: for<'b> B<Foo = &'b ()>
+                // for<'b> <T as A<'a>>::Foo = &'b ()
+                // ```
+                /*
+                let n_bound_vars = trait_ref.bound_vars().len();
+                let candidate_vars = candidate.bound_vars();
+                dbg!(&candidate);
+                let candidate = tcx
+                    .replace_bound_vars(
+                        &candidate,
+                        |r| {
+                            tcx.mk_region(ty::ReLateBound(
+                                ty::INNERMOST,
+                                ty::BoundRegion {
+                                    var: ty::BoundVar::from_usize(r.var.as_usize() + n_bound_vars),
+                                    kind: r.kind,
+                                },
+                            ))
+                        },
+                        |t| {
+                            tcx.mk_ty(ty::Bound(
+                                ty::INNERMOST,
+                                ty::BoundTy {
+                                    var: ty::BoundVar::from_usize(t.var.as_usize() + n_bound_vars),
+                                    kind: t.kind,
+                                },
+                            ))
+                        },
+                        |c, ty| {
+                            tcx.mk_const(ty::Const {
+                                val: ty::ConstKind::Bound(
+                                    ty::INNERMOST,
+                                    ty::BoundVar::from_usize(c.as_usize() + n_bound_vars),
+                                ),
+                                ty,
+                            })
+                        },
+                    )
+                    .0;
+                dbg!(&candidate);
+                let bound_vars = tcx
+                    .mk_bound_variable_kinds(trait_ref.bound_vars().iter().chain(candidate_vars));
+                dbg!(&bound_vars);
+                */
+                bounds.projection_bounds.push((
+                    ty::Binder::bind_with_vars(
+                        ty::ProjectionPredicate {
+                            projection_ty: ty::ProjectionTy::from_ref_and_name(
+                                tcx,
+                                //candidate,
+                                candidate.skip_binder(),
+                                binding.item_name,
+                            ),
+                            ty,
+                        },
+                        //bound_vars,
+                        trait_ref.bound_vars(),
+                    ),
+                    binding.span,
+                ));
+                /*
                 bounds.projection_bounds.push((
                     candidate.map_bound(|trait_ref| ty::ProjectionPredicate {
                         projection_ty: ty::ProjectionTy::from_ref_and_name(
@@ -1033,6 +1107,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     }),
                     binding.span,
                 ));
+                */
             }
             ConvertedBindingKind::Constraint(ast_bounds) => {
                 // "Desugar" a constraint like `T: Iterator<Item: Debug>` to
@@ -1126,6 +1201,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         if regular_traits.is_empty() && auto_traits.is_empty() {
             tcx.sess.emit_err(TraitObjectDeclaredWithNoTraits { span });
             return tcx.ty_error();
+        }
+
+        if regular_traits.iter().filter(|t| t.trait_ref().bound_vars().len() > 0).count() > 1 {
+            return tcx.ty_error();
+            //bug!("More than 1 regular trait refs have a late-bound vars.");
         }
 
         // Check that there are no gross object safety violations;
@@ -2305,8 +2385,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
     fn validate_late_bound_regions(
         &self,
-        constrained_regions: FxHashSet<ty::BoundRegion>,
-        referenced_regions: FxHashSet<ty::BoundRegion>,
+        constrained_regions: FxHashSet<ty::BoundRegionKind>,
+        referenced_regions: FxHashSet<ty::BoundRegionKind>,
         generate_err: impl Fn(&str) -> rustc_errors::DiagnosticBuilder<'tcx>,
     ) {
         for br in referenced_regions.difference(&constrained_regions) {

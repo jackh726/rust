@@ -42,12 +42,19 @@ pub struct TypeAndMut<'tcx> {
 /// at least as big as the scope `fr.scope`".
 pub struct FreeRegion {
     pub scope: DefId,
-    pub bound_region: BoundRegion,
+    pub bound_region: BoundRegionKind,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, TyEncodable, TyDecodable, Debug, PartialOrd, Ord)]
+#[derive(HashStable)]
+pub struct BoundRegion {
+    pub var: BoundVar,
+    pub kind: BoundRegionKind,
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Hash, TyEncodable, TyDecodable, Copy)]
 #[derive(HashStable)]
-pub enum BoundRegion {
+pub enum BoundRegionKind {
     /// An anonymous region parameter for a given fn (&T)
     BrAnon(u32),
 
@@ -62,10 +69,10 @@ pub enum BoundRegion {
     BrEnv,
 }
 
-impl BoundRegion {
+impl BoundRegionKind {
     pub fn is_named(&self) -> bool {
         match *self {
-            BoundRegion::BrNamed(_, name) => name != kw::UnderscoreLifetime,
+            BoundRegionKind::BrNamed(_, name) => name != kw::UnderscoreLifetime,
             _ => false,
         }
     }
@@ -76,7 +83,7 @@ impl BoundRegion {
     /// a canonical variable.
     pub fn assert_bound_var(&self) -> BoundVar {
         match *self {
-            BoundRegion::BrAnon(var) => BoundVar::from_u32(var),
+            BoundRegionKind::BrAnon(var) => BoundVar::from_u32(var),
             _ => bug!("bound region is not anonymous"),
         }
     }
@@ -954,12 +961,12 @@ impl<'tcx> PolyExistentialTraitRef<'tcx> {
 #[derive(HashStable)]
 pub enum BoundVariableKind {
     Ty(BoundTyKind),
-    Region(BoundRegion),
+    Region(BoundRegionKind),
     Const,
 }
 
 impl BoundVariableKind {
-    pub fn expect_region(self) -> BoundRegion {
+    pub fn expect_region(self) -> BoundRegionKind {
         match self {
             BoundVariableKind::Region(region) => region,
             _ => bug!(),
@@ -1147,8 +1154,8 @@ impl<'tcx, T> Binder<'tcx, T> {
                 match (var_a, var_b) {
                     // If we reach encounter a `BrEnv` in either list, then
                     // we know this is the end of the list, so we can break.
-                    (BoundVariableKind::Region(BoundRegion::BrEnv), _) => break,
-                    (_, BoundVariableKind::Region(BoundRegion::BrEnv)) => break,
+                    (BoundVariableKind::Region(BoundRegionKind::BrEnv), _) => break,
+                    (_, BoundVariableKind::Region(BoundRegionKind::BrEnv)) => break,
                     // Otherwise, ensure the bound vars are the same
                     (BoundVariableKind::Ty(kind_a), BoundVariableKind::Ty(kind_b)) => {
                         debug_assert_eq!(kind_a, kind_b)
@@ -1166,14 +1173,14 @@ impl<'tcx, T> Binder<'tcx, T> {
         // the type from by position. So, no matter where they are, we can bind.
         let longer_has_env = longer
             .last()
-            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegionKind::BrEnv)))
             .unwrap_or(false);
         let shorter_has_env = shorter
             .last()
-            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegion::BrEnv)))
+            .map(|b| matches!(b, BoundVariableKind::Region(BoundRegionKind::BrEnv)))
             .unwrap_or(false);
         let env_iter = if shorter_has_env && !longer_has_env {
-            Some(BoundVariableKind::Region(BoundRegion::BrEnv)).into_iter()
+            Some(BoundVariableKind::Region(BoundRegionKind::BrEnv)).into_iter()
         } else {
             None.into_iter()
         };
@@ -1497,7 +1504,7 @@ pub enum RegionKind {
 
     /// Region bound in a function scope, which will be substituted when the
     /// function is called.
-    ReLateBound(ty::DebruijnIndex, u32),
+    ReLateBound(ty::DebruijnIndex, BoundRegion),
 
     /// When checking a function body, the types of all arguments and so forth
     /// that refer to bound region parameters are modified to refer to free
@@ -1664,10 +1671,10 @@ impl<'tcx> PolyExistentialProjection<'tcx> {
 /// Region utilities
 impl RegionKind {
     /// Is this region named by the user?
-    pub fn has_name(&self, binders: &List<BoundVariableKind>) -> bool {
+    pub fn has_name(&self) -> bool {
         match *self {
             RegionKind::ReEarlyBound(ebr) => ebr.has_name(),
-            RegionKind::ReLateBound(_, br) => binders[br as usize].expect_region().is_named(),
+            RegionKind::ReLateBound(_, br) => br.kind.is_named(),
             RegionKind::ReFree(fr) => fr.bound_region.is_named(),
             RegionKind::ReStatic => true,
             RegionKind::ReVar(..) => false,

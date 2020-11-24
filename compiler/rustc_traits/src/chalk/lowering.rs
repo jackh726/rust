@@ -35,9 +35,7 @@ use rustc_ast::ast;
 use rustc_middle::traits::{ChalkEnvironmentAndGoal, ChalkRustInterner as RustInterner};
 use rustc_middle::ty::fold::TypeFolder;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, SubstsRef};
-use rustc_middle::ty::{
-    self, Binder, Region, RegionKind, Ty, TyCtxt, TypeFoldable, TypeVisitor,
-};
+use rustc_middle::ty::{self, Binder, Region, RegionKind, Ty, TyCtxt, TypeFoldable, TypeVisitor};
 use rustc_span::def_id::DefId;
 
 use chalk_ir::{FnSig, ForeignDefId};
@@ -446,7 +444,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Lifetime<RustInterner<'tcx>>> for Region<'t
             }
             ReLateBound(db, br) => chalk_ir::LifetimeData::BoundVar(chalk_ir::BoundVar::new(
                 chalk_ir::DebruijnIndex::new(db.as_u32()),
-                *br as usize,
+                br.var.as_usize(),
             ))
             .intern(interner),
             ReFree(_) => unimplemented!(),
@@ -471,13 +469,16 @@ impl<'tcx> LowerInto<'tcx, Region<'tcx>> for &chalk_ir::Lifetime<RustInterner<'t
         let kind = match self.data(interner) {
             chalk_ir::LifetimeData::BoundVar(var) => ty::RegionKind::ReLateBound(
                 ty::DebruijnIndex::from_u32(var.debruijn.depth()),
-                var.index as u32,
+                ty::BoundRegion {
+                    var: ty::BoundVar::from_usize(var.index),
+                    kind: ty::BrAnon(var.index as u32),
+                },
             ),
             chalk_ir::LifetimeData::InferenceVar(_var) => unimplemented!(),
             chalk_ir::LifetimeData::Placeholder(p) => {
                 ty::RegionKind::RePlaceholder(ty::Placeholder {
                     universe: ty::UniverseIndex::from_usize(p.ui.counter),
-                    name: ty::BoundRegion::BrAnon(p.idx as u32),
+                    name: ty::BoundRegionKind::BrAnon(p.idx as u32),
                 })
             }
             chalk_ir::LifetimeData::Static => ty::RegionKind::ReStatic,
@@ -801,7 +802,7 @@ impl<'tcx> LowerInto<'tcx, chalk_solve::rust_ir::AliasEqBound<RustInterner<'tcx>
 }
 
 /// To collect bound vars, we have to do two passes. In the first pass, we
-/// collect all `BoundRegion`s and `ty::Bound`s. In the second pass, we then
+/// collect all `BoundRegionKind`s and `ty::Bound`s. In the second pass, we then
 /// replace `BrNamed` into `BrAnon`. The two separate passes are important,
 /// since we can only replace `BrNamed` with `BrAnon`s with indices *after* all
 /// "real" `BrAnon`s.
@@ -905,7 +906,7 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
     }
 }
 
-/// This is used to replace `BoundRegion::BrNamed` with `BoundRegion::BrAnon`.
+/// This is used to replace `BoundRegionKind::BrNamed` with `BoundRegionKind::BrAnon`.
 /// Note: we assume that we will always have room for more bound vars. (i.e. we
 /// won't ever hit the `u32` limit in `BrAnon`s).
 struct NamedBoundVarSubstitutor<'a, 'tcx> {
@@ -1004,11 +1005,19 @@ impl<'tcx> TypeFolder<'tcx> for ParamsSubstitutor<'tcx> {
             // FIXME(chalk) - jackh726 - this currently isn't hit in any tests.
             // This covers any region variables in a goal, right?
             ty::ReEarlyBound(_re) => match self.named_regions.get(&_re.def_id) {
-                Some(idx) => self.tcx.mk_region(RegionKind::ReLateBound(self.binder_index, *idx)),
+                Some(idx) => {
+                    let br = ty::BoundRegion {
+                        var: ty::BoundVar::from_u32(*idx),
+                        kind: ty::BrAnon(*idx),
+                    };
+                    self.tcx.mk_region(RegionKind::ReLateBound(self.binder_index, br))
+                }
                 None => {
                     let idx = self.named_regions.len() as u32;
+                    let br =
+                        ty::BoundRegion { var: ty::BoundVar::from_u32(idx), kind: ty::BrAnon(idx) };
                     self.named_regions.insert(_re.def_id, idx);
-                    self.tcx.mk_region(RegionKind::ReLateBound(self.binder_index, idx))
+                    self.tcx.mk_region(RegionKind::ReLateBound(self.binder_index, br))
                 }
             },
 
@@ -1050,7 +1059,7 @@ impl<'tcx> TypeVisitor<'tcx> for PlaceholdersCollector {
     fn visit_region(&mut self, r: Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         match r {
             ty::RePlaceholder(p) if p.universe == self.universe_index => {
-                if let ty::BoundRegion::BrAnon(anon) = p.name {
+                if let ty::BoundRegionKind::BrAnon(anon) = p.name {
                     self.next_anon_region_placeholder = self.next_anon_region_placeholder.max(anon);
                 }
             }

@@ -94,9 +94,9 @@ fn inferred_outlives_crate(tcx: TyCtxt<'_>, crate_num: CrateNum) -> CratePredica
                             span,
                         )),
                         GenericArgKind::Lifetime(region1) => Some((
-                            ty::PredicateAtom::RegionOutlives(ty::OutlivesPredicate(
-                                region1, region2,
-                            ))
+                            ty::PredicateAtom::RegionOutlives(
+                                ty::OutlivesPredicate(region1, region2),
+                            )
                             .to_predicate(tcx),
                             span,
                         )),

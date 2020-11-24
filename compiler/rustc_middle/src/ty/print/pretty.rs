@@ -126,13 +126,13 @@ pub struct RegionHighlightMode {
     highlight_regions: [Option<(ty::RegionKind, usize)>; 3],
 
     /// If enabled, when printing a "free region" that originated from
-    /// the given `ty::BoundRegion`, print it as "`'1`". Free regions that would ordinarily
+    /// the given `ty::BoundRegionKind`, print it as "`'1`". Free regions that would ordinarily
     /// have names print as normal.
     ///
     /// This is used when you have a signature like `fn foo(x: &u32,
     /// y: &'a u32)` and we want to give a name to the region of the
     /// reference `x`.
-    highlight_bound_region: Option<(ty::BoundRegion, usize)>,
+    highlight_bound_region: Option<(ty::BoundRegionKind, usize)>,
 }
 
 impl RegionHighlightMode {
@@ -176,7 +176,7 @@ impl RegionHighlightMode {
     /// Highlight the given bound region.
     /// We can only highlight one bound region at a time. See
     /// the field `highlight_bound_region` for more detailed notes.
-    pub fn highlighting_bound_region(&mut self, br: ty::BoundRegion, number: usize) {
+    pub fn highlighting_bound_region(&mut self, br: ty::BoundRegionKind, number: usize) {
         assert!(self.highlight_bound_region.is_none());
         self.highlight_bound_region = Some((br, number));
     }
@@ -1635,16 +1635,15 @@ impl<F: fmt::Write> PrettyPrinter<'tcx> for FmtPrinter<'_, 'tcx, F> {
                 false
             }
 
-            ty::ReLateBound(db, br) => {
-                let br = self.binders[db.as_usize()][br as usize].expect_region();
-                if let ty::BrNamed(_, name) = br {
+            ty::ReLateBound(_, br) => {
+                if let ty::BrNamed(_, name) = br.kind {
                     if name != kw::Invalid && name != kw::UnderscoreLifetime {
                         return true;
                     }
                 }
 
                 if let Some((region, _)) = highlight.highlight_bound_region {
-                    if br == region {
+                    if br.kind == region {
                         return true;
                     }
                 }
@@ -1730,25 +1729,18 @@ impl<F: fmt::Write> FmtPrinter<'_, '_, F> {
                 }
             }
 
-            ty::ReLateBound(db, br) => {
-                if self.binders.len() <= db.as_usize() {
-                    eprintln!("{:?} not long enough for {:?}", self.binders, db);
-                } else if self.binders[db.as_usize()].len() <= br as usize {
-                    eprintln!("{:?} is not long enough for {:?}", self.binders[db.as_usize()], br);
-                } else {
-                    let br = self.binders[db.as_usize()][br as usize].expect_region();
-                    if let ty::BrNamed(_, name) = br {
-                        if name != kw::Invalid && name != kw::UnderscoreLifetime {
-                            p!(write("{}", name));
-                            return Ok(self);
-                        }
+            ty::ReLateBound(_, br) => {
+                if let ty::BrNamed(_, name) = br.kind {
+                    if name != kw::Invalid && name != kw::UnderscoreLifetime {
+                        p!(write("{}", name));
+                        return Ok(self);
                     }
+                }
 
-                    if let Some((region, counter)) = highlight.highlight_bound_region {
-                        if br == region {
-                            p!(write("'{}", counter));
-                            return Ok(self);
-                        }
+                if let Some((region, counter)) = highlight.highlight_bound_region {
+                    if br.kind == region {
+                        p!(write("'{}", counter));
+                        return Ok(self);
                     }
                 }
             }
@@ -1825,10 +1817,10 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
         let mut region_index = self.region_index;
         let new_value = self.tcx.replace_late_bound_regions(value.clone(), |br| {
             let _ = start_or_continue(&mut self, "for<", ", ");
-            let _br = match br {
+            let kind = match br.kind {
                 ty::BrNamed(_, name) => {
                     let _ = write!(self, "{}", name);
-                    br
+                    br.kind
                 }
                 ty::BrAnon(_) | ty::BrEnv => {
                     let name = loop {
@@ -1842,9 +1834,8 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
                     ty::BrNamed(DefId::local(CRATE_DEF_INDEX), name)
                 }
             };
-            // FIXME
-            //self.tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
-            self.tcx.mk_region(ty::ReLateBound(ty::INNERMOST, 0))
+            self.tcx
+                .mk_region(ty::ReLateBound(ty::INNERMOST, ty::BoundRegion { var: br.var, kind }))
         });
         start_or_continue(&mut self, "", "> ")?;
 
@@ -1887,7 +1878,10 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
     {
         struct LateBoundRegionNameCollector<'a>(&'a mut FxHashSet<Symbol>);
         impl<'tcx> ty::fold::TypeVisitor<'tcx> for LateBoundRegionNameCollector<'_> {
-            fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &ty::Binder<'tcx, T>) -> ControlFlow<Self::BreakTy> {
+            fn visit_binder<T: TypeFoldable<'tcx>>(
+                &mut self,
+                t: &ty::Binder<'tcx, T>,
+            ) -> ControlFlow<Self::BreakTy> {
                 for b in t.bound_vars() {
                     if let ty::BoundVariableKind::Region(ty::BrNamed(_, name)) = b {
                         self.0.insert(name);
