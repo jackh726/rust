@@ -83,6 +83,10 @@ crate fn create(
 }
 
 impl UniversalRegionRelations<'tcx> {
+    pub fn universal_regions(&self) -> &Rc<UniversalRegions<'tcx>> {
+        &self.universal_regions
+    }
+
     /// Records in the `outlives_relation` (and
     /// `inverse_outlives_relation`) that `fr_a: fr_b`. Invoked by the
     /// builder below.
@@ -316,12 +320,14 @@ impl UniversalRegionRelationsBuilder<'cx, 'tcx> {
     /// the same time, compute and add any implied bounds that come
     /// from this local.
     fn add_implied_bounds(&mut self, ty: Ty<'tcx>) -> Option<Rc<QueryRegionConstraints<'tcx>>> {
+        dbg!(&ty);
         debug!("add_implied_bounds(ty={:?})", ty);
         let (bounds, constraints) = self
             .param_env
             .and(type_op::implied_outlives_bounds::ImpliedOutlivesBounds { ty })
             .fully_perform(self.infcx)
             .unwrap_or_else(|_| bug!("failed to compute implied bounds {:?}", ty));
+        dbg!(&bounds);
         self.add_outlives_bounds(bounds);
         constraints
     }
@@ -334,7 +340,8 @@ impl UniversalRegionRelationsBuilder<'cx, 'tcx> {
         I: IntoIterator<Item = OutlivesBound<'tcx>>,
     {
         for outlives_bound in outlives_bounds {
-            debug!("add_outlives_bounds(bound={:?})", outlives_bound);
+            dbg!(&outlives_bound);
+            debug!(?outlives_bound, "add_outlives_bounds");
 
             match outlives_bound {
                 OutlivesBound::RegionSubRegion(r1, r2) => {

@@ -1165,7 +1165,12 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return value.
-    pub fn fuse<U, F, R>(self, u: Binder<'tcx, U>, tcx: TyCtxt<'tcx>, f: F) -> Binder<'tcx, R>
+    pub fn fuse<U, F, R: TypeFoldable<'tcx>>(
+        self,
+        u: Binder<'tcx, U>,
+        tcx: TyCtxt<'tcx>,
+        f: F,
+    ) -> Binder<'tcx, R>
     where
         F: FnOnce(T, U) -> R,
     {
@@ -1210,7 +1215,12 @@ impl<'tcx, T> Binder<'tcx, T> {
         };
         let bound_vars_iter = self.1.iter().chain(env_iter);
         let bound_vars = tcx.mk_bound_variable_kinds(bound_vars_iter);
-        Binder(f(self.0, u.0), bound_vars)
+        let value = f(self.0, u.0);
+        if cfg!(debug_assertions) {
+            let mut validator = ValidateBoundVars::new(bound_vars);
+            value.visit_with(&mut validator);
+        }
+        Binder(value, bound_vars)
     }
 
     /// Splits the contents into two things that share the same binder

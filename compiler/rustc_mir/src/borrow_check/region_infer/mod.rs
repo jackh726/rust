@@ -141,6 +141,7 @@ pub(crate) struct AppliedMemberConstraint {
     pub(in crate::borrow_check) member_constraint_index: NllMemberConstraintIndex,
 }
 
+#[derive(Debug)]
 pub(crate) struct RegionDefinition<'tcx> {
     /// What kind of variable is this -- a free region? existential
     /// variable? etc. (See the `NLLRegionVariableOrigin` for more
@@ -563,6 +564,9 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         let mut outlives_requirements = infcx.tcx.is_closure(mir_def_id).then(Vec::new);
 
         self.check_type_tests(infcx, body, outlives_requirements.as_mut(), &mut errors_buffer);
+        if !errors_buffer.is_empty() {
+            panic!("{:?}", errors_buffer);
+        }
 
         // In Polonius mode, the errors about missing universal region relations are in the output
         // and need to be emitted or propagated. Otherwise, we need to check whether the
@@ -576,6 +580,10 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             );
         } else {
             self.check_universal_regions(body, outlives_requirements.as_mut(), &mut errors_buffer);
+        }
+        if !errors_buffer.is_empty() {
+            dbg!("Errors");
+            dbg!(&errors_buffer);
         }
 
         if errors_buffer.is_empty() {
@@ -1330,22 +1338,32 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         mut propagated_outlives_requirements: Option<&mut Vec<ClosureOutlivesRequirement<'tcx>>>,
         errors_buffer: &mut RegionErrors<'tcx>,
     ) {
+        dbg!(&self.universal_region_relations.universal_regions());
         for (fr, fr_definition) in self.definitions.iter_enumerated() {
             match fr_definition.origin {
                 NLLRegionVariableOrigin::FreeRegion => {
                     // Go through each of the universal regions `fr` and check that
                     // they did not grow too large, accumulating any requirements
                     // for our caller into the `outlives_requirements` vector.
+                    dbg!(&fr_definition);
                     self.check_universal_region(
                         body,
                         fr,
                         &mut propagated_outlives_requirements,
                         errors_buffer,
                     );
+                    if !errors_buffer.is_empty() {
+                        dbg!("Error");
+                        dbg!(&fr);
+                        dbg!(&errors_buffer);
+                    }
                 }
 
                 NLLRegionVariableOrigin::Placeholder(placeholder) => {
                     self.check_bound_universal_region(fr, placeholder, errors_buffer);
+                    if !errors_buffer.is_empty() {
+                        panic!("{:?} {:?}", fr, errors_buffer);
+                    }
                 }
 
                 NLLRegionVariableOrigin::RootEmptyRegion
@@ -1497,12 +1515,15 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 body,
                 propagated_outlives_requirements,
             ) {
+                dbg!(&longer_fr);
+                dbg!(&representative);
                 errors_buffer.push(RegionErrorKind::RegionError {
                     longer_fr,
                     shorter_fr: representative,
                     fr_origin: NLLRegionVariableOrigin::FreeRegion,
                     is_reported: true,
                 });
+                panic!();
             }
             return;
         }
@@ -1511,6 +1532,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // (because `fr` includes `end(o)`).
         let mut error_reported = false;
         for shorter_fr in self.scc_values.universal_regions_outlived_by(longer_fr_scc) {
+            dbg!(&self.definitions.get(shorter_fr));
             if let RegionRelationCheckResult::Error = self.check_universal_region_relation(
                 longer_fr,
                 shorter_fr,
@@ -1520,6 +1542,9 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 // We only report the first region error. Subsequent errors are hidden so as
                 // not to overwhelm the user, but we do record them so as to potentially print
                 // better diagnostics elsewhere...
+                dbg!("Error");
+                dbg!(&longer_fr);
+                dbg!(&shorter_fr);
                 errors_buffer.push(RegionErrorKind::RegionError {
                     longer_fr,
                     shorter_fr,
@@ -1543,7 +1568,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         propagated_outlives_requirements: &mut Option<&mut Vec<ClosureOutlivesRequirement<'tcx>>>,
     ) -> RegionRelationCheckResult {
         // If it is known that `fr: o`, carry on.
-        if self.universal_region_relations.outlives(longer_fr, shorter_fr) {
+        if dbg!(self.universal_region_relations.outlives(dbg!(longer_fr), dbg!(shorter_fr))) {
             RegionRelationCheckResult::Ok
         } else {
             // If we are not in a context where we can't propagate errors, or we

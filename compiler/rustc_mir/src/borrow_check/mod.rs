@@ -187,6 +187,7 @@ fn do_mir_borrowck<'a, 'tcx>(
     let mut body = input_body.clone();
     let mut promoted = input_promoted.clone();
     let free_regions = nll::replace_regions_in_mir(infcx, param_env, &mut body, &mut promoted);
+    dbg!(&free_regions);
     let body = &body; // no further changes
 
     let location_table = &LocationTable::new(&body);
@@ -232,6 +233,7 @@ fn do_mir_borrowck<'a, 'tcx>(
         &borrow_set,
         &upvars,
     );
+    let errors = !nll_errors.is_empty();
 
     // Dump MIR results into a file, if that is enabled. This let us
     // write unit-tests, as well as helping with debugging.
@@ -464,6 +466,9 @@ fn do_mir_borrowck<'a, 'tcx>(
 
     debug!("do_mir_borrowck: result = {:#?}", result);
 
+    if errors {
+        panic!("Errors");
+    }
     result
 }
 

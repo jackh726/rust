@@ -561,6 +561,7 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         let tcx = self.infcx.tcx;
         let closure_base_def_id = tcx.closure_base_def_id(self.mir_def.did.to_def_id());
         let identity_substs = InternalSubsts::identity_for_item(tcx, closure_base_def_id);
+        dbg!(&identity_substs);
         let fr_substs = match defining_ty {
             DefiningTy::Closure(_, ref substs) | DefiningTy::Generator(_, ref substs, _) => {
                 // In the case of closures, we rely on the fact that
@@ -582,7 +583,10 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         let subst_mapping =
             identity_substs.regions().zip(fr_substs.regions().map(|r| r.to_region_vid()));
 
-        UniversalRegionIndices { indices: global_mapping.chain(subst_mapping).collect() }
+        let indices = global_mapping.chain(subst_mapping).collect();
+        dbg!(&indices);
+
+        UniversalRegionIndices { indices }
     }
 
     fn compute_inputs_and_output(

@@ -157,6 +157,8 @@ pub(crate) fn type_check<'mir, 'tcx>(
         &mut constraints,
     );
 
+    dbg!(&universal_region_relations);
+
     let mut borrowck_context = BorrowCheckContext {
         universal_regions,
         location_table,
