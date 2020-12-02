@@ -121,7 +121,7 @@ pub trait TypeRelatingDelegate<'tcx> {
 
 #[derive(Clone, Debug, Default)]
 struct BoundRegionScope<'tcx> {
-    map: FxHashMap<ty::BoundRegion, ty::Region<'tcx>>,
+    map: FxHashMap<ty::BoundRegionKind, ty::Region<'tcx>>,
 }
 
 #[derive(Copy, Clone)]
@@ -165,7 +165,7 @@ where
         let mut next_region = {
             let delegate = &mut self.delegate;
             let mut lazy_universe = None;
-            move |br: ty::BoundRegion| {
+            move |br: ty::BoundRegionKind| {
                 if universally_quantified.0 {
                     // The first time this closure is called, create a
                     // new universe for the placeholders we will make
@@ -176,7 +176,7 @@ where
                         universe
                     });
 
-                    let placeholder = ty::PlaceholderRegion { universe, name: br.kind };
+                    let placeholder = ty::PlaceholderRegion { universe, name: br };
                     delegate.next_placeholder_region(placeholder)
                 } else {
                     delegate.next_existential_region_var(true)
@@ -203,7 +203,7 @@ where
     /// of ambient scopes `scopes`.
     fn lookup_bound_region(
         debruijn: ty::DebruijnIndex,
-        br: ty::BoundRegion,
+        br: ty::BoundRegionKind,
         first_free_index: ty::DebruijnIndex,
         scopes: &[BoundRegionScope<'tcx>],
     ) -> ty::Region<'tcx> {
@@ -229,7 +229,7 @@ where
     ) -> ty::Region<'tcx> {
         debug!("replace_bound_regions(scopes={:?})", scopes);
         if let ty::ReLateBound(debruijn, br) = r {
-            Self::lookup_bound_region(*debruijn, *br, first_free_index, scopes)
+            Self::lookup_bound_region(*debruijn, br.kind, first_free_index, scopes)
         } else {
             r
         }
@@ -568,6 +568,10 @@ where
         let v_a = self.replace_bound_region(a, ty::INNERMOST, &self.a_scopes);
         let v_b = self.replace_bound_region(b, ty::INNERMOST, &self.b_scopes);
 
+        if v_a == v_b {
+            return Ok(a);
+        }
+
         debug!("regions: v_a = {:?}", v_a);
         debug!("regions: v_b = {:?}", v_b);
 
@@ -734,7 +738,7 @@ where
 /// `for<..`>.  For each of those, it creates an entry in
 /// `bound_region_scope`.
 struct ScopeInstantiator<'me, 'tcx> {
-    next_region: &'me mut dyn FnMut(ty::BoundRegion) -> ty::Region<'tcx>,
+    next_region: &'me mut dyn FnMut(ty::BoundRegionKind) -> ty::Region<'tcx>,
     // The debruijn index of the scope we are instantiating.
     target_index: ty::DebruijnIndex,
     bound_region_scope: &'me mut BoundRegionScope<'tcx>,
@@ -757,7 +761,7 @@ impl<'me, 'tcx> TypeVisitor<'tcx> for ScopeInstantiator<'me, 'tcx> {
 
         match r {
             ty::ReLateBound(debruijn, br) if *debruijn == self.target_index => {
-                bound_region_scope.map.entry(*br).or_insert_with(|| next_region(*br));
+                bound_region_scope.map.entry(br.kind).or_insert_with(|| next_region(br.kind));
             }
 
             _ => {}

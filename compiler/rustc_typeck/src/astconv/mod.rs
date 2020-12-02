@@ -974,7 +974,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             } else {
                 // Otherwise, we have to walk through the supertraits to find
                 // those that do.
-                self.one_bound_for_assoc_type(
+                let candidate = self.one_bound_for_assoc_type(
                     || traits::supertraits(tcx, trait_ref),
                     || trait_ref.print_only_trait_path().to_string(),
                     binding.item_name,
@@ -983,7 +983,54 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         ConvertedBindingKind::Equality(ty) => Some(ty.to_string()),
                         _ => None,
                     },
-                )?
+                )?;
+                /*
+                let n_bound_vars = trait_ref.bound_vars().len();
+                let candidate_vars = candidate.bound_vars();
+                dbg!(&trait_ref);
+                dbg!(&candidate);
+                let candidate = tcx
+                    .replace_bound_vars(
+                        candidate,
+                        |r| {
+                            tcx.mk_region(ty::ReLateBound(
+                                ty::INNERMOST,
+                                ty::BoundRegion {
+                                    var: ty::BoundVar::from_usize(r.var.as_usize() + n_bound_vars),
+                                    kind: r.kind,
+                                },
+                            ))
+                        },
+                        |t| {
+                            tcx.mk_ty(ty::Bound(
+                                ty::INNERMOST,
+                                ty::BoundTy {
+                                    var: ty::BoundVar::from_usize(t.var.as_usize() + n_bound_vars),
+                                    kind: t.kind,
+                                },
+                            ))
+                        },
+                        |c, ty| {
+                            tcx.mk_const(ty::Const {
+                                val: ty::ConstKind::Bound(
+                                    ty::INNERMOST,
+                                    ty::BoundVar::from_usize(c.as_usize() + n_bound_vars),
+                                ),
+                                ty,
+                            })
+                        },
+                    )
+                    .0;
+                dbg!(&candidate);
+                let bound_vars = tcx
+                    .mk_bound_variable_kinds(trait_ref.bound_vars().iter().chain(candidate_vars));
+                dbg!(&bound_vars);
+                if trait_ref.bound_vars().len() > 0 && candidate_vars.len() > 0 {
+                    dbg!("Shifting");
+                }
+                ty::Binder::bind_with_vars(candidate, bound_vars)
+                */
+                candidate
             };
 
         let (assoc_ident, def_scope) =
@@ -1040,6 +1087,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 /*
                 let n_bound_vars = trait_ref.bound_vars().len();
                 let candidate_vars = candidate.bound_vars();
+                dbg!(&trait_ref);
                 dbg!(&candidate);
                 let candidate = tcx
                     .replace_bound_vars(
@@ -1077,6 +1125,16 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 let bound_vars = tcx
                     .mk_bound_variable_kinds(trait_ref.bound_vars().iter().chain(candidate_vars));
                 dbg!(&bound_vars);
+                if trait_ref.bound_vars().len() > 0 && candidate_vars.len() > 0 {
+                    dbg!("Shifting");
+                }
+                */
+                /*
+                if candidate.bound_vars() != trait_ref.bound_vars() {
+                    dbg!(&candidate);
+                    dbg!(&trait_ref);
+                    panic!();
+                }
                 */
                 bounds.projection_bounds.push((
                     ty::Binder::bind_with_vars(
@@ -1090,7 +1148,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                             ty,
                         },
                         //bound_vars,
-                        trait_ref.bound_vars(),
+                        //trait_ref.bound_vars(),
+                        candidate.bound_vars(),
                     ),
                     binding.span,
                 ));

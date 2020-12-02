@@ -523,6 +523,11 @@ impl<'tcx> RegionConstraintCollector<'_, 'tcx> {
         sup: Region<'tcx>,
     ) {
         if sub != sup {
+            if let (ty::ReLateBound(_, br1), ty::ReLateBound(_, br2)) = (sub, sup) {
+                if br1.kind == br2.kind {
+                    panic!();
+                }
+            }
             // Eventually, it would be nice to add direct support for
             // equating regions.
             self.make_subregion(origin.clone(), sub, sup);

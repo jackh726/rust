@@ -334,7 +334,7 @@ impl UniversalRegionRelationsBuilder<'cx, 'tcx> {
         I: IntoIterator<Item = OutlivesBound<'tcx>>,
     {
         for outlives_bound in outlives_bounds {
-            debug!("add_outlives_bounds(bound={:?})", outlives_bound);
+            debug!(?outlives_bound, "add_outlives_bounds");
 
             match outlives_bound {
                 OutlivesBound::RegionSubRegion(r1, r2) => {

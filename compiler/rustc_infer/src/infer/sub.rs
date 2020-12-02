@@ -4,6 +4,7 @@ use super::SubregionOrigin;
 use crate::infer::combine::ConstEquateRelation;
 use crate::traits::Obligation;
 use rustc_middle::ty::fold::TypeFoldable;
+use rustc_middle::ty::relate::LateBoundIgnoreVerifier;
 use rustc_middle::ty::relate::{Cause, Relate, RelateResult, TypeRelation};
 use rustc_middle::ty::TyVar;
 use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt};
@@ -78,6 +79,9 @@ impl TypeRelation<'tcx> for Sub<'combine, 'infcx, 'tcx> {
 
         if a == b {
             return Ok(a);
+        } else {
+            let mut verify = LateBoundIgnoreVerifier::new(self.tcx());
+            verify.relate(a, b)?;
         }
 
         let infcx = self.fields.infcx;

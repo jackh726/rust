@@ -768,3 +768,84 @@ pub fn expected_found_bool<T>(a_is_expected: bool, a: T, b: T) -> ExpectedFound<
         ExpectedFound { expected: b, found: a }
     }
 }
+
+pub struct LateBoundIgnoreVerifier<'tcx> {
+    tcx: TyCtxt<'tcx>,
+}
+
+impl<'tcx> LateBoundIgnoreVerifier<'tcx> {
+    pub fn new(tcx: TyCtxt<'tcx>) -> LateBoundIgnoreVerifier<'tcx> {
+        LateBoundIgnoreVerifier { tcx }
+    }
+}
+
+impl TypeRelation<'tcx> for LateBoundIgnoreVerifier<'tcx> {
+    fn tag(&self) -> &'static str {
+        "late_bound_ignore_verifier"
+    }
+    fn tcx(&self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        ty::ParamEnv::empty()
+    }
+
+    fn a_is_expected(&self) -> bool {
+        true
+    }
+
+    fn regions(
+        &mut self,
+        a: ty::Region<'tcx>,
+        b: ty::Region<'tcx>,
+    ) -> RelateResult<'tcx, ty::Region<'tcx>> {
+        if a != b {
+            if let (ty::ReLateBound(_, br1), ty::ReLateBound(_, br2)) = (a, b) {
+                if br1.kind == br2.kind {
+                    panic!();
+                }
+            }
+        }
+        Ok(a)
+    }
+
+    fn relate_with_variance<T: Relate<'tcx>>(
+        &mut self,
+        _: ty::Variance,
+        a: T,
+        b: T,
+    ) -> RelateResult<'tcx, T> {
+        self.relate(a, b)
+    }
+
+    fn tys(&mut self, a: Ty<'tcx>, b: Ty<'tcx>) -> RelateResult<'tcx, Ty<'tcx>> {
+        match (a.kind(), b.kind()) {
+            (&ty::Infer(_), _) | (_, &ty::Infer(_)) => Ok(a),
+
+            _ => super_relate_tys(self, a, b),
+        }
+    }
+
+    fn consts(
+        &mut self,
+        a: &'tcx ty::Const<'tcx>,
+        _b: &'tcx ty::Const<'tcx>,
+    ) -> RelateResult<'tcx, &'tcx ty::Const<'tcx>> {
+        Ok(a)
+    }
+
+    fn binders<T>(
+        &mut self,
+        a: ty::Binder<'tcx, T>,
+        b: ty::Binder<'tcx, T>,
+    ) -> RelateResult<'tcx, ty::Binder<'tcx, T>>
+    where
+        T: Relate<'tcx>,
+    {
+        if a.skip_binder().has_escaping_bound_vars() || b.skip_binder().has_escaping_bound_vars() {
+            self.relate(a.skip_binder(), b.skip_binder())?;
+        }
+        Ok(a)
+    }
+}

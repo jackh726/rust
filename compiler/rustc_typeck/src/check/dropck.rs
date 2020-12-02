@@ -337,6 +337,11 @@ impl TypeRelation<'tcx> for SimpleEqRelation<'tcx> {
         if a == b {
             Ok(a)
         } else {
+            if let (ty::ReLateBound(_, br1), ty::ReLateBound(_, br2)) = (a, b) {
+                if br1.kind == br2.kind {
+                    panic!();
+                }
+            }
             // I'm not sure is this `TypeError` is the right one, but
             // it should not matter as it won't be checked (the dropck
             // will emit its own, more informative and higher-level errors
