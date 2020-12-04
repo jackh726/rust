@@ -1835,7 +1835,10 @@ impl<F: fmt::Write> FmtPrinter<'_, 'tcx, F> {
     {
         struct LateBoundRegionNameCollector<'a>(&'a mut FxHashSet<Symbol>);
         impl<'tcx> ty::fold::TypeVisitor<'tcx> for LateBoundRegionNameCollector<'_> {
-            fn visit_binder<T: TypeFoldable<'tcx>>(&mut self, t: &ty::Binder<'tcx, T>) -> ControlFlow<Self::BreakTy> {
+            fn visit_binder<T: TypeFoldable<'tcx>>(
+                &mut self,
+                t: &ty::Binder<'tcx, T>,
+            ) -> ControlFlow<Self::BreakTy> {
                 for b in t.bound_vars() {
                     if let ty::BoundVariableKind::Region(ty::BrNamed(_, name)) = b {
                         self.0.insert(name);

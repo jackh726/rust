@@ -928,7 +928,9 @@ fn clean_fn_or_proc_macro<'a, 'tcx>(
     }
 }
 
-impl<'a, 'tcx> Clean<'tcx, Function> for (&'a hir::FnSig<'tcx>, &'a hir::Generics<'tcx>, hir::BodyId) {
+impl<'a, 'tcx> Clean<'tcx, Function>
+    for (&'a hir::FnSig<'tcx>, &'a hir::Generics<'tcx>, hir::BodyId)
+{
     fn clean(&self, cx: &DocContext<'tcx>) -> Function {
         let (generics, decl) =
             enter_impl_trait(cx, || (self.1.clean(cx), (&*self.0.decl, self.2).clean(cx)));
