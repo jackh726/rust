@@ -202,6 +202,8 @@ enum Scope<'a> {
     Binder {
         lifetimes: FxHashMap<hir::ParamName, Region>,
 
+        binders: Vec<Region>,
+
         /// if we extend this scope with another scope, what is the next index
         /// we should use for an early-bound region?
         next_early_index: u32,
@@ -425,6 +427,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 let scope = Scope::Binder {
                     hir_id,
                     lifetimes: FxHashMap::default(),
+                    binders: Vec::default(),
                     next_early_index: self.next_early_index(),
                     s: self.scope,
                     track_lifetime_uses: true,
@@ -511,6 +514,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 let scope = Scope::Binder {
                     hir_id: item.hir_id,
                     lifetimes,
+                    binders: Vec::default(),
                     next_early_index: index + non_lifetime_count,
                     opaque_type_parent: true,
                     track_lifetime_uses,
@@ -575,15 +579,24 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         _ => None,
                     })
                     .collect();
-                let mut binders: Vec<_> = lifetimes.values().copied().collect();
-                binders.sort_by_key(|b| match b {
-                    Region::LateBound(_, idx, _, _) => *idx,
-                    _ => bug!(),
-                });
-                self.map.ty_binders.insert(ty.hir_id, binders);
+                let mut named_late_bound_vars = 0;
+                let binders: Vec<_> = c
+                    .generic_params
+                    .iter()
+                    .filter_map(|param| match param.kind {
+                        GenericParamKind::Lifetime { .. } => {
+                            let late_bound_idx = named_late_bound_vars;
+                            named_late_bound_vars += 1;
+                            Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
+                        }
+                        GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
+                    })
+                    .collect();
+                self.map.ty_binders.insert(ty.hir_id, binders.clone());
                 let scope = Scope::Binder {
                     hir_id: ty.hir_id,
                     lifetimes,
+                    binders,
                     s: self.scope,
                     next_early_index,
                     track_lifetime_uses: true,
@@ -760,6 +773,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         let scope = Scope::Binder {
                             hir_id: ty.hir_id,
                             lifetimes,
+                            binders: Vec::default(),
                             next_early_index,
                             s: this.scope,
                             track_lifetime_uses: true,
@@ -777,6 +791,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     let scope = Scope::Binder {
                         hir_id: ty.hir_id,
                         lifetimes,
+                        binders: Vec::default(),
                         next_early_index,
                         s: self.scope,
                         track_lifetime_uses: true,
@@ -833,6 +848,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 let scope = Scope::Binder {
                     hir_id: trait_item.hir_id,
                     lifetimes,
+                    binders: Vec::default(),
                     next_early_index: index + non_lifetime_count,
                     s: self.scope,
                     track_lifetime_uses: true,
@@ -899,6 +915,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 let scope = Scope::Binder {
                     hir_id: ty.hir_id,
                     lifetimes,
+                    binders: Vec::default(),
                     next_early_index: index + non_lifetime_count,
                     s: self.scope,
                     track_lifetime_uses: true,
@@ -997,17 +1014,27 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         })
                         .collect();
                     if !lifetimes.is_empty() {
-                        let mut binders: Vec<_> = lifetimes.values().copied().collect();
-                        binders.sort_by_key(|b| match b {
-                            Region::LateBound(_, idx, _, _) => *idx,
-                            _ => bug!(),
-                        });
+                        let mut named_late_bound_vars = 0;
+                        let binders: Vec<_> = bound_generic_params
+                            .iter()
+                            .filter_map(|param| match param.kind {
+                                GenericParamKind::Lifetime { .. } => {
+                                    let late_bound_idx = named_late_bound_vars;
+                                    named_late_bound_vars += 1;
+                                    Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
+                                }
+                                GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => {
+                                    None
+                                }
+                            })
+                            .collect();
                         self.map.ty_binders.insert(bounded_ty.hir_id, binders.clone());
 
                         let next_early_index = self.next_early_index();
                         let scope = Scope::Binder {
                             hir_id: bounded_ty.hir_id,
                             lifetimes,
+                            binders,
                             s: self.scope,
                             next_early_index,
                             track_lifetime_uses: true,
@@ -1055,6 +1082,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 let scope = Scope::Binder {
                     hir_id: *hir_id,
                     lifetimes: FxHashMap::default(),
+                    binders: Vec::default(),
                     s: self.scope,
                     next_early_index: self.next_early_index(),
                     track_lifetime_uses: true,
@@ -1105,15 +1133,24 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
             .emit();
         }
         if !trait_ref_hack || !lifetimes.is_empty() {
-            let mut binders: Vec<_> = lifetimes.values().copied().collect();
-            binders.sort_by_key(|b| match b {
-                Region::LateBound(_, idx, _, _) => *idx,
-                _ => bug!(),
-            });
-            self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders);
+            let mut named_late_bound_vars = 0;
+            let binders: Vec<_> = trait_ref
+                .bound_generic_params
+                .iter()
+                .filter_map(|param| match param.kind {
+                    GenericParamKind::Lifetime { .. } => {
+                        let late_bound_idx = named_late_bound_vars;
+                        named_late_bound_vars += 1;
+                        Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
+                    }
+                    GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
+                })
+                .collect();
+            self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
             let scope = Scope::Binder {
                 hir_id: trait_ref.trait_ref.hir_ref_id,
                 lifetimes,
+                binders,
                 s: self.scope,
                 next_early_index,
                 track_lifetime_uses: true,
@@ -1127,7 +1164,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
             });
         } else {
             // Since `trait_ref_hack` is true, we *know* there is a `Scope::Binder` above.
-            let (lifetimes, named_late_bound_vars) = {
+            let (binders, named_late_bound_vars) = {
                 let mut scope = self.scope;
                 loop {
                     match *scope {
@@ -1137,18 +1174,13 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             scope = s;
                         }
                         Scope::Root | Scope::TraitRefHackInner { .. } => bug!(),
-                        Scope::Binder { ref lifetimes, named_late_bound_vars, .. } => {
-                            break (lifetimes, named_late_bound_vars);
+                        Scope::Binder { ref binders, named_late_bound_vars, .. } => {
+                            break (binders, named_late_bound_vars);
                         }
                     }
                 }
             };
-            let mut binders: Vec<_> = lifetimes.values().copied().collect();
-            binders.sort_by_key(|b| match b {
-                Region::LateBound(_, idx, _, _) => *idx,
-                _ => bug!(),
-            });
-            self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders);
+            self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
             let scope = Scope::TraitRefHackInner {
                 hir_id: trait_ref.trait_ref.hir_ref_id,
                 named_late_bound_vars,
@@ -1869,22 +1901,28 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             .collect();
         let next_early_index = index + non_lifetime_count;
 
-        let mut binders: Vec<_> = lifetimes
-            .values()
-            .filter(|b| match b {
-                Region::LateBound(..) => true,
-                _ => false,
+        let mut named_late_bound_vars = 0;
+        let binders: Vec<_> = generics
+            .params
+            .iter()
+            .filter_map(|param| match param.kind {
+                GenericParamKind::Lifetime { .. } => {
+                    if self.map.late_bound.contains(&param.hir_id) {
+                        let late_bound_idx = named_late_bound_vars;
+                        named_late_bound_vars += 1;
+                        Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
+                    } else {
+                        None
+                    }
+                }
+                GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
             })
-            .copied()
             .collect();
-        binders.sort_by_key(|b| match b {
-            Region::LateBound(_, idx, _, _) => *idx,
-            _ => bug!(),
-        });
-        self.map.ty_binders.insert(hir_id, binders);
+        self.map.ty_binders.insert(hir_id, binders.clone());
         let scope = Scope::Binder {
             hir_id,
             lifetimes,
+            binders,
             next_early_index,
             s: self.scope,
             opaque_type_parent: true,
