@@ -16,7 +16,6 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::{AsyncGeneratorKind, GeneratorKind, Node};
-use rustc_middle::ty::fold::BoundVarsCollector;
 use rustc_middle::ty::{
     self, suggest_constraining_type_param, AdtKind, DefIdTree, Infer, InferTy, ToPredicate, Ty,
     TyCtxt, TypeFoldable, WithConstness,
@@ -1446,14 +1445,13 @@ impl<'a, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'a, 'tcx> {
         };
 
         // The generator interior types share the same binders
-        let mut collector = BoundVarsCollector::new();
-        typeck_results.generator_interior_types.visit_with(&mut collector);
-        let vars = collector.into_vars(self.tcx);
         typeck_results
             .generator_interior_types
+            .as_ref()
+            .skip_binder()
             .iter()
             .find(|ty::GeneratorInteriorTypeCause { ty, .. }| {
-                ty_matches(ty::Binder::bind_with_vars(ty, vars))
+                ty_matches(typeck_results.generator_interior_types.rebind(ty))
             })
             .map(|cause| {
                 // Check to see if any awaited expressions have the target type.

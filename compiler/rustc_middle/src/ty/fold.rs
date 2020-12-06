@@ -785,7 +785,7 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
 
     fn visit_region(&mut self, r: ty::Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         match r {
-            ty::ReLateBound(index, _br) if *index == self.binder_index => bug!(),
+            ty::ReLateBound(index, _br) if *index == self.binder_index => bug!("{:?}", _br),
 
             _ => (),
         };

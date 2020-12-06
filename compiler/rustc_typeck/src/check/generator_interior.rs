@@ -208,10 +208,12 @@ pub fn resolve_interior<'a, 'tcx>(
     let bound_vars = fcx.tcx.mk_bound_variable_kinds(
         (0..counter).map(|i| ty::BoundVariableKind::Region(ty::BrAnon(i))),
     );
-    let witness = fcx.tcx.mk_generator_witness(ty::Binder::bind_with_vars(type_list, bound_vars));
+    let witness =
+        fcx.tcx.mk_generator_witness(ty::Binder::bind_with_vars(type_list, bound_vars.clone()));
 
     // Store the generator types and spans into the typeck results for this generator.
-    visitor.fcx.inh.typeck_results.borrow_mut().generator_interior_types = type_causes;
+    visitor.fcx.inh.typeck_results.borrow_mut().generator_interior_types =
+        ty::Binder::bind_with_vars(type_causes, bound_vars);
 
     debug!(
         "types in generator after region replacement {:?}, span = {:?}",
