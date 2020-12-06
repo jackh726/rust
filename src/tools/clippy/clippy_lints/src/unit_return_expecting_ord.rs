@@ -44,7 +44,7 @@ fn get_trait_predicates_for_trait_id<'tcx>(
         if_chain! {
             let bound_pred = pred.bound_atom();
             if let PredicateAtom::Trait(poly_trait_pred, _) = bound_pred.skip_binder();
-            let trait_pred = cx.tcx.erase_late_bound_regions(&bound_pred.rebind(poly_trait_pred));
+            let trait_pred = cx.tcx.erase_late_bound_regions(bound_pred.rebind(poly_trait_pred));
             if let Some(trait_def_id) = trait_id;
             if trait_def_id == trait_pred.trait_ref.def_id;
             then {
@@ -63,7 +63,7 @@ fn get_projection_pred<'tcx>(
     generics.predicates.iter().find_map(|(proj_pred, _)| {
         let bound_proj_pred = proj_pred.bound_atom();
         if let ty::PredicateAtom::Projection(proj_pred) = bound_proj_pred.skip_binder() {
-            let projection_pred = cx.tcx.erase_late_bound_regions(&bound_proj_pred.rebind(proj_pred));
+            let projection_pred = cx.tcx.erase_late_bound_regions(bound_proj_pred.rebind(proj_pred));
             if projection_pred.projection_ty.substs == pred.trait_ref.substs {
                 return Some(projection_pred);
             }
