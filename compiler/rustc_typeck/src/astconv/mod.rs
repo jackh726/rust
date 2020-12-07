@@ -871,6 +871,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         param_ty: Ty<'tcx>,
         ast_bounds: &[&hir::GenericBound<'_>],
         bounds: &mut Bounds<'tcx>,
+        bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
     ) {
         let constness = self.default_constness_for_trait_bounds();
         for ast_bound in ast_bounds {
@@ -887,7 +888,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         *lang_item, *span, *hir_id, args, param_ty, bounds,
                     ),
                 hir::GenericBound::Outlives(ref l) => bounds.region_bounds.push((
-                    ty::Binder::bind(self.ast_region_to_region(l, None), self.tcx()),
+                    ty::Binder::bind_with_vars(self.ast_region_to_region(l, None), bound_vars),
                     l.span,
                 )),
             }
@@ -916,9 +917,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ast_bounds: &[hir::GenericBound<'_>],
         sized_by_default: SizedByDefault,
         span: Span,
+        bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
     ) -> Bounds<'tcx> {
         let ast_bounds: Vec<_> = ast_bounds.iter().collect();
-        self.compute_bounds_inner(param_ty, &ast_bounds, sized_by_default, span)
+        self.compute_bounds_inner(param_ty, &ast_bounds, sized_by_default, span, bound_vars)
     }
 
     /// Convert the bounds in `ast_bounds` that refer to traits which define an associated type
@@ -943,7 +945,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             }
         }
 
-        self.compute_bounds_inner(param_ty, &result, sized_by_default, span)
+        self.compute_bounds_inner(param_ty, &result, sized_by_default, span, ty::List::empty())
     }
 
     fn compute_bounds_inner(
@@ -952,10 +954,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ast_bounds: &[&hir::GenericBound<'_>],
         sized_by_default: SizedByDefault,
         span: Span,
+        bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
     ) -> Bounds<'tcx> {
         let mut bounds = Bounds::default();
 
-        self.add_bounds(param_ty, ast_bounds, &mut bounds);
+        self.add_bounds(param_ty, ast_bounds, &mut bounds, bound_vars);
         bounds.trait_bounds.sort_by_key(|(t, _, _)| t.def_id());
 
         bounds.implicitly_sized = if let SizedByDefault::Yes = sized_by_default {
@@ -1152,7 +1155,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 let param_ty =
                     tcx.mk_projection(assoc_ty.def_id, projection_ty.skip_binder().substs);
                 let ast_bounds: Vec<_> = ast_bounds.iter().collect();
-                self.add_bounds(param_ty, &ast_bounds, bounds);
+                self.add_bounds(param_ty, &ast_bounds, bounds, trait_ref.bound_vars());
             }
         }
         Ok(())
