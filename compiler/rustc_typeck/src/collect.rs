@@ -1007,8 +1007,14 @@ fn super_predicates_of(tcx: TyCtxt<'_>, trait_def_id: DefId) -> ty::GenericPredi
 
     // Convert the bounds that follow the colon, e.g., `Bar + Zed` in `trait Foo: Bar + Zed`.
     let self_param_ty = tcx.types.self_param;
-    let superbounds1 =
-        AstConv::compute_bounds(&icx, self_param_ty, bounds, SizedByDefault::No, item.span);
+    let superbounds1 = AstConv::compute_bounds(
+        &icx,
+        self_param_ty,
+        bounds,
+        SizedByDefault::No,
+        item.span,
+        ty::List::empty(),
+    );
 
     let superbounds1 = superbounds1.predicates(tcx, self_param_ty);
 
@@ -1901,8 +1907,14 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                 index += 1;
 
                 let sized = SizedByDefault::Yes;
-                let bounds =
-                    AstConv::compute_bounds(&icx, param_ty, &param.bounds, sized, param.span);
+                let bounds = AstConv::compute_bounds(
+                    &icx,
+                    param_ty,
+                    &param.bounds,
+                    sized,
+                    param.span,
+                    ty::List::empty(),
+                );
                 predicates.extend(bounds.predicates(tcx, param_ty));
             }
             GenericParamKind::Const { .. } => {
