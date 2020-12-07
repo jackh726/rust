@@ -26,7 +26,7 @@ pub struct Bounds<'tcx> {
     /// A list of region bounds on the (implicit) self type. So if you
     /// had `T: 'a + 'b` this might would be a list `['a, 'b]` (but
     /// the `T` is not explicitly included).
-    pub region_bounds: Vec<(ty::Region<'tcx>, Span)>,
+    pub region_bounds: Vec<(ty::Binder<'tcx, ty::Region<'tcx>>, Span)>,
 
     /// A list of trait bounds. So if you had `T: Debug` this would be
     /// `T: Debug`. Note that the self-type is explicit here.
@@ -57,10 +57,10 @@ impl<'tcx> Bounds<'tcx> {
         // If it could be sized, and is, add the `Sized` predicate.
         let sized_predicate = self.implicitly_sized.and_then(|span| {
             tcx.lang_items().sized_trait().map(|sized| {
-                let trait_ref = ty::Binder::bind(
-                    ty::TraitRef { def_id: sized, substs: tcx.mk_substs_trait(param_ty, &[]) },
-                    tcx,
-                );
+                let trait_ref = ty::Binder::dummy(ty::TraitRef {
+                    def_id: sized,
+                    substs: tcx.mk_substs_trait(param_ty, &[]),
+                });
                 (trait_ref.to_poly_trait_predicate().without_const().to_predicate(tcx), span)
             })
         });
@@ -68,8 +68,12 @@ impl<'tcx> Bounds<'tcx> {
         sized_predicate
             .into_iter()
             .chain(self.region_bounds.iter().map(|&(region_bound, span)| {
-                let outlives = ty::OutlivesPredicate(param_ty, region_bound);
-                (ty::Binder::bind(outlives, tcx).to_predicate(tcx), span)
+                (
+                    region_bound
+                        .map_bound(|region_bound| ty::OutlivesPredicate(param_ty, region_bound))
+                        .to_predicate(tcx),
+                    span,
+                )
             }))
             .chain(self.trait_bounds.iter().map(|&(bound_trait_ref, span, constness)| {
                 let predicate = bound_trait_ref
