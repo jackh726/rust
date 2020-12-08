@@ -25,6 +25,7 @@ use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use rustc_span::Span;
 use std::borrow::Cow;
 use std::cell::Cell;
+use std::fmt;
 use std::mem::take;
 
 use tracing::{debug, span, Level};
@@ -266,6 +267,53 @@ enum Scope<'a> {
     },
 
     Root,
+}
+
+struct TruncatedScopeDebug<'a>(&'a Scope<'a>);
+
+impl<'a> fmt::Debug for TruncatedScopeDebug<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Scope::Binder {
+                lifetimes,
+                binders,
+                next_early_index,
+                track_lifetime_uses,
+                opaque_type_parent,
+                named_late_bound_vars,
+                hir_id,
+                ..
+            } => f
+                .debug_struct("Binder")
+                .field("lifetimes", lifetimes)
+                .field("binders", binders)
+                .field("next_early_index", next_early_index)
+                .field("track_lifetime_uses", track_lifetime_uses)
+                .field("opaque_type_parent", opaque_type_parent)
+                .field("named_late_bound_vars", named_late_bound_vars)
+                .field("hir_id", hir_id)
+                .field("s", &"..")
+                .finish(),
+            Scope::Body { id, .. } => {
+                f.debug_struct("Body").field("id", id).field("s", &"..").finish()
+            }
+            Scope::Elision { elide, .. } => {
+                f.debug_struct("Elision").field("elide", elide).field("s", &"..").finish()
+            }
+            Scope::ObjectLifetimeDefault { lifetime, .. } => f
+                .debug_struct("ObjectLifetimeDefault")
+                .field("lifetime", lifetime)
+                .field("s", &"..")
+                .finish(),
+            Scope::TraitRefHackInner { hir_id, named_late_bound_vars, .. } => f
+                .debug_struct("TraitRefHackInner")
+                .field("hir_id", hir_id)
+                .field("named_late_bound_vars", named_late_bound_vars)
+                .field("s", &"..")
+                .finish(),
+            Scope::Root => f.debug_struct("Root").finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1567,7 +1615,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             lifetime_uses,
             missing_named_lifetime_spots,
         };
-        let span = span!(Level::DEBUG, "scope", scope = ?this.scope);
+        let span = span!(Level::DEBUG, "scope", scope = ?TruncatedScopeDebug(&this.scope));
         //debug!(scope = ?this.scope, "entering scope");
         {
             let _enter = span.enter();
