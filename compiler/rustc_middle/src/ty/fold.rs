@@ -637,6 +637,42 @@ impl<'tcx> TyCtxt<'tcx> {
         .0
     }
 
+    pub fn shift_bound_var_indices<T>(self, bound_vars: usize, tcx: TyCtxt<'tcx>, value: T) -> T
+    where
+        T: TypeFoldable<'tcx>,
+    {
+        tcx.replace_escaping_bound_vars(
+            value,
+            |r| {
+                tcx.mk_region(ty::ReLateBound(
+                    ty::INNERMOST,
+                    ty::BoundRegion {
+                        var: ty::BoundVar::from_usize(r.var.as_usize() + bound_vars),
+                        kind: r.kind,
+                    },
+                ))
+            },
+            |t| {
+                tcx.mk_ty(ty::Bound(
+                    ty::INNERMOST,
+                    ty::BoundTy {
+                        var: ty::BoundVar::from_usize(t.var.as_usize() + bound_vars),
+                        kind: t.kind,
+                    },
+                ))
+            },
+            |c, ty| {
+                tcx.mk_const(ty::Const {
+                    val: ty::ConstKind::Bound(
+                        ty::INNERMOST,
+                        ty::BoundVar::from_usize(c.as_usize() + bound_vars),
+                    ),
+                    ty,
+                })
+            },
+        )
+    }
+
     /// Returns a set of all late-bound regions that are constrained
     /// by `value`, meaning that if we instantiate those LBR with
     /// variables and equate `value` with something else, those
