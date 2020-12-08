@@ -637,14 +637,14 @@ impl<'tcx> TyCtxt<'tcx> {
         .0
     }
 
-    pub fn shift_bound_var_indices<T>(self, bound_vars: usize, tcx: TyCtxt<'tcx>, value: T) -> T
+    pub fn shift_bound_var_indices<T>(self, bound_vars: usize, value: T) -> T
     where
         T: TypeFoldable<'tcx>,
     {
-        tcx.replace_escaping_bound_vars(
+        self.replace_escaping_bound_vars(
             value,
             |r| {
-                tcx.mk_region(ty::ReLateBound(
+                self.mk_region(ty::ReLateBound(
                     ty::INNERMOST,
                     ty::BoundRegion {
                         var: ty::BoundVar::from_usize(r.var.as_usize() + bound_vars),
@@ -653,7 +653,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 ))
             },
             |t| {
-                tcx.mk_ty(ty::Bound(
+                self.mk_ty(ty::Bound(
                     ty::INNERMOST,
                     ty::BoundTy {
                         var: ty::BoundVar::from_usize(t.var.as_usize() + bound_vars),
@@ -662,7 +662,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 ))
             },
             |c, ty| {
-                tcx.mk_const(ty::Const {
+                self.mk_const(ty::Const {
                     val: ty::ConstKind::Bound(
                         ty::INNERMOST,
                         ty::BoundVar::from_usize(c.as_usize() + bound_vars),

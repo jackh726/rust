@@ -1251,25 +1251,16 @@ impl<'tcx> Predicate<'tcx> {
         // substitution code expects equal binding levels in the values
         // from the substitution and the value being substituted into, and
         // this trick achieves that).
-        let substs = trait_ref.skip_binder().substs;
         let bound_pred = self.bound_atom();
+        let trait_bound_vars = trait_ref.bound_vars();
+        let substs = tcx
+            .shift_bound_var_indices(bound_pred.bound_vars().len(), trait_ref.skip_binder())
+            .substs;
         let pred = bound_pred.skip_binder();
         let new = pred.subst(tcx, substs);
         if new != pred {
             let bound_vars =
-                if trait_ref.bound_vars().len() > 0 && bound_pred.bound_vars().len() == 0 {
-                    trait_ref.bound_vars()
-                } else if bound_pred.bound_vars().len() > 0 && trait_ref.bound_vars().len() == 0 {
-                    bound_pred.bound_vars()
-                } else if trait_ref.bound_vars().len() == 0 && bound_pred.bound_vars().len() == 0 {
-                    ty::List::empty()
-                } else {
-                    bug!(
-                        "Both trait ref and bound_pred bound vars not empty: {:?} and {:?}",
-                        trait_ref,
-                        bound_pred
-                    );
-                };
+                tcx.mk_bound_variable_kinds(bound_pred.bound_vars().iter().chain(trait_bound_vars));
             ty::Binder::bind_with_vars(new, bound_vars)
                 .potentially_quantified(tcx, PredicateKind::ForAll)
         } else {
