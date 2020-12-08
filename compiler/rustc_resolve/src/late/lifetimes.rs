@@ -1123,7 +1123,11 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
             .collect();
         // See note on `trait_ref_hack`. If `for<..>` has been defined in both
         // the outer and inner part of the trait ref, emit an error.
-        if trait_ref_hack && !lifetimes.is_empty() {
+        let has_lifetimes = trait_ref.bound_generic_params.iter().any(|param| match param.kind {
+            GenericParamKind::Lifetime { .. } => true,
+            _ => false,
+        });
+        if trait_ref_hack && has_lifetimes {
             struct_span_err!(
                 self.tcx.sess,
                 trait_ref.span,
@@ -1132,7 +1136,38 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
             )
             .emit();
         }
-        if !trait_ref_hack || !lifetimes.is_empty() {
+        let (binders, named_late_bound_vars) = if trait_ref_hack {
+            // Since `trait_ref_hack` is true, we *know* there is a `Scope::Binder` above.
+            let (mut binders, mut named_late_bound_vars) = {
+                let mut scope = self.scope;
+                loop {
+                    match *scope {
+                        Scope::Body { s, .. }
+                        | Scope::Elision { s, .. }
+                        | Scope::ObjectLifetimeDefault { s, .. } => {
+                            scope = s;
+                        }
+                        Scope::Root | Scope::TraitRefHackInner { .. } => bug!(),
+                        Scope::Binder { ref binders, named_late_bound_vars, .. } => {
+                            break (binders.clone(), named_late_bound_vars);
+                        }
+                    }
+                }
+            };
+
+            binders.extend(trait_ref.bound_generic_params.iter().filter_map(
+                |param| match param.kind {
+                    GenericParamKind::Lifetime { .. } => {
+                        let late_bound_idx = named_late_bound_vars;
+                        named_late_bound_vars += 1;
+                        Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
+                    }
+                    GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
+                },
+            ));
+
+            (binders, named_late_bound_vars)
+        } else {
             let mut named_late_bound_vars = 0;
             let binders: Vec<_> = trait_ref
                 .bound_generic_params
@@ -1146,7 +1181,13 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
                 })
                 .collect();
-            self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
+
+            (binders, named_late_bound_vars)
+        };
+
+        self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
+
+        if !trait_ref_hack || has_lifetimes {
             let scope = Scope::Binder {
                 hir_id: trait_ref.trait_ref.hir_ref_id,
                 lifetimes,
@@ -1163,24 +1204,6 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 this.visit_trait_ref(&trait_ref.trait_ref);
             });
         } else {
-            // Since `trait_ref_hack` is true, we *know* there is a `Scope::Binder` above.
-            let (binders, named_late_bound_vars) = {
-                let mut scope = self.scope;
-                loop {
-                    match *scope {
-                        Scope::Body { s, .. }
-                        | Scope::Elision { s, .. }
-                        | Scope::ObjectLifetimeDefault { s, .. } => {
-                            scope = s;
-                        }
-                        Scope::Root | Scope::TraitRefHackInner { .. } => bug!(),
-                        Scope::Binder { ref binders, named_late_bound_vars, .. } => {
-                            break (binders, named_late_bound_vars);
-                        }
-                    }
-                }
-            };
-            self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
             let scope = Scope::TraitRefHackInner {
                 hir_id: trait_ref.trait_ref.hir_ref_id,
                 named_late_bound_vars,
