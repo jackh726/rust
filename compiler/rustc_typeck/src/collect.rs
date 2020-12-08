@@ -1993,6 +1993,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                                 constness,
                                 ty,
                                 &mut bounds,
+                                ty::List::empty(),
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
@@ -2272,7 +2273,13 @@ fn predicates_from_bound<'tcx>(
             };
 
             let mut bounds = Bounds::default();
-            let _ = astconv.instantiate_poly_trait_ref(tr, constness, param_ty, &mut bounds);
+            let _ = astconv.instantiate_poly_trait_ref(
+                tr,
+                constness,
+                param_ty,
+                &mut bounds,
+                ty::List::empty(),
+            );
             bounds.predicates(astconv.tcx(), param_ty)
         }
         hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => {
