@@ -104,7 +104,10 @@ fn external_generic_args<'tcx>(
         .iter()
         .filter_map(|kind| match kind.unpack() {
             GenericArgKind::Lifetime(lt) => match lt {
-                ty::ReLateBound(_, _) => Some(GenericArg::Lifetime(Lifetime::elided())),
+                ty::ReLateBound(
+                    _,
+                    ty::BoundRegion { kind: ty::BoundRegionKind::BrAnon(_), .. },
+                ) => Some(GenericArg::Lifetime(Lifetime::elided())),
                 _ => lt.clean(cx).map(GenericArg::Lifetime),
             },
             GenericArgKind::Type(_) if skip_self => {
