@@ -566,6 +566,23 @@ fn object_ty_for_trait<'tcx>(
     // existential predicates need to be in a specific order
     associated_types.sort_by_cached_key(|(_, item)| tcx.def_path_hash(item.def_id));
 
+    let mut all_bound_vars = associated_types.iter().filter_map(|(super_trait_ref, _)| {
+        if super_trait_ref.bound_vars().len() > 0 {
+            Some(super_trait_ref.bound_vars())
+        } else {
+            None
+        }
+    });
+    let bound_vars = if let Some(first_binders) = all_bound_vars.next() {
+        for binders in all_bound_vars {
+            if binders != first_binders {
+                panic!("Unhandled case: multiple associated_types have non-identical binders.")
+            }
+        }
+        first_binders
+    } else {
+        ty::List::empty()
+    };
     let projection_predicates = associated_types.into_iter().map(|(super_trait_ref, item)| {
         // We *can* get bound lifetimes here in cases like
         // `trait MyTrait: for<'s> OtherTrait<&'s T, Output=bool>`.
@@ -584,7 +601,7 @@ fn object_ty_for_trait<'tcx>(
 
     let object_ty = tcx.mk_dynamic(
         // (*) ... binder re-introduced here
-        ty::Binder::bind(existential_predicates, tcx),
+        ty::Binder::bind_with_vars(existential_predicates, bound_vars),
         lifetime,
     );
 
