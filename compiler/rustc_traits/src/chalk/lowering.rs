@@ -888,6 +888,26 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
 
     fn visit_region(&mut self, r: Region<'tcx>) -> ControlFlow<Self::BreakTy> {
         match r {
+            ty::ReLateBound(index, br) if *index == self.binder_index => match br.kind {
+                ty::BoundRegionKind::BrNamed(def_id, _name) => {
+                    if self.named_parameters.iter().find(|d| **d == def_id).is_none() {
+                        self.named_parameters.push(def_id);
+                    }
+                }
+
+                ty::BoundRegionKind::BrAnon(var) => match self.parameters.entry(var) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(chalk_ir::VariableKind::Lifetime);
+                    }
+                    Entry::Occupied(entry) => match entry.get() {
+                        chalk_ir::VariableKind::Lifetime => {}
+                        _ => panic!(),
+                    },
+                },
+
+                ty::BoundRegionKind::BrEnv => unimplemented!(),
+            },
+
             ty::ReEarlyBound(_re) => {
                 // FIXME(chalk): jackh726 - I think we should always have already
                 // substituted away `ReEarlyBound`s for `ReLateBound`s, but need to confirm.
