@@ -1186,11 +1186,27 @@ impl<'tcx> Predicate<'tcx> {
     /// poly-trait-ref to supertraits that must hold if that
     /// poly-trait-ref holds. This is slightly different from a normal
     /// substitution in terms of what happens with bound regions. See
-    /// lengthy comment below for details.
+    /// lengthy comment in `poly_subst_supertrait` for details.
     pub fn subst_supertrait(
         self,
         tcx: TyCtxt<'tcx>,
         trait_ref: &ty::PolyTraitRef<'tcx>,
+    ) -> Predicate<'tcx> {
+        self.poly_subst_supertrait(tcx, trait_ref, false)
+    }
+
+    /// Performs a substitution suitable for going from a
+    /// poly-trait-ref to supertraits that must hold if that
+    /// poly-trait-ref holds. This is slightly different from a normal
+    /// substitution in terms of what happens with bound regions. See
+    /// lengthy comment in below for details. Unlike `subst_supertrait`, this
+    /// allows the caller to specify whether to always maintain the binders,
+    /// even if there are no bound vars inside.
+    pub fn poly_subst_supertrait(
+        self,
+        tcx: TyCtxt<'tcx>,
+        trait_ref: &ty::PolyTraitRef<'tcx>,
+        poly: bool,
     ) -> Predicate<'tcx> {
         // The interaction between HRTB and supertraits is not entirely
         // obvious. Let me walk you (and myself) through an example.
@@ -1261,8 +1277,12 @@ impl<'tcx> Predicate<'tcx> {
         if new != pred {
             let bound_vars =
                 tcx.mk_bound_variable_kinds(bound_pred.bound_vars().iter().chain(trait_bound_vars));
-            ty::Binder::bind_with_vars(new, bound_vars)
-                .potentially_quantified(tcx, PredicateKind::ForAll)
+            if poly {
+                PredicateKind::ForAll(ty::Binder::bind_with_vars(new, bound_vars)).to_predicate(tcx)
+            } else {
+                ty::Binder::bind_with_vars(new, bound_vars)
+                    .potentially_quantified(tcx, PredicateKind::ForAll)
+            }
         } else {
             self
         }
