@@ -14,7 +14,9 @@ pub fn anonymize_predicate<'tcx>(
             let new = ty::PredicateKind::ForAll(tcx.anonymize_late_bound_regions(binder));
             tcx.reuse_or_mk_predicate(pred, new)
         }
-        ty::PredicateKind::Atom(_) => pred,
+        ty::PredicateKind::Atom(p) => {
+            tcx.mk_predicate(ty::PredicateKind::ForAll(ty::Binder::dummy(p)))
+        }
     }
 }
 
@@ -134,7 +136,11 @@ impl Elaborator<'tcx> {
 
                 let obligations = predicates.predicates.iter().map(|&(pred, _)| {
                     predicate_obligation(
-                        pred.subst_supertrait(tcx, &bound_predicate.rebind(data.trait_ref)),
+                        pred.poly_subst_supertrait(
+                            tcx,
+                            &bound_predicate.rebind(data.trait_ref),
+                            true,
+                        ),
                         obligation.param_env,
                         obligation.cause.clone(),
                     )

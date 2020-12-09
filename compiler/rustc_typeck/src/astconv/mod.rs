@@ -23,7 +23,7 @@ use rustc_hir::lang_items::LangItem;
 use rustc_hir::{Constness, GenericArg, GenericArgs};
 use rustc_middle::ty::subst::{self, InternalSubsts, Subst, SubstsRef};
 use rustc_middle::ty::GenericParamDefKind;
-use rustc_middle::ty::{self, Const, DefIdTree, Ty, TyCtxt, TypeFoldable};
+use rustc_middle::ty::{self, Const, DefIdTree, ToPredicate, Ty, TyCtxt, TypeFoldable};
 use rustc_session::lint::builtin::AMBIGUOUS_ASSOCIATED_ITEMS;
 use rustc_span::lev_distance::find_best_match_for_name;
 use rustc_span::symbol::{Ident, Symbol};
@@ -1018,7 +1018,21 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 // Otherwise, we have to walk through the supertraits to find
                 // those that do.
                 self.one_bound_for_assoc_type(
-                    || traits::supertraits(tcx, trait_ref),
+                    || {
+                        traits::elaborate_predicates(
+                            tcx,
+                            std::iter::once(
+                                ty::PredicateKind::ForAll(trait_ref.map_bound(|trait_ref| {
+                                    ty::PredicateAtom::Trait(
+                                        ty::TraitPredicate { trait_ref },
+                                        hir::Constness::NotConst,
+                                    )
+                                }))
+                                .to_predicate(tcx),
+                            ),
+                        )
+                        .filter_to_traits()
+                    },
                     || trait_ref.print_only_trait_path().to_string(),
                     binding.item_name,
                     path_span,
