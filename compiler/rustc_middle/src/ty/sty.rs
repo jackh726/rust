@@ -965,15 +965,6 @@ pub enum BoundVariableKind {
     Const,
 }
 
-impl BoundVariableKind {
-    pub fn expect_region(self) -> BoundRegionKind {
-        match self {
-            BoundVariableKind::Region(region) => region,
-            _ => bug!(),
-        }
-    }
-}
-
 /// Binder is a binder for higher-ranked lifetimes or types. It is part of the
 /// compiler's representation for things like `for<'a> Fn(&'a isize)`
 /// (which would be represented by the type `PolyTraitRef ==
@@ -1018,18 +1009,6 @@ where
         } else {
             Binder::dummy(value)
         }
-    }
-
-    /// Like `rebind`, but will debug assert that bound vars are compatible
-    pub fn rebind_checked<U>(&self, value: U) -> Binder<'tcx, U>
-    where
-        U: TypeFoldable<'tcx>,
-    {
-        if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(self.bound_vars());
-            value.visit_with(&mut validator);
-        }
-        Binder(value, self.1)
     }
 
     pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {

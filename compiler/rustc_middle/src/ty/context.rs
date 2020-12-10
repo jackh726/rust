@@ -2637,9 +2637,8 @@ impl<'tcx> TyCtxt<'tcx> {
             self.late_bound_vars_map(id.owner)
                 .and_then(|map| map.get(&id.local_id).cloned())
                 .unwrap_or_else(|| {
-                    panic!("No bound vars found for {:?} ({:?})", self.hir().node_to_string(id), id)
+                    bug!("No bound vars found for {:?} ({:?})", self.hir().node_to_string(id), id)
                 })
-                //.unwrap_or_default()
                 .iter()
                 .map(|b| match b {
                     resolve_lifetime::Region::LateBound(_, _, def_id, _) => {

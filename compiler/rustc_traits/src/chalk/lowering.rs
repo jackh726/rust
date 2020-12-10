@@ -932,16 +932,12 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
 struct NamedBoundVarSubstitutor<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     binder_index: ty::DebruijnIndex,
-    _named_parameters: &'a BTreeMap<DefId, u32>,
+    named_parameters: &'a BTreeMap<DefId, u32>,
 }
 
 impl<'a, 'tcx> NamedBoundVarSubstitutor<'a, 'tcx> {
     fn new(tcx: TyCtxt<'tcx>, named_parameters: &'a BTreeMap<DefId, u32>) -> Self {
-        NamedBoundVarSubstitutor {
-            tcx,
-            binder_index: ty::INNERMOST,
-            _named_parameters: named_parameters,
-        }
+        NamedBoundVarSubstitutor { tcx, binder_index: ty::INNERMOST, named_parameters }
     }
 }
 
@@ -955,6 +951,25 @@ impl<'a, 'tcx> TypeFolder<'tcx> for NamedBoundVarSubstitutor<'a, 'tcx> {
         let result = t.super_fold_with(self);
         self.binder_index.shift_out(1);
         result
+    }
+
+    fn fold_region(&mut self, r: Region<'tcx>) -> Region<'tcx> {
+        match r {
+            ty::ReLateBound(index, br) if *index == self.binder_index => match br.kind {
+                ty::BrNamed(def_id, _name) => match self.named_parameters.get(&def_id) {
+                    Some(idx) => {
+                        let new_br = ty::BoundRegion { var: br.var, kind: ty::BrAnon(*idx) };
+                        return self.tcx.mk_region(RegionKind::ReLateBound(*index, new_br));
+                    }
+                    None => panic!("Missing `BrNamed`."),
+                },
+                ty::BrEnv => unimplemented!(),
+                ty::BrAnon(_) => {}
+            },
+            _ => (),
+        };
+
+        r.super_fold_with(self)
     }
 }
 

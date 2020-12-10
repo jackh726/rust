@@ -38,7 +38,6 @@ use rustc_ast::walk_list;
 use rustc_ast::{Attribute, Label};
 use rustc_span::symbol::{Ident, Symbol};
 use rustc_span::Span;
-use tracing::debug_span;
 
 pub struct DeepVisitor<'v, V> {
     visitor: &'v mut V,
@@ -385,14 +384,6 @@ pub trait Visitor<'v>: Sized {
         walk_fn_decl(self, fd)
     }
     fn visit_fn(&mut self, fk: FnKind<'v>, fd: &'v FnDecl<'v>, b: BodyId, s: Span, id: HirId) {
-        let name = match fk {
-            FnKind::ItemFn(id, _, _, _, _) => id.as_str(),
-            FnKind::Method(id, _, _, _) => id.as_str(),
-            FnKind::Closure(..) => Symbol::intern("closure").as_str(),
-        };
-        let name: &str = &name;
-        let span = debug_span!("visit_fn", name);
-        let _enter = span.enter();
         walk_fn(self, fk, fd, b, s, id)
     }
     fn visit_use(&mut self, path: &'v Path<'v>, hir_id: HirId) {
