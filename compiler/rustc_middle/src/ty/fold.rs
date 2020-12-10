@@ -755,6 +755,8 @@ impl<'tcx> TyCtxt<'tcx> {
 pub struct BoundVarsCollector<'tcx> {
     binder_index: ty::DebruijnIndex,
     vars: BTreeMap<u32, ty::BoundVariableKind>,
+    // We may encounter the same variable at different levels of binding, so
+    // this can't just be `Ty`
     visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
 }
 
@@ -763,7 +765,6 @@ impl<'tcx> BoundVarsCollector<'tcx> {
         BoundVarsCollector {
             binder_index: ty::INNERMOST,
             vars: BTreeMap::new(),
-            // We may encounter the same variable at different levels of binding
             visited: SsoHashSet::default(),
         }
     }
@@ -835,6 +836,8 @@ impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
 pub struct ValidateBoundVars<'tcx> {
     bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
     binder_index: ty::DebruijnIndex,
+    // We may encounter the same variable at different levels of binding, so
+    // this can't just be `Ty`
     visited: SsoHashSet<(ty::DebruijnIndex, Ty<'tcx>)>,
 }
 
@@ -843,7 +846,6 @@ impl<'tcx> ValidateBoundVars<'tcx> {
         ValidateBoundVars {
             bound_vars,
             binder_index: ty::INNERMOST,
-            // We may encounter the same variable at different levels of binding
             visited: SsoHashSet::default(),
         }
     }

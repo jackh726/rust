@@ -1087,83 +1087,17 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 // the "projection predicate" for:
                 //
                 // `<T as Iterator>::Item = u32`
-                // FIXME: this fails (I think) for things like
-                // ```
-                // trait A<'a> { type Foo; }
-                // trait B: for<'a> A<'a> {}
-                // T: for<'b> B<Foo = &'b ()>
-                // for<'b> <T as A<'a>>::Foo = &'b ()
-                // ```
-                /*
-                let n_bound_vars = trait_ref.bound_vars().len();
-                let candidate_vars = candidate.bound_vars();
-                dbg!(&candidate);
-                let candidate = tcx
-                    .replace_bound_vars(
-                        &candidate,
-                        |r| {
-                            tcx.mk_region(ty::ReLateBound(
-                                ty::INNERMOST,
-                                ty::BoundRegion {
-                                    var: ty::BoundVar::from_usize(r.var.as_usize() + n_bound_vars),
-                                    kind: r.kind,
-                                },
-                            ))
-                        },
-                        |t| {
-                            tcx.mk_ty(ty::Bound(
-                                ty::INNERMOST,
-                                ty::BoundTy {
-                                    var: ty::BoundVar::from_usize(t.var.as_usize() + n_bound_vars),
-                                    kind: t.kind,
-                                },
-                            ))
-                        },
-                        |c, ty| {
-                            tcx.mk_const(ty::Const {
-                                val: ty::ConstKind::Bound(
-                                    ty::INNERMOST,
-                                    ty::BoundVar::from_usize(c.as_usize() + n_bound_vars),
-                                ),
-                                ty,
-                            })
-                        },
-                    )
-                    .0;
-                dbg!(&candidate);
-                let bound_vars = tcx
-                    .mk_bound_variable_kinds(trait_ref.bound_vars().iter().chain(candidate_vars));
-                dbg!(&bound_vars);
-                */
                 bounds.projection_bounds.push((
-                    ty::Binder::bind_with_vars(
-                        ty::ProjectionPredicate {
-                            projection_ty: ty::ProjectionTy::from_ref_and_name(
-                                tcx,
-                                //candidate,
-                                candidate.skip_binder(),
-                                binding.item_name,
-                            ),
-                            ty,
-                        },
-                        //bound_vars,
-                        candidate.bound_vars(),
-                    ),
-                    binding.span,
-                ));
-                /*
-                bounds.projection_bounds.push((
-                    candidate.map_bound(|trait_ref| ty::ProjectionPredicate {
+                    candidate.map_bound(|candidate| ty::ProjectionPredicate {
                         projection_ty: ty::ProjectionTy::from_ref_and_name(
                             tcx,
-                            trait_ref,
+                            candidate,
                             binding.item_name,
                         ),
                         ty,
                     }),
                     binding.span,
                 ));
-                */
             }
             ConvertedBindingKind::Constraint(ast_bounds) => {
                 // "Desugar" a constraint like `T: Iterator<Item: Debug>` to

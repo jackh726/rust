@@ -203,7 +203,7 @@ where
     /// of ambient scopes `scopes`.
     fn lookup_bound_region(
         debruijn: ty::DebruijnIndex,
-        br: ty::BoundRegion,
+        br: &ty::BoundRegion,
         first_free_index: ty::DebruijnIndex,
         scopes: &[BoundRegionScope<'tcx>],
     ) -> ty::Region<'tcx> {
@@ -215,7 +215,7 @@ where
 
         // Find this bound region in that scope to map to a
         // particular region.
-        scope.map[&br]
+        scope.map[br]
     }
 
     /// If `r` is a bound region, find the scope in which it is bound
@@ -229,7 +229,7 @@ where
     ) -> ty::Region<'tcx> {
         debug!("replace_bound_regions(scopes={:?})", scopes);
         if let ty::ReLateBound(debruijn, br) = r {
-            Self::lookup_bound_region(*debruijn, *br, first_free_index, scopes)
+            Self::lookup_bound_region(*debruijn, br, first_free_index, scopes)
         } else {
             r
         }
@@ -1008,6 +1008,6 @@ where
         self.first_free_index.shift_in(1);
         let result = self.relate(a.skip_binder(), a.skip_binder())?;
         self.first_free_index.shift_out(1);
-        Ok(a.rebind_checked(result))
+        Ok(a.rebind(result))
     }
 }

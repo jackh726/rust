@@ -528,21 +528,21 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
             let predicate = substitute_value(self.tcx, result_subst, constraint);
             let ty::OutlivesPredicate(k1, r2) = predicate.skip_binder();
 
-            let predicate = predicate
-                .rebind(match k1.unpack() {
-                    GenericArgKind::Lifetime(r1) => {
-                        ty::PredicateAtom::RegionOutlives(ty::OutlivesPredicate(r1, r2))
-                    }
-                    GenericArgKind::Type(t1) => {
-                        ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(t1, r2))
-                    }
-                    GenericArgKind::Const(..) => {
-                        // Consts cannot outlive one another, so we don't expect to
-                        // encounter this branch.
-                        span_bug!(cause.span, "unexpected const outlives {:?}", constraint);
-                    }
-                })
-                .potentially_quantified(self.tcx, ty::PredicateKind::ForAll);
+            let atom = match k1.unpack() {
+                GenericArgKind::Lifetime(r1) => {
+                    ty::PredicateAtom::RegionOutlives(ty::OutlivesPredicate(r1, r2))
+                }
+                GenericArgKind::Type(t1) => {
+                    ty::PredicateAtom::TypeOutlives(ty::OutlivesPredicate(t1, r2))
+                }
+                GenericArgKind::Const(..) => {
+                    // Consts cannot outlive one another, so we don't expect to
+                    // encounter this branch.
+                    span_bug!(cause.span, "unexpected const outlives {:?}", constraint);
+                }
+            };
+            let predicate =
+                predicate.rebind(atom).potentially_quantified(self.tcx, ty::PredicateKind::ForAll);
 
             Obligation::new(cause.clone(), param_env, predicate)
         })

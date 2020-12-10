@@ -153,7 +153,7 @@ struct NamedRegionMap {
     // to the trait object lifetime defaults computed from them.
     object_lifetime_defaults: HirIdMap<Vec<ObjectLifetimeDefault>>,
 
-    ty_binders: HirIdMap<Vec<Region>>,
+    late_bound_vars: HirIdMap<Vec<Region>>,
 }
 
 crate struct LifetimeContext<'a, 'tcx> {
@@ -384,7 +384,7 @@ fn resolve_lifetimes(tcx: TyCtxt<'_>, for_krate: CrateNum) -> ResolveLifetimes {
         let map = rl.object_lifetime_defaults.entry(hir_id.owner).or_default();
         map.insert(hir_id.local_id, v);
     }
-    for (hir_id, v) in named_region_map.ty_binders {
+    for (hir_id, v) in named_region_map.late_bound_vars {
         let map = rl.late_bound_vars.entry(hir_id.owner).or_default();
         map.insert(hir_id.local_id, v);
     }
@@ -398,7 +398,7 @@ fn krate(tcx: TyCtxt<'_>) -> NamedRegionMap {
         defs: Default::default(),
         late_bound: Default::default(),
         object_lifetime_defaults: compute_object_lifetime_defaults(tcx),
-        ty_binders: Default::default(),
+        late_bound_vars: Default::default(),
     };
     {
         let mut visitor = LifetimeContext {
@@ -441,7 +441,6 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
         // Each body has their own set of labels, save labels.
         let saved = take(&mut self.labels_in_fn);
         let body = self.tcx.hir().body(body);
-        debug!("body {:?}", body);
         extract_labels(self, body);
         self.with(Scope::Body { id: body.id(), s: self.scope }, |_, this| {
             this.visit_body(body);
@@ -471,7 +470,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 intravisit::walk_fn(self, fk, fd, b, s, hir_id)
             }
             intravisit::FnKind::Closure(..) => {
-                self.map.ty_binders.insert(hir_id, Vec::default());
+                self.map.late_bound_vars.insert(hir_id, Vec::default());
                 let scope = Scope::Binder {
                     hir_id,
                     lifetimes: FxHashMap::default(),
@@ -492,9 +491,8 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
     fn visit_item(&mut self, item: &'tcx hir::Item<'tcx>) {
         match &item.kind {
             hir::ItemKind::Impl { of_trait, .. } => {
-                // Insert into map just because we've seen it
                 if let Some(of_trait) = of_trait {
-                    self.map.ty_binders.insert(of_trait.hir_ref_id, Vec::default());
+                    self.map.late_bound_vars.insert(of_trait.hir_ref_id, Vec::default());
                 }
             }
             _ => {}
@@ -558,7 +556,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         }
                     })
                     .collect();
-                self.map.ty_binders.insert(item.hir_id, Vec::default());
+                self.map.late_bound_vars.insert(item.hir_id, Vec::default());
                 let scope = Scope::Binder {
                     hir_id: item.hir_id,
                     lifetimes,
@@ -615,32 +613,21 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 self.missing_named_lifetime_spots
                     .push(MissingLifetimeSpot::HigherRanked { span, span_type });
                 let mut named_late_bound_vars = 0;
-                let lifetimes: FxHashMap<hir::ParamName, Region> = c
+                let (lifetimes, binders): (FxHashMap<hir::ParamName, Region>, Vec<_>) = c
                     .generic_params
                     .iter()
                     .filter_map(|param| match param.kind {
                         GenericParamKind::Lifetime { .. } => {
                             let late_bound_idx = named_late_bound_vars;
                             named_late_bound_vars += 1;
-                            Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
+                            let pair = Region::late(late_bound_idx, &self.tcx.hir(), param);
+                            let r = pair.1.clone();
+                            Some((pair, r))
                         }
                         _ => None,
                     })
-                    .collect();
-                let mut named_late_bound_vars = 0;
-                let binders: Vec<_> = c
-                    .generic_params
-                    .iter()
-                    .filter_map(|param| match param.kind {
-                        GenericParamKind::Lifetime { .. } => {
-                            let late_bound_idx = named_late_bound_vars;
-                            named_late_bound_vars += 1;
-                            Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
-                        }
-                        GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
-                    })
-                    .collect();
-                self.map.ty_binders.insert(ty.hir_id, binders.clone());
+                    .unzip();
+                self.map.late_bound_vars.insert(ty.hir_id, binders.clone());
                 let scope = Scope::Binder {
                     hir_id: ty.hir_id,
                     lifetimes,
@@ -812,7 +799,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     }
                 }
                 let next_early_index = index + non_lifetime_count;
-                self.map.ty_binders.insert(ty.hir_id, Vec::default());
+                self.map.late_bound_vars.insert(ty.hir_id, Vec::default());
 
                 if let Some(elision_region) = elision {
                     let scope =
@@ -892,7 +879,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         }
                     })
                     .collect();
-                self.map.ty_binders.insert(trait_item.hir_id, Vec::default());
+                self.map.late_bound_vars.insert(trait_item.hir_id, Vec::default());
                 let scope = Scope::Binder {
                     hir_id: trait_item.hir_id,
                     lifetimes,
@@ -959,7 +946,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         }
                     })
                     .collect();
-                self.map.ty_binders.insert(ty.hir_id, Vec::default());
+                self.map.late_bound_vars.insert(ty.hir_id, Vec::default());
                 let scope = Scope::Binder {
                     hir_id: ty.hir_id,
                     lifetimes,
@@ -1050,34 +1037,21 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     ..
                 }) => {
                     let mut named_late_bound_vars = 0;
-                    let lifetimes: FxHashMap<_, _> = bound_generic_params
+                    let (lifetimes, binders): (FxHashMap<_, _>, Vec<_>) = bound_generic_params
                         .iter()
                         .filter_map(|param| match param.kind {
                             GenericParamKind::Lifetime { .. } => {
                                 let late_bound_idx = named_late_bound_vars;
                                 named_late_bound_vars += 1;
-                                Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
+                                let pair = Region::late(late_bound_idx, &self.tcx.hir(), param);
+                                let r = pair.1.clone();
+                                Some((pair, r))
                             }
                             _ => None,
                         })
-                        .collect();
+                        .unzip();
+                    self.map.late_bound_vars.insert(bounded_ty.hir_id, binders.clone());
                     if !lifetimes.is_empty() {
-                        let mut named_late_bound_vars = 0;
-                        let binders: Vec<_> = bound_generic_params
-                            .iter()
-                            .filter_map(|param| match param.kind {
-                                GenericParamKind::Lifetime { .. } => {
-                                    let late_bound_idx = named_late_bound_vars;
-                                    named_late_bound_vars += 1;
-                                    Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
-                                }
-                                GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => {
-                                    None
-                                }
-                            })
-                            .collect();
-                        self.map.ty_binders.insert(bounded_ty.hir_id, binders.clone());
-
                         let next_early_index = self.next_early_index();
                         let scope = Scope::Binder {
                             hir_id: bounded_ty.hir_id,
@@ -1098,7 +1072,6 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         });
                         result
                     } else {
-                        self.map.ty_binders.insert(bounded_ty.hir_id, Vec::default());
                         self.visit_ty(&bounded_ty);
                         walk_list!(self, visit_param_bound, bounds);
                     }
@@ -1126,7 +1099,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
     fn visit_param_bound(&mut self, bound: &'tcx hir::GenericBound<'tcx>) {
         match bound {
             hir::GenericBound::LangItemTrait(_, _, hir_id, _) if !self.trait_ref_hack => {
-                self.map.ty_binders.insert(*hir_id, Vec::default());
+                self.map.late_bound_vars.insert(*hir_id, Vec::default());
                 let scope = Scope::Binder {
                     hir_id: *hir_id,
                     lifetimes: FxHashMap::default(),
@@ -1233,7 +1206,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
             (binders, named_late_bound_vars)
         };
 
-        self.map.ty_binders.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
+        self.map.late_bound_vars.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
 
         if !trait_ref_hack || has_lifetimes {
             let scope = Scope::Binder {
@@ -1607,7 +1580,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             tcx: *tcx,
             map,
             scope: &wrap_scope,
-            trait_ref_hack: self.trait_ref_hack.clone(),
+            trait_ref_hack: self.trait_ref_hack,
             is_in_fn_syntax: self.is_in_fn_syntax,
             is_in_const_generic: self.is_in_const_generic,
             labels_in_fn,
@@ -1616,13 +1589,11 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             missing_named_lifetime_spots,
         };
         let span = span!(Level::DEBUG, "scope", scope = ?TruncatedScopeDebug(&this.scope));
-        //debug!(scope = ?this.scope, "entering scope");
         {
             let _enter = span.enter();
             f(self.scope, &mut this);
             this.check_uses_for_lifetimes_defined_by_scope();
         }
-        //debug!(scope = ?this.scope, "exiting scope");
 
         self.labels_in_fn = this.labels_in_fn;
         self.xcrate_object_lifetime_defaults = this.xcrate_object_lifetime_defaults;
@@ -1989,7 +1960,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
             })
             .collect();
-        self.map.ty_binders.insert(hir_id, binders.clone());
+        self.map.late_bound_vars.insert(hir_id, binders.clone());
         let scope = Scope::Binder {
             hir_id,
             lifetimes,
@@ -2676,7 +2647,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                                 let lifetime = Region::late_anon(named_late_bound_vars, counter)
                                     .shifted(late_depth);
                                 self.insert_lifetime(lifetime_ref, lifetime);
-                                self.map.ty_binders.entry(hir_id).or_default().push(lifetime);
+                                self.map.late_bound_vars.entry(hir_id).or_default().push(lifetime);
                             }
                             return;
                         }

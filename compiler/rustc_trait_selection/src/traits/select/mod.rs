@@ -1745,7 +1745,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             .skip_binder() // binder moved -\
             .iter()
             .flat_map(|ty| {
-                let ty: ty::Binder<'tcx, Ty<'tcx>> = binders.rebind_checked(ty); // <----/
+                let ty: ty::Binder<'tcx, Ty<'tcx>> = binders.rebind(ty); // <----/
 
                 self.infcx.commit_unconditionally(|_| {
                     let placeholder_ty = self.infcx.replace_bound_vars_with_placeholders(ty);
