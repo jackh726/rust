@@ -1198,12 +1198,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             return tcx.ty_error();
             //bug!("More than 1 regular trait refs have a late-bound vars.");
         }
-        let mut bound_vars = regular_traits
-            .iter()
-            .filter(|t| t.trait_ref().bound_vars().len() > 0)
-            .next()
-            .map(|f| f.trait_ref().bound_vars())
-            .unwrap_or_else(|| ty::List::empty());
 
         // Check that there are no gross object safety violations;
         // most importantly, that the supertraits don't contain `Self`,
@@ -1338,45 +1332,21 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             })
         });
 
-        let existential_projections: SmallVec<[_; 8]> = existential_projections.collect();
-        if let Some(first_binders) = existential_projections
-            .iter()
-            .filter_map(|p| if p.bound_vars().len() > 0 { Some(p.bound_vars()) } else { None })
-            .next()
-        {
-            for binders in existential_projections
-                .iter()
-                .filter_map(|p| if p.bound_vars().len() > 0 { Some(p.bound_vars()) } else { None })
-            {
-                if binders != first_binders {
-                    panic!(
-                        "Unhandled case: multiple existential projections have non-identical binders."
-                    )
-                }
-            }
-            if bound_vars.len() != 0 && bound_vars != first_binders {
-                panic!("Multiple binders {:?} {:?}", bound_vars, first_binders);
-            }
-            bound_vars = first_binders;
-        }
-
-        // Calling `skip_binder` is okay because the predicates are re-bound.
-        let regular_trait_predicates = existential_trait_refs
-            .map(|trait_ref| ty::ExistentialPredicate::Trait(trait_ref.skip_binder()));
-        let auto_trait_predicates = auto_traits
-            .into_iter()
-            .map(|trait_ref| ty::ExistentialPredicate::AutoTrait(trait_ref.trait_ref().def_id()));
+        let regular_trait_predicates = existential_trait_refs.map(|trait_ref| {
+            trait_ref.map_bound(|trait_ref| ty::ExistentialPredicate::Trait(trait_ref))
+        });
+        let auto_trait_predicates = auto_traits.into_iter().map(|trait_ref| {
+            ty::Binder::dummy(ty::ExistentialPredicate::AutoTrait(trait_ref.trait_ref().def_id()))
+        });
         let existential_predicates = existential_projections
-            .into_iter()
-            .map(|x| ty::ExistentialPredicate::Projection(x.skip_binder()));
+            .map(|x| x.map_bound(|x| ty::ExistentialPredicate::Projection(x)));
         let mut v = regular_trait_predicates
             .chain(auto_trait_predicates)
             .chain(existential_predicates)
             .collect::<SmallVec<[_; 8]>>();
-        v.sort_by(|a, b| a.stable_cmp(tcx, b));
+        v.sort_by(|a, b| a.skip_binder().stable_cmp(tcx, &b.skip_binder()));
         v.dedup();
-        let existential_predicates =
-            ty::Binder::bind_with_vars(tcx.mk_existential_predicates(v.into_iter()), bound_vars);
+        let existential_predicates = tcx.mk_poly_existential_predicates(v.into_iter());
 
         // Use explicitly-specified region bound.
         let region_bound = if !lifetime.is_elided() {
@@ -2442,7 +2412,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     fn compute_object_lifetime_bound(
         &self,
         span: Span,
-        existential_predicates: ty::Binder<'tcx, &'tcx ty::List<ty::ExistentialPredicate<'tcx>>>,
+        existential_predicates: &'tcx ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>>,
     ) -> Option<ty::Region<'tcx>> // if None, use the default
     {
         let tcx = self.tcx();
