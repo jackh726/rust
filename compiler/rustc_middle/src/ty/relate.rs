@@ -93,11 +93,11 @@ pub trait TypeRelation<'tcx>: Sized {
 
     fn binders<T>(
         &mut self,
-        a: ty::Binder<'tcx, T>,
-        b: ty::Binder<'tcx, T>,
-    ) -> RelateResult<'tcx, ty::Binder<'tcx, T>>
+        a: ty::Binder<T>,
+        b: ty::Binder<T>,
+    ) -> RelateResult<'tcx, ty::Binder<T>>
     where
-        T: Relate<'tcx>;
+        T: Relate<'tcx> + ty::HasInternedBoundVariableKinds;
 }
 
 pub trait Relate<'tcx>: TypeFoldable<'tcx> + Copy {
@@ -603,7 +603,7 @@ pub fn super_relate_consts<R: TypeRelation<'tcx>>(
     new_const_val.map(|val| tcx.mk_const(ty::Const { val, ty: a.ty }))
 }
 
-impl<'tcx> Relate<'tcx> for &'tcx ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>> {
+impl<'tcx> Relate<'tcx> for &'tcx ty::List<ty::Binder<ty::ExistentialPredicate<'tcx>>> {
     fn relate<R: TypeRelation<'tcx>>(
         relation: &mut R,
         a: Self,
@@ -692,12 +692,12 @@ impl<'tcx> Relate<'tcx> for &'tcx ty::Const<'tcx> {
     }
 }
 
-impl<'tcx, T: Relate<'tcx>> Relate<'tcx> for ty::Binder<'tcx, T> {
+impl<'tcx, T: Relate<'tcx> + ty::HasInternedBoundVariableKinds> Relate<'tcx> for ty::Binder<T> {
     fn relate<R: TypeRelation<'tcx>>(
         relation: &mut R,
-        a: ty::Binder<'tcx, T>,
-        b: ty::Binder<'tcx, T>,
-    ) -> RelateResult<'tcx, ty::Binder<'tcx, T>> {
+        a: ty::Binder<T>,
+        b: ty::Binder<T>,
+    ) -> RelateResult<'tcx, ty::Binder<T>> {
         relation.binders(a, b)
     }
 }

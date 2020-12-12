@@ -43,9 +43,9 @@ impl TypeFolder<'tcx> for RegionEraserVisitor<'tcx> {
         if ty.needs_infer() { ty.super_fold_with(self) } else { self.tcx.erase_regions_ty(ty) }
     }
 
-    fn fold_binder<T>(&mut self, t: ty::Binder<'tcx, T>) -> ty::Binder<'tcx, T>
+    fn fold_binder<T>(&mut self, t: ty::Binder<T>) -> ty::Binder<T>
     where
-        T: TypeFoldable<'tcx>,
+        T: TypeFoldable<'tcx> + ty::HasInternedBoundVariableKinds,
     {
         let u = self.tcx.anonymize_late_bound_regions(t);
         u.super_fold_with(self)

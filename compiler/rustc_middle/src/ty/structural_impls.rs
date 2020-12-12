@@ -530,13 +530,14 @@ impl<'a, 'tcx> Lift<'tcx> for ty::PredicateAtom<'a> {
     }
 }
 
-impl<'a, 'tcx, T: Lift<'tcx>> Lift<'tcx> for ty::Binder<'a, T>
+impl<'tcx, T: Lift<'tcx> + ty::HasInternedBoundVariableKinds> Lift<'tcx> for ty::Binder<T>
 where
-    <T as Lift<'tcx>>::Lifted: TypeFoldable<'tcx>,
+    <T as Lift<'tcx>>::Lifted: TypeFoldable<'tcx> + ty::HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
 {
-    type Lifted = ty::Binder<'tcx, T::Lifted>;
+    type Lifted = ty::Binder<T::Lifted>;
     fn lift_to_tcx(self, tcx: TyCtxt<'tcx>) -> Option<Self::Lifted> {
-        let bound_vars = tcx.lift(self.bound_vars());
+        //let bound_vars = tcx.lift(self.bound_vars());
+        let bound_vars = self.bound_vars();
         tcx.lift(self.skip_binder())
             .zip(bound_vars)
             .map(|(value, vars)| ty::Binder::bind_with_vars(value, vars))
@@ -831,7 +832,7 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for Box<[T]> {
     }
 }
 
-impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for ty::Binder<'tcx, T> {
+impl<'tcx, T: TypeFoldable<'tcx> + ty::HasInternedBoundVariableKinds> TypeFoldable<'tcx> for ty::Binder<T> {
     fn super_fold_with<F: TypeFolder<'tcx>>(self, folder: &mut F) -> Self {
         self.map_bound(|ty| ty.fold_with(folder))
     }
@@ -849,7 +850,7 @@ impl<'tcx, T: TypeFoldable<'tcx>> TypeFoldable<'tcx> for ty::Binder<'tcx, T> {
     }
 }
 
-impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>> {
+impl<'tcx> TypeFoldable<'tcx> for &'tcx ty::List<ty::Binder<ty::ExistentialPredicate<'tcx>>> {
     fn super_fold_with<F: TypeFolder<'tcx>>(self, folder: &mut F) -> Self {
         ty::util::fold_list(self, folder, |tcx, v| tcx.intern_poly_existential_predicates(v))
     }

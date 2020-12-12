@@ -57,7 +57,7 @@ pub use self::sty::RegionKind;
 pub use self::sty::RegionKind::*;
 pub use self::sty::TyKind::*;
 pub use self::sty::{
-    Binder, BoundTy, BoundTyKind, BoundVar, BoundVariableKind, DebruijnIndex, INNERMOST,
+    Binder, BoundTy, BoundTyKind, BoundVar, BoundVariableKind, DebruijnIndex, HasInternedBoundVariableKinds, INNERMOST,
 };
 pub use self::sty::{BoundRegion, BoundRegionKind, EarlyBoundRegion, FreeRegion, Region};
 pub use self::sty::{CanonicalPolyFnSig, FnSig, GenSig, PolyFnSig, PolyGenSig};
@@ -1131,9 +1131,9 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    /// Converts this to a `Binder<'tcx, PredicateAtom<'tcx>>`. If the value was an
+    /// Converts this to a `Binder<PredicateAtom<'tcx>>`. If the value was an
     /// `Atom`, then it is not allowed to contain escaping bound vars.
-    pub fn bound_atom(self) -> Binder<'tcx, PredicateAtom<'tcx>> {
+    pub fn bound_atom(self) -> Binder<PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => {
@@ -1143,12 +1143,12 @@ impl<'tcx> Predicate<'tcx> {
         }
     }
 
-    /// Allows using a `Binder<'tcx, PredicateAtom<'tcx>>` even if the given predicate previously
+    /// Allows using a `Binder<PredicateAtom<'tcx>>` even if the given predicate previously
     /// contained unbound variables by shifting these variables outwards.
     pub fn bound_atom_with_opt_escaping(
         self,
         tcx: TyCtxt<'tcx>,
-    ) -> Binder<'tcx, PredicateAtom<'tcx>> {
+    ) -> Binder<PredicateAtom<'tcx>> {
         match self.kind() {
             &PredicateKind::ForAll(binder) => binder,
             &PredicateKind::Atom(atom) => Binder::wrap_nonbinding(tcx, atom),
@@ -1175,7 +1175,7 @@ impl<'a, 'tcx> HashStable<StableHashingContext<'a>> for Predicate<'tcx> {
 #[derive(HashStable, TypeFoldable)]
 pub enum PredicateKind<'tcx> {
     /// `for<'a>: ...`
-    ForAll(Binder<'tcx, PredicateAtom<'tcx>>),
+    ForAll(Binder<PredicateAtom<'tcx>>),
     Atom(PredicateAtom<'tcx>),
 }
 
@@ -1227,12 +1227,12 @@ pub enum PredicateAtom<'tcx> {
     TypeWellFormedFromEnv(Ty<'tcx>),
 }
 
-impl<'tcx> Binder<'tcx, PredicateAtom<'tcx>> {
+impl<'tcx> Binder<PredicateAtom<'tcx>> {
     /// Wraps `self` with the given qualifier if this predicate has any unbound variables.
     pub fn potentially_quantified(
         self,
         tcx: TyCtxt<'tcx>,
-        qualifier: impl FnOnce(Binder<'tcx, PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
+        qualifier: impl FnOnce(Binder<PredicateAtom<'tcx>>) -> PredicateKind<'tcx>,
     ) -> Predicate<'tcx> {
         if self.skip_binder().has_escaping_bound_vars() {
             qualifier(self)
@@ -1371,7 +1371,7 @@ pub struct TraitPredicate<'tcx> {
     pub trait_ref: TraitRef<'tcx>,
 }
 
-pub type PolyTraitPredicate<'tcx> = ty::Binder<'tcx, TraitPredicate<'tcx>>;
+pub type PolyTraitPredicate<'tcx> = ty::Binder<TraitPredicate<'tcx>>;
 
 impl<'tcx> TraitPredicate<'tcx> {
     pub fn def_id(self) -> DefId {
@@ -1395,8 +1395,8 @@ impl<'tcx> PolyTraitPredicate<'tcx> {
 pub struct OutlivesPredicate<A, B>(pub A, pub B); // `A: B`
 pub type RegionOutlivesPredicate<'tcx> = OutlivesPredicate<ty::Region<'tcx>, ty::Region<'tcx>>;
 pub type TypeOutlivesPredicate<'tcx> = OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>;
-pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<'tcx, RegionOutlivesPredicate<'tcx>>;
-pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<'tcx, TypeOutlivesPredicate<'tcx>>;
+pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<RegionOutlivesPredicate<'tcx>>;
+pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<TypeOutlivesPredicate<'tcx>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, TyEncodable, TyDecodable)]
 #[derive(HashStable, TypeFoldable)]
@@ -1405,7 +1405,7 @@ pub struct SubtypePredicate<'tcx> {
     pub a: Ty<'tcx>,
     pub b: Ty<'tcx>,
 }
-pub type PolySubtypePredicate<'tcx> = ty::Binder<'tcx, SubtypePredicate<'tcx>>;
+pub type PolySubtypePredicate<'tcx> = ty::Binder<SubtypePredicate<'tcx>>;
 
 /// This kind of predicate has no *direct* correspondent in the
 /// syntax, but it roughly corresponds to the syntactic forms:
@@ -1426,7 +1426,7 @@ pub struct ProjectionPredicate<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-pub type PolyProjectionPredicate<'tcx> = Binder<'tcx, ProjectionPredicate<'tcx>>;
+pub type PolyProjectionPredicate<'tcx> = Binder<ProjectionPredicate<'tcx>>;
 
 impl<'tcx> PolyProjectionPredicate<'tcx> {
     /// Returns the `DefId` of the associated item being projected.
@@ -1444,7 +1444,7 @@ impl<'tcx> PolyProjectionPredicate<'tcx> {
         self.map_bound(|predicate| predicate.projection_ty.trait_ref(tcx))
     }
 
-    pub fn ty(&self) -> Binder<'tcx, Ty<'tcx>> {
+    pub fn ty(&self) -> Binder<Ty<'tcx>> {
         self.map_bound(|predicate| predicate.ty)
     }
 
@@ -3266,3 +3266,48 @@ impl<'tcx> fmt::Debug for SymbolName<'tcx> {
         fmt::Display::fmt(&self.name, fmt)
     }
 }
+
+macro_rules! impl_hibvk {
+    ($lt:lifetime, $ty:ty $(, $args:tt)*) => {
+        impl<$lt, $($args)*> HasInternedBoundVariableKinds for $ty {
+            type InternedKinds = &$lt List<BoundVariableKind>;
+            fn kinds_list(kinds: &Self::InternedKinds) -> &List<BoundVariableKind> {
+                kinds
+            }
+        }
+    };
+    ($t:tt, $ty:ty $(, $args:tt)*) => {
+        impl<$t, $($args)*> HasInternedBoundVariableKinds for $ty where $t: HasInternedBoundVariableKinds {
+            type InternedKinds = $t::InternedKinds;
+            fn kinds_list(kinds: &Self::InternedKinds) -> &List<BoundVariableKind> {
+                $t::kinds_list(kinds)
+            }
+        }
+    };
+}
+
+impl_hibvk!(T, &T);
+impl_hibvk!(T, Option<T>);
+impl_hibvk!(T, Vec<T>);
+impl_hibvk!('tcx, &'tcx [T], T);
+impl_hibvk!('tcx, &'tcx List<T>, T);
+impl_hibvk!('tcx, PredicateAtom<'tcx>);
+impl_hibvk!('tcx, FnSig<'tcx>);
+impl_hibvk!('tcx, ExistentialTraitRef<'tcx>);
+impl_hibvk!('tcx, ExistentialPredicate<'tcx>);
+impl_hibvk!('tcx, ExistentialProjection<'tcx>);
+impl_hibvk!('tcx, TraitRef<'tcx>);
+impl_hibvk!('tcx, GenSig<'tcx>);
+impl_hibvk!('tcx, Ty<'tcx>);
+impl_hibvk!('tcx, TyKind<'tcx>);
+impl_hibvk!('tcx, OutlivesPredicate<Region<'tcx>, Region<'tcx>>);
+impl_hibvk!('tcx, OutlivesPredicate<Ty<'tcx>, Region<'tcx>>);
+impl_hibvk!('tcx, OutlivesPredicate<GenericArg<'tcx>, Region<'tcx>>);
+impl_hibvk!('tcx, ProjectionPredicate<'tcx>);
+impl_hibvk!('tcx, SubtypePredicate<'tcx>);
+impl_hibvk!('tcx, TraitPredicate<'tcx>);
+impl_hibvk!('tcx, Const<'tcx>);
+impl_hibvk!('tcx, crate::ty::context::GeneratorInteriorTypeCause<'tcx>);
+impl_hibvk!('tcx, crate::ty::print::TraitRefPrintOnlyTraitPath<'tcx>);
+impl_hibvk!('tcx, crate::mir::terminator::Terminator<'tcx>);
+impl_hibvk!('tcx, crate::infer::canonical::QueryOutlivesConstraint<'tcx>);

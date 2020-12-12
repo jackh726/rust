@@ -161,7 +161,7 @@ pub enum TyKind<'tcx> {
     FnPtr(PolyFnSig<'tcx>),
 
     /// A trait, defined with `trait`.
-    Dynamic(&'tcx List<Binder<'tcx, ExistentialPredicate<'tcx>>>, ty::Region<'tcx>),
+    Dynamic(&'tcx List<Binder<ExistentialPredicate<'tcx>>>, ty::Region<'tcx>),
 
     /// The anonymous type of a closure. Used to represent the type of
     /// `|a| a`.
@@ -173,7 +173,7 @@ pub enum TyKind<'tcx> {
 
     /// A type representin the types stored inside a generator.
     /// This should only appear in GeneratorInteriors.
-    GeneratorWitness(Binder<'tcx, &'tcx List<Ty<'tcx>>>),
+    GeneratorWitness(Binder<&'tcx List<Ty<'tcx>>>),
 
     /// The never type `!`
     Never,
@@ -750,7 +750,7 @@ impl<'tcx> ExistentialPredicate<'tcx> {
     }
 }
 
-impl<'tcx> Binder<'tcx, ExistentialPredicate<'tcx>> {
+impl<'tcx> Binder<ExistentialPredicate<'tcx>> {
     pub fn with_self_ty(&self, tcx: TyCtxt<'tcx>, self_ty: Ty<'tcx>) -> ty::Predicate<'tcx> {
         use crate::ty::ToPredicate;
         match self.skip_binder() {
@@ -774,7 +774,7 @@ impl<'tcx> Binder<'tcx, ExistentialPredicate<'tcx>> {
     }
 }
 
-impl<'tcx> List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>> {
+impl<'tcx> List<ty::Binder<ExistentialPredicate<'tcx>>> {
     /// Returns the "principal `DefId`" of this set of existential predicates.
     ///
     /// A Rust trait object type consists (in addition to a lifetime bound)
@@ -800,7 +800,7 @@ impl<'tcx> List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>> {
     /// is `{Send, Sync}`, while there is no principal. These trait objects
     /// have a "trivial" vtable consisting of just the size, alignment,
     /// and destructor.
-    pub fn principal(&self) -> Option<ty::Binder<'tcx, ExistentialTraitRef<'tcx>>> {
+    pub fn principal(&self) -> Option<ty::Binder<ExistentialTraitRef<'tcx>>> {
         self[0]
             .map_bound(|this| match this {
                 ExistentialPredicate::Trait(tr) => Some(tr),
@@ -816,7 +816,7 @@ impl<'tcx> List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>> {
     #[inline]
     pub fn projection_bounds<'a>(
         &'a self,
-    ) -> impl Iterator<Item = ty::Binder<'tcx, ExistentialProjection<'tcx>>> + 'a {
+    ) -> impl Iterator<Item = ty::Binder<ExistentialProjection<'tcx>>> + 'a {
         self.iter().filter_map(|predicate| {
             predicate
                 .map_bound(|pred| match pred {
@@ -828,7 +828,7 @@ impl<'tcx> List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>> {
     }
 
     #[inline]
-    pub fn auto_traits<'a>(&'a self) -> impl Iterator<Item = DefId> + 'a {
+    pub fn auto_traits<'a>(&'a self) -> impl Iterator<Item = DefId> + rustc_data_structures::captures::Captures<'tcx> + 'a {
         self.iter().filter_map(|predicate| match predicate.skip_binder() {
             ExistentialPredicate::AutoTrait(did) => Some(did),
             _ => None,
@@ -885,10 +885,10 @@ impl<'tcx> TraitRef<'tcx> {
     }
 }
 
-pub type PolyTraitRef<'tcx> = Binder<'tcx, TraitRef<'tcx>>;
+pub type PolyTraitRef<'tcx> = Binder<TraitRef<'tcx>>;
 
 impl<'tcx> PolyTraitRef<'tcx> {
-    pub fn self_ty(&self) -> Binder<'tcx, Ty<'tcx>> {
+    pub fn self_ty(&self) -> Binder<Ty<'tcx>> {
         self.map_bound_ref(|tr| tr.self_ty())
     }
 
@@ -941,7 +941,7 @@ impl<'tcx> ExistentialTraitRef<'tcx> {
     }
 }
 
-pub type PolyExistentialTraitRef<'tcx> = Binder<'tcx, ExistentialTraitRef<'tcx>>;
+pub type PolyExistentialTraitRef<'tcx> = Binder<ExistentialTraitRef<'tcx>>;
 
 impl<'tcx> PolyExistentialTraitRef<'tcx> {
     pub fn def_id(&self) -> DefId {
@@ -965,31 +965,53 @@ pub enum BoundVariableKind {
     Const,
 }
 
+pub trait HasInternedBoundVariableKinds {
+    type InternedKinds: Copy + std::fmt::Debug;
+
+    fn kinds_list(kinds: &Self::InternedKinds) -> &List<BoundVariableKind>;
+}
+
 /// Binder is a binder for higher-ranked lifetimes or types. It is part of the
 /// compiler's representation for things like `for<'a> Fn(&'a isize)`
 /// (which would be represented by the type `PolyTraitRef ==
-/// Binder<'tcx, TraitRef>`). Note that when we instantiate,
+/// Binder<TraitRef>`). Note that when we instantiate,
 /// erase, or otherwise "discharge" these bound vars, we change the
-/// type from `Binder<'tcx, T>` to just `T` (see
+/// type from `Binder<T>` to just `T` (see
 /// e.g., `liberate_late_bound_regions`).
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, TyEncodable, TyDecodable)]
-pub struct Binder<'tcx, T>(T, &'tcx List<BoundVariableKind>);
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Binder<T: HasInternedBoundVariableKinds>(T, T::InternedKinds);
 
-impl<'tcx, T> Binder<'tcx, T>
+impl<S: rustc_serialize::Encoder, T: rustc_serialize::Encodable<S> + HasInternedBoundVariableKinds> rustc_serialize::Encodable<S> for Binder<T> where T::InternedKinds: rustc_serialize::Encodable<S> {
+    fn encode(&self, s: &mut S) -> Result<(), S::Error> {
+        rustc_serialize::Encodable::encode(&self.0, s)?;
+        rustc_serialize::Encodable::encode(&self.1, s)
+    }
+}
+
+impl<S: rustc_serialize::Decoder, T: rustc_serialize::Decodable<S> + HasInternedBoundVariableKinds> rustc_serialize::Decodable<S> for Binder<T> where T::InternedKinds: rustc_serialize::Decodable<S> {
+    fn decode(s: &mut S) -> Result<Self, S::Error> {
+        Ok(Binder(
+            rustc_serialize::Decodable::decode(s)?,
+            rustc_serialize::Decodable::decode(s)?
+        ))
+    }
+}
+
+impl<'tcx, T> Binder<T>
 where
-    T: TypeFoldable<'tcx>,
+    T: TypeFoldable<'tcx> + HasInternedBoundVariableKinds,
 {
     /// Wraps `value` in a binder, asserting that `value` does not
     /// contain any bound vars that would be bound by the
     /// binder. This is commonly used to 'inject' a value T into a
     /// different binding level.
-    pub fn dummy(value: T) -> Binder<'tcx, T> {
+    pub fn dummy(value: T) -> Binder<T> where T: HasInternedBoundVariableKinds<InternedKinds = &'tcx List<BoundVariableKind>> {
         debug_assert!(!value.has_escaping_bound_vars());
         Binder(value, ty::List::empty())
     }
 
     /// Wraps `value` in a binder, binding higher-ranked vars (if any).
-    pub fn bind(value: T, tcx: TyCtxt<'tcx>) -> Binder<'tcx, T> {
+    pub fn bind(value: T, tcx: TyCtxt<'tcx>) -> Binder<T> where T: HasInternedBoundVariableKinds<InternedKinds = &'tcx List<BoundVariableKind>>  {
         let mut collector = BoundVarsCollector::new();
         value.visit_with(&mut collector);
         Binder(value, collector.into_vars(tcx))
@@ -1000,9 +1022,9 @@ where
     ///
     /// Note that this will shift all debrujin indices of escaping bound variables
     /// by 1 to avoid accidential captures.
-    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<'tcx, T>
+    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<T>
     where
-        T: TypeFoldable<'tcx>,
+        T: TypeFoldable<'tcx> + HasInternedBoundVariableKinds<InternedKinds = &'tcx List<BoundVariableKind>>,
     {
         if value.has_escaping_bound_vars() {
             Binder::bind(super::fold::shift_vars(tcx, value, 1), tcx)
@@ -1011,16 +1033,16 @@ where
         }
     }
 
-    pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
+    pub fn bind_with_vars(value: T, vars: T::InternedKinds) -> Binder<T> where T: HasInternedBoundVariableKinds<InternedKinds = &'tcx List<BoundVariableKind>>  {
         if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(vars);
+            let mut validator = ValidateBoundVars::new(T::kinds_list(&vars));
             value.visit_with(&mut validator);
         }
         Binder(value, vars)
     }
 }
 
-impl<'tcx, T> Binder<'tcx, T> {
+impl<T: HasInternedBoundVariableKinds> Binder<T> {
     /// Skips the binder and returns the "bound" value. This is a
     /// risky thing to do because it's easy to get confused about
     /// De Bruijn indices and the like. It is usually better to
@@ -1041,36 +1063,39 @@ impl<'tcx, T> Binder<'tcx, T> {
         self.0
     }
 
-    pub fn bound_vars(&self) -> &'tcx List<BoundVariableKind> {
+    pub fn bound_vars(&self) -> T::InternedKinds {
         self.1
     }
 
-    pub fn as_ref(&self) -> Binder<'tcx, &T> {
+    pub fn as_ref(&self) -> Binder<&T> {
         Binder(&self.0, self.1)
     }
 
-    pub fn map_bound_ref_unchecked<F, U>(&self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound_ref_unchecked<F, U>(&self, f: F) -> Binder<U>
     where
         F: FnOnce(&T) -> U,
+        U: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
     {
         let value = f(&self.0);
         Binder(value, self.1)
     }
 
-    pub fn map_bound_ref<F, U: TypeFoldable<'tcx>>(&self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound_ref<F, U: TypeFoldable<'tcx>>(&self, f: F) -> Binder<U>
     where
         F: FnOnce(&T) -> U,
+        U: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
     {
         self.as_ref().map_bound(f)
     }
 
-    pub fn map_bound<F, U: TypeFoldable<'tcx>>(self, f: F) -> Binder<'tcx, U>
+    pub fn map_bound<F, U: TypeFoldable<'tcx>>(self, f: F) -> Binder<U>
     where
         F: FnOnce(T) -> U,
+        U: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
     {
         let value = f(self.0);
         if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(self.1);
+            let mut validator = ValidateBoundVars::new(T::kinds_list(&self.1));
             value.visit_with(&mut validator);
         }
         Binder(value, self.1)
@@ -1085,12 +1110,12 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// don't actually track bound vars. However, semantically, it is different
     /// because bound vars aren't allowed to change here, whereas they are
     /// in `bind`. This may be (debug) asserted in the future.
-    pub fn rebind<U>(&self, value: U) -> Binder<'tcx, U>
+    pub fn rebind<U>(&self, value: U) -> Binder<U>
     where
-        U: TypeFoldable<'tcx>,
+        U: TypeFoldable<'tcx> + HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
     {
         if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(self.bound_vars());
+            let mut validator = ValidateBoundVars::new(T::kinds_list(&self.1));
             value.visit_with(&mut validator);
         }
         Binder(value, self.1)
@@ -1120,13 +1145,18 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return value.
-    pub fn fuse<U, F, R>(self, u: Binder<'tcx, U>, tcx: TyCtxt<'tcx>, f: F) -> Binder<'tcx, R>
+    pub fn fuse<U, F, R>(self, u: Binder<U>, tcx: TyCtxt<'tcx>, f: F) -> Binder<R>
     where
+        T: HasInternedBoundVariableKinds<InternedKinds = &'tcx List<BoundVariableKind>> ,
+        U: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
         F: FnOnce(T, U) -> R,
+        R: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
     {
         // No matter the order, we want to bind the *most* variables.
+        let first = T::kinds_list(&self.1);
+        let second = U::kinds_list(&u.1);
         let (longer, shorter) =
-            if self.1.len() >= u.1.len() { (self.1, u.1) } else { (u.1, self.1) };
+            if first.len() >= second.len() { (first, second) } else { (second, first) };
         if cfg!(debug_assertions) {
             // We want to verify that the bound variables are compatible
             for (var_a, var_b) in longer.iter().zip(shorter.iter()) {
@@ -1163,7 +1193,7 @@ impl<'tcx, T> Binder<'tcx, T> {
         } else {
             None.into_iter()
         };
-        let bound_vars_iter = self.1.iter().chain(env_iter);
+        let bound_vars_iter = T::kinds_list(&self.1).iter().chain(env_iter);
         let bound_vars = tcx.mk_bound_variable_kinds(bound_vars_iter);
         Binder(f(self.0, u.0), bound_vars)
     }
@@ -1174,8 +1204,10 @@ impl<'tcx, T> Binder<'tcx, T> {
     /// `f` should consider bound regions at depth 1 to be free, and
     /// anything it produces with bound regions at depth 1 will be
     /// bound in the resulting return values.
-    pub fn split<U, V, F>(self, f: F) -> (Binder<'tcx, U>, Binder<'tcx, V>)
+    pub fn split<U, V, F>(self, f: F) -> (Binder<U>, Binder<V>)
     where
+        U: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
+        V: HasInternedBoundVariableKinds<InternedKinds = T::InternedKinds>,
         F: FnOnce(T) -> (U, V),
     {
         let (u, v) = f(self.0);
@@ -1183,8 +1215,8 @@ impl<'tcx, T> Binder<'tcx, T> {
     }
 }
 
-impl<'tcx, T> Binder<'tcx, Option<T>> {
-    pub fn transpose(self) -> Option<Binder<'tcx, T>> {
+impl<T: HasInternedBoundVariableKinds> Binder<Option<T>> {
+    pub fn transpose(self) -> Option<Binder<T>> {
         let bound_vars = self.1;
         self.0.map(|v| Binder(v, bound_vars))
     }
@@ -1242,16 +1274,16 @@ pub struct GenSig<'tcx> {
     pub return_ty: Ty<'tcx>,
 }
 
-pub type PolyGenSig<'tcx> = Binder<'tcx, GenSig<'tcx>>;
+pub type PolyGenSig<'tcx> = Binder<GenSig<'tcx>>;
 
 impl<'tcx> PolyGenSig<'tcx> {
-    pub fn resume_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn resume_ty(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.resume_ty)
     }
-    pub fn yield_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn yield_ty(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.yield_ty)
     }
-    pub fn return_ty(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn return_ty(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|sig| sig.return_ty)
     }
 }
@@ -1292,22 +1324,22 @@ impl<'tcx> FnSig<'tcx> {
     }
 }
 
-pub type PolyFnSig<'tcx> = Binder<'tcx, FnSig<'tcx>>;
+pub type PolyFnSig<'tcx> = Binder<FnSig<'tcx>>;
 
 impl<'tcx> PolyFnSig<'tcx> {
     #[inline]
-    pub fn inputs(&self) -> Binder<'tcx, &'tcx [Ty<'tcx>]> {
+    pub fn inputs(&self) -> Binder<&'tcx [Ty<'tcx>]> {
         self.map_bound_ref_unchecked(|fn_sig| fn_sig.inputs())
     }
     #[inline]
-    pub fn input(&self, index: usize) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn input(&self, index: usize) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs()[index])
     }
-    pub fn inputs_and_output(&self) -> ty::Binder<'tcx, &'tcx List<Ty<'tcx>>> {
+    pub fn inputs_and_output(&self) -> ty::Binder<&'tcx List<Ty<'tcx>>> {
         self.map_bound_ref(|fn_sig| fn_sig.inputs_and_output)
     }
     #[inline]
-    pub fn output(&self) -> ty::Binder<'tcx, Ty<'tcx>> {
+    pub fn output(&self) -> ty::Binder<Ty<'tcx>> {
         self.map_bound_ref(|fn_sig| fn_sig.output())
     }
     pub fn c_variadic(&self) -> bool {
@@ -1321,7 +1353,7 @@ impl<'tcx> PolyFnSig<'tcx> {
     }
 }
 
-pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<'tcx, FnSig<'tcx>>>;
+pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<FnSig<'tcx>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, TyEncodable, TyDecodable)]
 #[derive(HashStable)]
@@ -1647,7 +1679,7 @@ pub struct ExistentialProjection<'tcx> {
     pub ty: Ty<'tcx>,
 }
 
-pub type PolyExistentialProjection<'tcx> = Binder<'tcx, ExistentialProjection<'tcx>>;
+pub type PolyExistentialProjection<'tcx> = Binder<ExistentialProjection<'tcx>>;
 
 impl<'tcx> ExistentialProjection<'tcx> {
     /// Extracts the underlying existential trait reference from this projection.

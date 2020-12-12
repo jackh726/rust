@@ -88,7 +88,7 @@ pub struct CtxtInterners<'tcx> {
     canonical_var_infos: InternedSet<'tcx, List<CanonicalVarInfo<'tcx>>>,
     region: InternedSet<'tcx, RegionKind>,
     poly_existential_predicates:
-        InternedSet<'tcx, List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>>>,
+        InternedSet<'tcx, List<ty::Binder<ExistentialPredicate<'tcx>>>>,
     predicate: InternedSet<'tcx, PredicateInner<'tcx>>,
     predicates: InternedSet<'tcx, List<Predicate<'tcx>>>,
     projs: InternedSet<'tcx, List<ProjectionKind>>,
@@ -427,7 +427,7 @@ pub struct TypeckResults<'tcx> {
 
     /// Stores the type, expression, span and optional scope span of all types
     /// that are live across the yield of this generator (if a generator).
-    pub generator_interior_types: ty::Binder<'tcx, Vec<GeneratorInteriorTypeCause<'tcx>>>,
+    pub generator_interior_types: ty::Binder<Vec<GeneratorInteriorTypeCause<'tcx>>>,
 
     /// We sometimes treat byte string literals (which are of type `&[u8; N]`)
     /// as `&[u8]`, depending on the pattern  in which they are used.
@@ -1614,7 +1614,7 @@ nop_lift! {const_; &'a Const<'a> => &'tcx Const<'tcx>}
 nop_lift! {predicate; &'a PredicateInner<'a> => &'tcx PredicateInner<'tcx>}
 
 nop_list_lift! {type_list; Ty<'a> => Ty<'tcx>}
-nop_list_lift! {poly_existential_predicates; ty::Binder<'a, ExistentialPredicate<'a>> => ty::Binder<'tcx, ExistentialPredicate<'tcx>>}
+nop_list_lift! {poly_existential_predicates; ty::Binder<ExistentialPredicate<'a>> => ty::Binder<ExistentialPredicate<'tcx>>}
 nop_list_lift! {predicates; Predicate<'a> => Predicate<'tcx>}
 nop_list_lift! {canonical_var_infos; CanonicalVarInfo<'a> => CanonicalVarInfo<'tcx>}
 nop_list_lift! {projs; ProjectionKind => ProjectionKind}
@@ -2057,7 +2057,7 @@ slice_interners!(
     substs: _intern_substs(GenericArg<'tcx>),
     canonical_var_infos: _intern_canonical_var_infos(CanonicalVarInfo<'tcx>),
     poly_existential_predicates:
-        _intern_poly_existential_predicates(ty::Binder<'tcx, ExistentialPredicate<'tcx>>),
+        _intern_poly_existential_predicates(ty::Binder<ExistentialPredicate<'tcx>>),
     predicates: _intern_predicates(Predicate<'tcx>),
     projs: _intern_projs(ProjectionKind),
     place_elems: _intern_place_elems(PlaceElem<'tcx>),
@@ -2289,7 +2289,7 @@ impl<'tcx> TyCtxt<'tcx> {
     #[inline]
     pub fn mk_dynamic(
         self,
-        obj: &'tcx List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>>,
+        obj: &'tcx List<ty::Binder<ExistentialPredicate<'tcx>>>,
         reg: ty::Region<'tcx>,
     ) -> Ty<'tcx> {
         self.mk_ty(Dynamic(obj, reg))
@@ -2316,7 +2316,7 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     #[inline]
-    pub fn mk_generator_witness(self, types: ty::Binder<'tcx, &'tcx List<Ty<'tcx>>>) -> Ty<'tcx> {
+    pub fn mk_generator_witness(self, types: ty::Binder<&'tcx List<Ty<'tcx>>>) -> Ty<'tcx> {
         self.mk_ty(GeneratorWitness(types))
     }
 
@@ -2421,8 +2421,8 @@ impl<'tcx> TyCtxt<'tcx> {
 
     pub fn intern_poly_existential_predicates(
         self,
-        eps: &[ty::Binder<'tcx, ExistentialPredicate<'tcx>>],
-    ) -> &'tcx List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>> {
+        eps: &[ty::Binder<ExistentialPredicate<'tcx>>],
+    ) -> &'tcx List<ty::Binder<ExistentialPredicate<'tcx>>> {
         assert!(!eps.is_empty());
         assert!(
             eps.array_windows()
@@ -2495,8 +2495,8 @@ impl<'tcx> TyCtxt<'tcx> {
 
     pub fn mk_poly_existential_predicates<
         I: InternAs<
-            [ty::Binder<'tcx, ExistentialPredicate<'tcx>>],
-            &'tcx List<ty::Binder<'tcx, ExistentialPredicate<'tcx>>>,
+            [ty::Binder<ExistentialPredicate<'tcx>>],
+            &'tcx List<ty::Binder<ExistentialPredicate<'tcx>>>,
         >,
     >(
         self,

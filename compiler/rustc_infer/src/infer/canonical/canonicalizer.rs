@@ -293,7 +293,7 @@ impl<'cx, 'tcx> TypeFolder<'tcx> for Canonicalizer<'cx, 'tcx> {
         self.tcx
     }
 
-    fn fold_binder<T>(&mut self, t: ty::Binder<'tcx, T>) -> ty::Binder<'tcx, T>
+    fn fold_binder<T>(&mut self, t: ty::Binder<T>) -> ty::Binder<T>
     where
         T: TypeFoldable<'tcx>,
     {

@@ -1416,7 +1416,7 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         &self,
         span: Span,
         lbrct: LateBoundRegionConversionTime,
-        value: ty::Binder<'tcx, T>,
+        value: ty::Binder<T>,
     ) -> (T, BTreeMap<ty::BoundRegion, ty::Region<'tcx>>)
     where
         T: TypeFoldable<'tcx>,

@@ -112,11 +112,11 @@ impl TypeRelation<'tcx> for Match<'tcx> {
 
     fn binders<T>(
         &mut self,
-        a: ty::Binder<'tcx, T>,
-        b: ty::Binder<'tcx, T>,
-    ) -> RelateResult<'tcx, ty::Binder<'tcx, T>>
+        a: ty::Binder<T>,
+        b: ty::Binder<T>,
+    ) -> RelateResult<'tcx, ty::Binder<T>>
     where
-        T: Relate<'tcx>,
+        T: Relate<'tcx> + ty::HasInternedBoundVariableKinds,
     {
         Ok(a.rebind(self.relate(a.skip_binder(), b.skip_binder())?))
     }

@@ -610,7 +610,7 @@ impl<'tcx> LowerInto<'tcx, Option<chalk_ir::QuantifiedWhereClause<RustInterner<'
 }
 
 impl<'tcx> LowerInto<'tcx, chalk_ir::Binders<chalk_ir::QuantifiedWhereClauses<RustInterner<'tcx>>>>
-    for &'tcx ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>>
+    for &'tcx ty::List<ty::Binder<ty::ExistentialPredicate<'tcx>>>
 {
     fn lower_into(
         self,
@@ -682,7 +682,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Binders<chalk_ir::QuantifiedWhereClauses<Ru
 }
 
 impl<'tcx> LowerInto<'tcx, chalk_ir::FnSig<RustInterner<'tcx>>>
-    for ty::Binder<'tcx, ty::FnSig<'tcx>>
+    for ty::Binder<ty::FnSig<'tcx>>
 {
     fn lower_into(self, _interner: &RustInterner<'_>) -> FnSig<RustInterner<'tcx>> {
         chalk_ir::FnSig {
@@ -813,7 +813,7 @@ impl<'tcx> LowerInto<'tcx, chalk_solve::rust_ir::AliasEqBound<RustInterner<'tcx>
 crate fn collect_bound_vars<'tcx, T: TypeFoldable<'tcx>>(
     interner: &RustInterner<'tcx>,
     tcx: TyCtxt<'tcx>,
-    ty: Binder<'tcx, T>,
+    ty: Binder<T>,
 ) -> (T, chalk_ir::VariableKinds<RustInterner<'tcx>>, BTreeMap<DefId, u32>) {
     let mut bound_vars_collector = BoundVarsCollector::new();
     ty.as_ref().skip_binder().visit_with(&mut bound_vars_collector);
@@ -863,7 +863,7 @@ impl<'tcx> BoundVarsCollector<'tcx> {
 impl<'tcx> TypeVisitor<'tcx> for BoundVarsCollector<'tcx> {
     fn visit_binder<T: TypeFoldable<'tcx>>(
         &mut self,
-        t: &Binder<'tcx, T>,
+        t: &Binder<T>,
     ) -> ControlFlow<Self::BreakTy> {
         self.binder_index.shift_in(1);
         let result = t.super_visit_with(self);
@@ -946,7 +946,7 @@ impl<'a, 'tcx> TypeFolder<'tcx> for NamedBoundVarSubstitutor<'a, 'tcx> {
         self.tcx
     }
 
-    fn fold_binder<T: TypeFoldable<'tcx>>(&mut self, t: Binder<'tcx, T>) -> Binder<'tcx, T> {
+    fn fold_binder<T: TypeFoldable<'tcx>>(&mut self, t: Binder<T>) -> Binder<T> {
         self.binder_index.shift_in(1);
         let result = t.super_fold_with(self);
         self.binder_index.shift_out(1);
@@ -1002,7 +1002,7 @@ impl<'tcx> TypeFolder<'tcx> for ParamsSubstitutor<'tcx> {
         self.tcx
     }
 
-    fn fold_binder<T: TypeFoldable<'tcx>>(&mut self, t: Binder<'tcx, T>) -> Binder<'tcx, T> {
+    fn fold_binder<T: TypeFoldable<'tcx>>(&mut self, t: Binder<T>) -> Binder<T> {
         self.binder_index.shift_in(1);
         let result = t.super_fold_with(self);
         self.binder_index.shift_out(1);

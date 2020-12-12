@@ -364,7 +364,7 @@ impl<'tcx> Body<'tcx> {
 
     /// Returns an iterator over all temporaries.
     #[inline]
-    pub fn temps_iter<'a>(&'a self) -> impl Iterator<Item = Local> + 'a {
+    pub fn temps_iter<'a>(&'a self) -> impl Iterator<Item = Local> + rustc_data_structures::captures::Captures<'tcx> + 'a {
         (self.arg_count + 1..self.local_decls.len()).filter_map(move |index| {
             let local = Local::new(index);
             if self.local_decls[local].is_user_variable() { None } else { Some(local) }
@@ -373,7 +373,7 @@ impl<'tcx> Body<'tcx> {
 
     /// Returns an iterator over all user-declared locals.
     #[inline]
-    pub fn vars_iter<'a>(&'a self) -> impl Iterator<Item = Local> + 'a {
+    pub fn vars_iter<'a>(&'a self) -> impl Iterator<Item = Local> + rustc_data_structures::captures::Captures<'tcx> + 'a {
         (self.arg_count + 1..self.local_decls.len()).filter_map(move |index| {
             let local = Local::new(index);
             self.local_decls[local].is_user_variable().then_some(local)
@@ -382,7 +382,7 @@ impl<'tcx> Body<'tcx> {
 
     /// Returns an iterator over all user-declared mutable locals.
     #[inline]
-    pub fn mut_vars_iter<'a>(&'a self) -> impl Iterator<Item = Local> + 'a {
+    pub fn mut_vars_iter<'a>(&'a self) -> impl Iterator<Item = Local> + rustc_data_structures::captures::Captures<'tcx> + 'a {
         (self.arg_count + 1..self.local_decls.len()).filter_map(move |index| {
             let local = Local::new(index);
             let decl = &self.local_decls[local];
@@ -396,7 +396,7 @@ impl<'tcx> Body<'tcx> {
 
     /// Returns an iterator over all user-declared mutable arguments and locals.
     #[inline]
-    pub fn mut_vars_and_args_iter<'a>(&'a self) -> impl Iterator<Item = Local> + 'a {
+    pub fn mut_vars_and_args_iter<'a>(&'a self) -> impl Iterator<Item = Local> + rustc_data_structures::captures::Captures<'tcx> + 'a {
         (1..self.local_decls.len()).filter_map(move |index| {
             let local = Local::new(index);
             let decl = &self.local_decls[local];

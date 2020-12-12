@@ -110,9 +110,9 @@ impl<'tcx> HashStable<StableHashingContext<'tcx>> for ty::BoundVar {
     }
 }
 
-impl<'a, 'tcx, T> HashStable<StableHashingContext<'a>> for ty::Binder<'tcx, T>
+impl<'a, T> HashStable<StableHashingContext<'a>> for ty::Binder<T>
 where
-    T: HashStable<StableHashingContext<'a>>,
+    T: HashStable<StableHashingContext<'a>> + ty::HasInternedBoundVariableKinds<InternedKinds: HashStable<StableHashingContext<'a>>>,
 {
     fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         self.as_ref().skip_binder().hash_stable(hcx, hasher);

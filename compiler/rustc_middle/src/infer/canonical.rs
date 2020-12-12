@@ -284,7 +284,7 @@ impl<'tcx, V> Canonical<'tcx, V> {
 }
 
 pub type QueryOutlivesConstraint<'tcx> =
-    ty::Binder<'tcx, ty::OutlivesPredicate<GenericArg<'tcx>, Region<'tcx>>>;
+    ty::Binder<ty::OutlivesPredicate<GenericArg<'tcx>, Region<'tcx>>>;
 
 TrivialTypeFoldableAndLiftImpls! {
     for <'tcx> {
