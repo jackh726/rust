@@ -319,9 +319,10 @@ impl Printer<'tcx> for SymbolMangler<'tcx> {
 
             // Late-bound lifetimes use indices starting at 1,
             // see `BinderLevel` for more details.
-            ty::ReLateBound(debruijn, br) => {
+            ty::ReLateBound(debruijn, ty::BoundRegion { kind: ty::BrAnon(i), .. }) => {
                 let binder = &self.binders[self.binders.len() - 1 - debruijn.index()];
-                let depth = binder.lifetime_depths.start + br.var.as_u32();
+                let depth = binder.lifetime_depths.start + i;
+
                 1 + (self.binders.last().unwrap().lifetime_depths.end - 1 - depth)
             }
 
