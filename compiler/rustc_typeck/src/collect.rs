@@ -1940,10 +1940,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                         let predicate = ty::Binder::bind(ty::PredicateAtom::TypeOutlives(
                             ty::OutlivesPredicate(ty, re_root_empty),
                         ));
-                        predicates.insert((
-                            predicate.potentially_quantified(tcx, ty::PredicateKind::ForAll),
-                            span,
-                        ));
+                        predicates.insert((predicate.potentially_quantified(tcx), span));
                     }
                 }
 
@@ -1987,7 +1984,7 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                                 ty::Binder::bind(ty::PredicateAtom::TypeOutlives(
                                     ty::OutlivesPredicate(ty, region),
                                 ))
-                                .potentially_quantified(tcx, ty::PredicateKind::ForAll),
+                                .potentially_quantified(tcx),
                                 lifetime.span,
                             ));
                         }
