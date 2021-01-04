@@ -144,7 +144,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     );
                     let mut suggest_box = !impl_trait_ret_ty.obligations.is_empty();
                     for o in impl_trait_ret_ty.obligations {
-                        match o.predicate.skip_binders_unchecked() {
+                        match o.predicate.bound_atom().skip_binder() {
                             ty::PredicateAtom::Trait(t, constness) => {
                                 let pred = ty::PredicateAtom::Trait(
                                     ty::TraitPredicate {
