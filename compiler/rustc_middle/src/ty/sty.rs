@@ -978,22 +978,6 @@ where
         Binder(value, collector.into_vars(tcx))
     }
 
-    /// Wraps `value` in a binder without actually binding any currently
-    /// unbound variables.
-    ///
-    /// Note that this will shift all debrujin indices of escaping bound variables
-    /// by 1 to avoid accidential captures.
-    pub fn wrap_nonbinding(tcx: TyCtxt<'tcx>, value: T) -> Binder<'tcx, T>
-    where
-        T: TypeFoldable<'tcx>,
-    {
-        if value.has_escaping_bound_vars() {
-            Binder::bind(super::fold::shift_vars(tcx, value, 1), tcx)
-        } else {
-            Binder::dummy(value)
-        }
-    }
-
     pub fn bind_with_vars(value: T, vars: &'tcx List<BoundVariableKind>) -> Binder<'tcx, T> {
         if cfg!(debug_assertions) {
             let mut validator = ValidateBoundVars::new(vars);
