@@ -896,6 +896,12 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     /// **A note on binders:** there is an implied binder around
     /// `param_ty` and `ast_bounds`. See `instantiate_poly_trait_ref`
     /// for more details.
+    ///
+    /// The `bound_vars` argument here is needed for associated type bounds.
+    /// Specifically, imagine something like
+    /// `F: for<'a> Iterator<Item: for<'b> A<'a, 'b>>`. Here, the inner
+    /// `Item: for<'b> A<'a, 'b>` has an implicit `for<'a>` binder around it, at
+    /// the same binding level of `for<'b>`.
     fn add_bounds(
         &self,
         param_ty: Ty<'tcx>,

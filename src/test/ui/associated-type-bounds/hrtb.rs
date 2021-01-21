@@ -1,4 +1,5 @@
 // check-pass
+// compile-flags: -Z verbose
 
 #![feature(associated_type_bounds)]
 
