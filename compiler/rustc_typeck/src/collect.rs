@@ -1,4 +1,3 @@
-// ignore-tidy-filelength
 //! "Collection" is the process of determining the type and other external
 //! details of each item in Rust. Collection is specifically concerned
 //! with *inter-procedural* things -- for example, for a function
@@ -1003,14 +1002,8 @@ fn super_predicates_of(tcx: TyCtxt<'_>, trait_def_id: DefId) -> ty::GenericPredi
 
     // Convert the bounds that follow the colon, e.g., `Bar + Zed` in `trait Foo: Bar + Zed`.
     let self_param_ty = tcx.types.self_param;
-    let superbounds1 = AstConv::compute_bounds(
-        &icx,
-        self_param_ty,
-        bounds,
-        SizedByDefault::No,
-        item.span,
-        ty::List::empty(),
-    );
+    let superbounds1 =
+        AstConv::compute_bounds(&icx, self_param_ty, bounds, SizedByDefault::No, item.span);
 
     let superbounds1 = superbounds1.predicates(tcx, self_param_ty);
 
@@ -1929,14 +1922,8 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                 index += 1;
 
                 let sized = SizedByDefault::Yes;
-                let bounds = AstConv::compute_bounds(
-                    &icx,
-                    param_ty,
-                    &param.bounds,
-                    sized,
-                    param.span,
-                    ty::List::empty(),
-                );
+                let bounds =
+                    AstConv::compute_bounds(&icx, param_ty, &param.bounds, sized, param.span);
                 predicates.extend(bounds.predicates(tcx, param_ty));
             }
             GenericParamKind::Const { .. } => {
@@ -1996,7 +1983,6 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                                 constness,
                                 ty,
                                 &mut bounds,
-                                ty::List::empty(),
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
@@ -2276,13 +2262,7 @@ fn predicates_from_bound<'tcx>(
             };
 
             let mut bounds = Bounds::default();
-            let _ = astconv.instantiate_poly_trait_ref(
-                tr,
-                constness,
-                param_ty,
-                &mut bounds,
-                ty::List::empty(),
-            );
+            let _ = astconv.instantiate_poly_trait_ref(tr, constness, param_ty, &mut bounds);
             bounds.predicates(astconv.tcx(), param_ty)
         }
         hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => {

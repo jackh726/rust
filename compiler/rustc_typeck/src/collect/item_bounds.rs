@@ -31,7 +31,6 @@ fn associated_type_bounds<'tcx>(
         bounds,
         SizedByDefault::Yes,
         span,
-        ty::List::empty(),
     );
 
     let trait_def_id = tcx.associated_item(assoc_item_def_id).container.id();
@@ -73,7 +72,6 @@ fn opaque_type_bounds<'tcx>(
             bounds,
             SizedByDefault::Yes,
             span,
-            ty::List::empty(),
         )
         .predicates(tcx, item_ty);
 
