@@ -436,16 +436,15 @@ pub fn hir_trait_to_predicates<'tcx>(
     let env_hir_id = tcx.hir().get_parent_item(hir_trait.hir_ref_id);
     let env_def_id = tcx.hir().local_def_id(env_hir_id);
     let item_cx = self::collect::ItemCtxt::new(tcx, env_def_id.to_def_id());
-    let mut bounds = Bounds::default();
-    let _ = AstConv::instantiate_poly_trait_ref_inner(
+    let (_, bounds) = AstConv::instantiate_poly_trait_ref_inner(
         &item_cx,
         hir_trait,
         DUMMY_SP,
         hir::Constness::NotConst,
         self_ty,
-        &mut bounds,
         true,
         ty::List::empty(),
+        vec![],
     );
 
     bounds

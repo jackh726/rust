@@ -880,8 +880,8 @@ impl<'tcx> TypeVisitor<'tcx> for ValidateBoundVars<'tcx> {
                     ty::BoundVariableKind::Ty(kind) => {
                         if kind != bound_ty.kind {
                             panic!(
-                                "Mismatched type kinds: {:?} doesn't var in list {:?}",
-                                bound_ty.kind, list_var
+                                "Mismatched type kinds: {:?} doesn't match var ({:?}) in list ({:?})",
+                                bound_ty.kind, list_var, self.bound_vars
                             );
                         }
                     }
@@ -906,7 +906,14 @@ impl<'tcx> TypeVisitor<'tcx> for ValidateBoundVars<'tcx> {
                 }
                 let list_var = self.bound_vars[br.var.as_usize()];
                 match list_var {
-                    ty::BoundVariableKind::Region(_) => {}
+                    ty::BoundVariableKind::Region(kind) => {
+                        if kind != br.kind {
+                            panic!(
+                                "Mismatched region kinds: {:?} doesn't match var ({:?}) in list ({:?})",
+                                br.kind, list_var, self.bound_vars
+                            );
+                        }
+                    }
                     _ => panic!(
                         "Mismatched bound variable kinds! Expected region, found {:?}",
                         list_var
