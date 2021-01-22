@@ -685,10 +685,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             // Okay to ignore `Err` because of `ErrorReported` (see above).
         }
 
-        debug!(
-            "instantiate_poly_trait_ref({:?}, bounds={:?}) -> {:?}",
-            trait_ref, bounds, poly_trait_ref
-        );
+        debug!("instantiate_poly_trait_ref({:?}, bounds={:?})", trait_ref, bounds);
 
         arg_count
     }
@@ -752,6 +749,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             Some(self_ty),
             ty::List::empty(),
         );
+
         let tcx = self.tcx();
         let bound_vars = tcx.late_bound_vars(hir_id);
         let poly_trait_ref =
@@ -1080,6 +1078,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 .or_insert(binding.span);
         }
 
+        let shift_bound_vars = candidate.bound_vars().len() - trait_ref.bound_vars().len();
         match binding.kind {
             ConvertedBindingKind::Equality(ref ty) => {
                 // "Desugar" a constraint like `T: Iterator<Item = u32>` this to
@@ -1093,7 +1092,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                             trait_ref,
                             binding.item_name,
                         ),
-                        ty,
+                        ty: tcx.shift_bound_var_indices(shift_bound_vars, ty),
                     }),
                     binding.span,
                 ));

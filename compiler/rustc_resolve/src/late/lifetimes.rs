@@ -1184,19 +1184,6 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
 
         let trait_ref_hack = self.trait_ref_hack.take();
         let next_early_index = self.next_early_index();
-        let mut named_late_bound_vars = 0;
-        let lifetimes: FxHashMap<hir::ParamName, Region> = trait_ref
-            .bound_generic_params
-            .iter()
-            .filter_map(|param| match param.kind {
-                GenericParamKind::Lifetime { .. } => {
-                    let late_bound_idx = named_late_bound_vars;
-                    named_late_bound_vars += 1;
-                    Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
-                }
-                _ => None,
-            })
-            .collect();
         // See note on `trait_ref_hack`. If `for<..>` has been defined in both
         // the outer and inner part of the trait ref, emit an error.
         let has_lifetimes = trait_ref.bound_generic_params.iter().any(|param| match param.kind {
@@ -1213,8 +1200,9 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
             .emit();
         }
 
-        let (binders, named_late_bound_vars) =
-            if let Some((mut binders, mut named_late_bound_vars)) = trait_ref_hack.clone() {
+        let (binders, named_late_bound_vars, initial_named_late_bound_vars) =
+            if let Some((mut binders, initial_named_late_bound_vars)) = trait_ref_hack.clone() {
+                let mut named_late_bound_vars = initial_named_late_bound_vars;
                 binders.extend(trait_ref.bound_generic_params.iter().filter_map(|param| {
                     match param.kind {
                         GenericParamKind::Lifetime { .. } => {
@@ -1226,7 +1214,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     }
                 }));
 
-                (binders, named_late_bound_vars)
+                (binders, named_late_bound_vars, initial_named_late_bound_vars)
             } else {
                 let mut named_late_bound_vars = 0;
                 let binders: Vec<_> = trait_ref
@@ -1242,12 +1230,26 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     })
                     .collect();
 
-                (binders, named_late_bound_vars)
+                (binders, named_late_bound_vars, 0)
             };
 
         self.map.late_bound_vars.insert(trait_ref.trait_ref.hir_ref_id, binders.clone());
 
         if trait_ref_hack.is_none() || has_lifetimes {
+            let mut named_late_bound_vars = initial_named_late_bound_vars;
+            let lifetimes: FxHashMap<hir::ParamName, Region> = trait_ref
+                .bound_generic_params
+                .iter()
+                .filter_map(|param| match param.kind {
+                    GenericParamKind::Lifetime { .. } => {
+                        let late_bound_idx = named_late_bound_vars;
+                        named_late_bound_vars += 1;
+                        Some(Region::late(late_bound_idx, &self.tcx.hir(), param))
+                    }
+                    _ => None,
+                })
+                .collect();
+
             let scope = Scope::Binder {
                 hir_id: trait_ref.trait_ref.hir_ref_id,
                 lifetimes,
