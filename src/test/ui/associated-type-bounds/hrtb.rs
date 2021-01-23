@@ -26,4 +26,6 @@ trait I<'a, 'b, 'c> {
 trait H<'d, 'e>: for<'f> I<'d, 'f, 'e> + 'd {}
 fn foo2<T>() where T: for<'g> H<'g, 'g, As: for<'h> H<'h, 'g> + 'g> {}
 
+fn foo3<T>() where T: for<'i> H<'i, 'i, As: for<'j> H<'j, 'i, As: for<'k> I<'i, 'k, 'j> + 'j> + 'i> {}
+
 fn main() {}

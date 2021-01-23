@@ -5,6 +5,8 @@ use rustc_hir::Constness;
 use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, WithConstness};
 use rustc_span::Span;
 
+use smallvec::SmallVec;
+
 /// Collects together a list of type bounds. These lists of bounds occur in many places
 /// in Rust's syntax:
 ///
@@ -26,17 +28,17 @@ pub struct Bounds<'tcx> {
     /// A list of region bounds on the (implicit) self type. So if you
     /// had `T: 'a + 'b` this might would be a list `['a, 'b]` (but
     /// the `T` is not explicitly included).
-    pub region_bounds: Vec<(ty::Binder<'tcx, ty::Region<'tcx>>, Span)>,
+    pub region_bounds: SmallVec<[(ty::Binder<'tcx, ty::Region<'tcx>>, Span); 8]>,
 
     /// A list of trait bounds. So if you had `T: Debug` this would be
     /// `T: Debug`. Note that the self-type is explicit here.
-    pub trait_bounds: Vec<(ty::PolyTraitRef<'tcx>, Span, Constness)>,
+    pub trait_bounds: SmallVec<[(ty::PolyTraitRef<'tcx>, Span, Constness); 8]>,
 
     /// A list of projection equality bounds. So if you had `T:
     /// Iterator<Item = u32>` this would include `<T as
     /// Iterator>::Item => u32`. Note that the self-type is explicit
     /// here.
-    pub projection_bounds: Vec<(ty::PolyProjectionPredicate<'tcx>, Span)>,
+    pub projection_bounds: SmallVec<[(ty::PolyProjectionPredicate<'tcx>, Span); 8]>,
 
     /// `Some` if there is *no* `?Sized` predicate. The `span`
     /// is the location in the source of the `T` declaration which can
@@ -85,5 +87,12 @@ impl<'tcx> Bounds<'tcx> {
                     .map(|&(projection, span)| (projection.to_predicate(tcx), span)),
             )
             .collect()
+    }
+
+    pub fn merge(&mut self, other: Bounds<'tcx>) {
+        self.region_bounds.extend(other.region_bounds.into_iter());
+        self.trait_bounds.extend(other.trait_bounds.into_iter());
+        self.projection_bounds.extend(other.projection_bounds.into_iter());
+        self.implicitly_sized = self.implicitly_sized.or(other.implicitly_sized);
     }
 }

@@ -16,7 +16,6 @@
 //! crate as a kind of pass. This should eventually be factored away.
 
 use crate::astconv::{AstConv, SizedByDefault};
-use crate::bounds::Bounds;
 use crate::check::intrinsic::intrinsic_operation_unsafety;
 use crate::constrained_generic_params as cgp;
 use crate::errors;
@@ -1003,14 +1002,8 @@ fn super_predicates_of(tcx: TyCtxt<'_>, trait_def_id: DefId) -> ty::GenericPredi
 
     // Convert the bounds that follow the colon, e.g., `Bar + Zed` in `trait Foo: Bar + Zed`.
     let self_param_ty = tcx.types.self_param;
-    let superbounds1 = AstConv::compute_bounds(
-        &icx,
-        self_param_ty,
-        bounds,
-        SizedByDefault::No,
-        item.span,
-        ty::List::empty(),
-    );
+    let superbounds1 =
+        AstConv::compute_bounds(&icx, self_param_ty, bounds, SizedByDefault::No, item.span);
 
     let superbounds1 = superbounds1.predicates(tcx, self_param_ty);
 
@@ -1929,14 +1922,8 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                 index += 1;
 
                 let sized = SizedByDefault::Yes;
-                let bounds = AstConv::compute_bounds(
-                    &icx,
-                    param_ty,
-                    &param.bounds,
-                    sized,
-                    param.span,
-                    ty::List::empty(),
-                );
+                let bounds =
+                    AstConv::compute_bounds(&icx, param_ty, &param.bounds, sized, param.span);
                 predicates.extend(bounds.predicates(tcx, param_ty));
             }
             GenericParamKind::Const { .. } => {
@@ -1989,28 +1976,25 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                                 hir::TraitBoundModifier::Maybe => bug!("this wasn't handled"),
                             };
 
-                            let mut bounds = Bounds::default();
-                            let _ = AstConv::instantiate_poly_trait_ref(
+                            let (_, bounds) = AstConv::instantiate_poly_trait_ref(
                                 &icx,
                                 &poly_trait_ref,
                                 constness,
                                 ty,
-                                &mut bounds,
                                 ty::List::empty(),
+                                0,
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
 
                         &hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => {
-                            let mut bounds = Bounds::default();
-                            AstConv::instantiate_lang_item_trait_ref(
+                            let bounds = AstConv::instantiate_lang_item_trait_ref(
                                 &icx,
                                 lang_item,
                                 span,
                                 hir_id,
                                 args,
                                 ty,
-                                &mut bounds,
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
@@ -2275,25 +2259,22 @@ fn predicates_from_bound<'tcx>(
                 hir::TraitBoundModifier::None => constness,
             };
 
-            let mut bounds = Bounds::default();
-            let _ = astconv.instantiate_poly_trait_ref(
+            let (_, bounds) = astconv.instantiate_poly_trait_ref(
                 tr,
                 constness,
                 param_ty,
-                &mut bounds,
                 ty::List::empty(),
+                0,
             );
             bounds.predicates(astconv.tcx(), param_ty)
         }
         hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => {
-            let mut bounds = Bounds::default();
-            astconv.instantiate_lang_item_trait_ref(
+            let bounds = astconv.instantiate_lang_item_trait_ref(
                 lang_item,
                 span,
                 hir_id,
                 args,
                 param_ty,
-                &mut bounds,
             );
             bounds.predicates(astconv.tcx(), param_ty)
         }
