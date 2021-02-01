@@ -88,11 +88,4 @@ impl<'tcx> Bounds<'tcx> {
             )
             .collect()
     }
-
-    pub fn merge(&mut self, other: Bounds<'tcx>) {
-        self.region_bounds.extend(other.region_bounds.into_iter());
-        self.trait_bounds.extend(other.trait_bounds.into_iter());
-        self.projection_bounds.extend(other.projection_bounds.into_iter());
-        self.implicitly_sized = self.implicitly_sized.or(other.implicitly_sized);
-    }
 }
