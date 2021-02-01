@@ -443,8 +443,6 @@ pub fn hir_trait_to_predicates<'tcx>(
         hir::Constness::NotConst,
         self_ty,
         true,
-        ty::List::empty(),
-        vec![],
     );
 
     bounds

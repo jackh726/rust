@@ -52,7 +52,10 @@ where
 {
 }
 
-struct X<'a, 'b> {}
+struct X<'a, 'b> {
+    a: std::marker::PhantomData<&'a ()>,
+    b: std::marker::PhantomData<&'b ()>,
+}
 
 fn foo5<T>()
 where
