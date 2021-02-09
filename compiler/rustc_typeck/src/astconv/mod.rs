@@ -1351,11 +1351,22 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             regular_traits.iter().map(|i| i.trait_ref().map_bound(trait_ref_to_existential));
         let existential_projections = bounds.projection_bounds.iter().map(|(bound, _)| {
             bound.map_bound(|b| {
-                let trait_ref = trait_ref_to_existential(b.projection_ty.trait_ref(tcx));
+                if b.projection_ty.substs.type_at(0) != dummy_self {
+                    // FIXME: There appears to be a missing filter on top of `expand_trait_aliases`,
+                    // which picks up non-supertraits where clauses - but also, the object safety
+                    // completely ignores trait aliases, which could be object safety hazards. We
+                    // `delay_span_bug` here to avoid an ICE in stable even when the feature is
+                    // disabled. (#66420)
+                    tcx.sess.delay_span_bug(
+                        DUMMY_SP,
+                        &format!("ProjectionTy ({:?}) had non-dummy Self", b.projection_ty,),
+                    );
+                }
+                let substs = tcx.intern_substs(&b.projection_ty.substs[1..]);
                 ty::ExistentialProjection {
                     ty: b.ty,
                     item_def_id: b.projection_ty.item_def_id,
-                    substs: trait_ref.substs,
+                    substs: substs,
                 }
             })
         });

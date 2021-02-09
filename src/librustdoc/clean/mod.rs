@@ -1423,7 +1423,7 @@ fn clean_qpath(hir_ty: &hir::Ty<'_>, cx: &DocContext<'_>) -> Type {
         hir::QPath::TypeRelative(ref qself, ref segment) => {
             let ty = hir_ty_to_ty(cx.tcx, hir_ty);
             let res = if let ty::Projection(proj) = ty.kind() {
-                Res::Def(DefKind::Trait, proj.trait_ref(cx.tcx).def_id)
+                Res::Def(DefKind::Trait, proj.trait_def_id(cx.tcx))
             } else {
                 Res::Err
             };

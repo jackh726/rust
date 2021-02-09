@@ -662,9 +662,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
 
         // Check that this is a projection from the `Future` trait.
-        let trait_ref = predicate.projection_ty.trait_ref(self.tcx);
+        let trait_def_id = predicate.projection_ty.trait_def_id(self.tcx);
         let future_trait = self.tcx.require_lang_item(LangItem::Future, Some(cause_span));
-        if trait_ref.def_id != future_trait {
+        if trait_def_id != future_trait {
             debug!("deduce_future_output_from_projection: not a future");
             return None;
         }

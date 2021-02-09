@@ -1,0 +1,18 @@
+warning: the feature `generic_associated_types` is incomplete and may not be safe to use and/or cause compiler crashes
+  --> $DIR/issue-77905.rs:1:12
+   |
+LL | #![feature(generic_associated_types)]
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(incomplete_features)]` on by default
+   = note: see issue #44265 <https://github.com/rust-lang/rust/issues/44265> for more information
+
+error[E0581]: return type references lifetime `'a`, which is not constrained by the fn input types
+  --> $DIR/issue-77905.rs:14:51
+   |
+LL | fn somefn_gat<T: Foo>(f: for<'a> fn(T::In<'a>) -> T::In<'a>) {
+   |                                                   ^^^^^^^^^
+
+error: aborting due to previous error; 1 warning emitted
+
+For more information about this error, try `rustc --explain E0581`.

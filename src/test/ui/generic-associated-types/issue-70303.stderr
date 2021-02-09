@@ -1,5 +1,5 @@
 warning: the feature `generic_associated_types` is incomplete and may not be safe to use and/or cause compiler crashes
-  --> $DIR/issue-74684-1.rs:3:12
+  --> $DIR/issue-70303.rs:3:12
    |
 LL | #![feature(generic_associated_types)]
    |            ^^^^^^^^^^^^^^^^^^^^^^^^

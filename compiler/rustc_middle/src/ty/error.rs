@@ -556,7 +556,7 @@ impl<T> Trait<T> for X {
         ty: Ty<'tcx>,
     ) -> bool {
         let assoc = self.associated_item(proj_ty.item_def_id);
-        let trait_ref = proj_ty.trait_ref(self);
+        let trait_def_id = proj_ty.trait_def_id(self);
         if let Some(item) = self.hir().get_if_local(body_owner_def_id) {
             if let Some(hir_generics) = item.generics() {
                 // Get the `DefId` for the type parameter corresponding to `A` in `<A as T>::Foo`.
@@ -587,7 +587,7 @@ impl<T> Trait<T> for X {
 
                         if self.constrain_generic_bound_associated_type_structured_suggestion(
                             db,
-                            &trait_ref,
+                            trait_def_id,
                             pred.bounds,
                             &assoc,
                             ty,
@@ -604,7 +604,7 @@ impl<T> Trait<T> for X {
                         // This is type param `A` in `<A as T>::Foo`.
                         return self.constrain_generic_bound_associated_type_structured_suggestion(
                             db,
-                            &trait_ref,
+                            trait_def_id,
                             param.bounds,
                             &assoc,
                             ty,
@@ -853,7 +853,7 @@ fn foo(&self) -> Self::T { String::new() }
     fn constrain_generic_bound_associated_type_structured_suggestion(
         self,
         db: &mut DiagnosticBuilder<'_>,
-        trait_ref: &ty::TraitRef<'tcx>,
+        trait_def_id: DefId,
         bounds: hir::GenericBounds<'_>,
         assoc: &ty::AssocItem,
         ty: Ty<'tcx>,
@@ -863,7 +863,7 @@ fn foo(&self) -> Self::T { String::new() }
         bounds.iter().any(|bound| match bound {
             hir::GenericBound::Trait(ptr, hir::TraitBoundModifier::None) => {
                 // Relate the type param against `T` in `<A as T>::Foo`.
-                ptr.trait_ref.trait_def_id() == Some(trait_ref.def_id)
+                ptr.trait_ref.trait_def_id() == Some(trait_def_id)
                     && self.constrain_associated_type_structured_suggestion(
                         db, ptr.span, assoc, ty, msg,
                     )

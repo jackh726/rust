@@ -1,3 +1,5 @@
+// check-pass
+
 #![feature(generic_associated_types)]
   //~^ WARNING: the feature `generic_associated_types` is incomplete
 
@@ -14,7 +16,6 @@ impl <T> Fun for T {
 fn bug<'a, T: ?Sized + Fun<F<'a> = [u8]>>(_ : Box<T>) -> &'static T::F<'a> {
     let a = [0; 1];
     let _x = T::identity(&a);
-      //~^ ERROR: `a` does not live long enough
     todo!()
 }
 
