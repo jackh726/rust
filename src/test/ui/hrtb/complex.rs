@@ -9,10 +9,10 @@ trait C<'c>: for<'a> A<'a> + for<'b> B<'b> {
 struct D<T> where T: for<'c> C<'c, As=&'c ()> {
     t: std::marker::PhantomData<T>,
 }
-trait E<'e> {
+trait E<'e, 'g> {
     type As;
 }
-trait F<'f>: for<'a> A<'a> + for<'e> E<'e> {}
+trait F<'f>: for<'a> A<'a> + for<'e> E<'e, 'f> {}
 struct G<T> where T: for<'f> F<'f, As=&'f ()> {
     t: std::marker::PhantomData<T>,
 }

@@ -2387,7 +2387,10 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 Scope::Root => bug!("In fn_like_elision without appropriate scope above"),
             }
         };
-        let arg_scope = Scope::Elision { elide: Elide::FreshLateAnon(hir_id, named_late_bound_vars, Cell::new(0)), s: self.scope };
+        let arg_scope = Scope::Elision {
+            elide: Elide::FreshLateAnon(hir_id, named_late_bound_vars, Cell::new(0)),
+            s: self.scope,
+        };
         self.with(arg_scope, |_, this| {
             for input in inputs {
                 this.visit_ty(input);

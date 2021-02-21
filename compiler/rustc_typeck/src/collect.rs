@@ -1100,7 +1100,14 @@ fn super_predicates_that_define_assoc_type(
                 assoc_name,
             )
         } else {
-            AstConv::compute_bounds(&icx, self_param_ty, &bounds, SizedByDefault::No, item.span, ty::List::empty())
+            AstConv::compute_bounds(
+                &icx,
+                self_param_ty,
+                &bounds,
+                SizedByDefault::No,
+                item.span,
+                ty::List::empty(),
+            )
         };
 
         let superbounds1 = superbounds1.predicates(tcx, self_param_ty);
