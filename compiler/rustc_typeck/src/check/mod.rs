@@ -528,7 +528,9 @@ fn typeck_with_fallback<'tcx>(
             let fcx = FnCtxt::new(&inh, param_env, body.value.hir_id);
             let expected_type = body_ty
                 .and_then(|ty| match ty.kind {
-                    hir::TyKind::Infer => Some(AstConv::ast_ty_to_ty(&fcx, ty)),
+                    hir::TyKind::Infer => {
+                        Some(AstConv::ast_ty_to_ty_inner(&fcx, ty, false, ty::List::empty()))
+                    }
                     _ => None,
                 })
                 .unwrap_or_else(|| match tcx.hir().get(id) {

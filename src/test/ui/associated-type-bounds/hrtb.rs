@@ -58,7 +58,7 @@ struct X<'x, 'y> {
 
 fn foo5<T>()
 where
-    T: for<'l, 'i> H<'l, 'i, As: for<'j> H<'j, 'i, As: for<'k> H<'l, 'k, As = X<'j, 'k>> + 'j> + 'i>
+    T: for<'l, 'i> H<'l, 'i, As: for<'j> H<'j, 'i, As: for<'k> H<'j, 'k, As = X<'j, 'k>> + 'j> + 'i>
 {
 }
 

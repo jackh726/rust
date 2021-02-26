@@ -310,7 +310,7 @@ impl ItemCtxt<'tcx> {
     }
 
     pub fn to_ty(&self, ast_ty: &hir::Ty<'_>) -> Ty<'tcx> {
-        AstConv::ast_ty_to_ty(self, ast_ty)
+        AstConv::ast_ty_to_ty_inner(self, ast_ty, false, ty::List::empty())
     }
 
     pub fn hir_id(&self) -> hir::HirId {
@@ -389,6 +389,7 @@ impl AstConv<'tcx> for ItemCtxt<'tcx> {
                 item_def_id,
                 item_segment,
                 trait_ref.substs,
+                ty::List::empty(),
             );
             self.tcx().mk_projection(item_def_id, item_substs)
         } else {
@@ -2099,10 +2100,12 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                             let mut bounds = Bounds::default();
                             let _ = AstConv::instantiate_poly_trait_ref(
                                 &icx,
-                                &poly_trait_ref,
+                                &poly_trait_ref.trait_ref,
+                                poly_trait_ref.span,
                                 constness,
                                 ty,
                                 &mut bounds,
+                                false,
                                 ty::List::empty(),
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
@@ -2352,10 +2355,12 @@ fn predicates_from_bound<'tcx>(
 
             let mut bounds = Bounds::default();
             let _ = astconv.instantiate_poly_trait_ref(
-                tr,
+                &tr.trait_ref,
+                tr.span,
                 constness,
                 param_ty,
                 &mut bounds,
+                false,
                 ty::List::empty(),
             );
             bounds.predicates(astconv.tcx(), param_ty)

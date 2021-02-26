@@ -60,7 +60,7 @@ pub(super) fn opt_const_param_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> Option<
                     .unwrap();
                 let item_did = tcx.hir().local_def_id(item_hir_id).to_def_id();
                 let item_ctxt = &ItemCtxt::new(tcx, item_did) as &dyn crate::astconv::AstConv<'_>;
-                let ty = item_ctxt.ast_ty_to_ty(hir_ty);
+                let ty = item_ctxt.ast_ty_to_ty_inner(hir_ty, false, ty::List::empty());
 
                 // Iterate through the generics of the projection to find the one that corresponds to
                 // the def_id that this query was called with. We filter to only const args here as a

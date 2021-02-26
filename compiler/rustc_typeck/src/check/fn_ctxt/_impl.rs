@@ -457,7 +457,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     pub fn to_ty(&self, ast_t: &hir::Ty<'_>) -> Ty<'tcx> {
-        let t = AstConv::ast_ty_to_ty(self, ast_t);
+        let t = AstConv::ast_ty_to_ty_inner(self, ast_t, false, ty::List::empty());
         self.register_wf_obligation(t.into(), ast_t.span, traits::MiscObligation);
         t
     }
@@ -1401,7 +1401,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 &[][..],
                 has_self,
                 self_ty,
-                arg_count,
+                &arg_count,
                 &mut CreateCtorSubstsContext {
                     fcx: self,
                     span,

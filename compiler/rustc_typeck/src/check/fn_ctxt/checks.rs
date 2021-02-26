@@ -866,7 +866,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         match *qpath {
             QPath::Resolved(ref maybe_qself, ref path) => {
                 let self_ty = maybe_qself.as_ref().map(|qself| self.to_ty(qself));
-                let ty = AstConv::res_to_ty(self, self_ty, path, true);
+                let ty = AstConv::res_to_ty(self, self_ty, path, true, ty::List::empty());
                 (path.res, ty)
             }
             QPath::TypeRelative(ref qself, ref segment) => {
@@ -991,7 +991,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                         // would trigger in `is_send::<T::AssocType>();`
                                         // from `typeck-default-trait-impl-assoc-type.rs`.
                                     } else {
-                                        let ty = AstConv::ast_ty_to_ty(self, hir_ty);
+                                        let ty = AstConv::ast_ty_to_ty_inner(
+                                            self,
+                                            hir_ty,
+                                            false,
+                                            ty::List::empty(),
+                                        );
                                         let ty = self.resolve_vars_if_possible(ty);
                                         if ty == predicate.self_ty() {
                                             error.obligation.cause.make_mut().span = hir_ty.span;
