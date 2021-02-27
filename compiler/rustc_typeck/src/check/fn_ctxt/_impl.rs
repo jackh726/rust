@@ -457,7 +457,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     pub fn to_ty(&self, ast_t: &hir::Ty<'_>) -> Ty<'tcx> {
-        let t = AstConv::ast_ty_to_ty_inner(self, ast_t, false, ty::List::empty());
+        let t = AstConv::ast_ty_to_ty(self, ast_t);
         self.register_wf_obligation(t.into(), ast_t.span, traits::MiscObligation);
         t
     }

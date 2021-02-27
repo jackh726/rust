@@ -560,10 +560,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         // First, convert the types that the user supplied (if any).
         let supplied_arguments =
-            decl.inputs.iter().map(|a| astconv.ast_ty_to_ty_inner(a, false, bound_vars));
+            decl.inputs.iter().map(|a| astconv.ast_ty_to_ty_inner(a, false, Some(bound_vars)));
         let supplied_return = match decl.output {
             hir::FnRetTy::Return(ref output) => {
-                astconv.ast_ty_to_ty_inner(&output, false, bound_vars)
+                astconv.ast_ty_to_ty_inner(&output, false, Some(bound_vars))
             }
             hir::FnRetTy::DefaultReturn(_) => match body.generator_kind {
                 // In the case of the async block that we create for a function body,
@@ -717,12 +717,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         let supplied_arguments = decl.inputs.iter().map(|a| {
             // Convert the types that the user supplied (if any), but ignore them.
-            astconv.ast_ty_to_ty_inner(a, false, ty::List::empty());
+            astconv.ast_ty_to_ty(a);
             self.tcx.ty_error()
         });
 
         if let hir::FnRetTy::Return(ref output) = decl.output {
-            astconv.ast_ty_to_ty_inner(&output, false, ty::List::empty());
+            astconv.ast_ty_to_ty(&output);
         }
 
         let result = ty::Binder::dummy(self.tcx.mk_fn_sig(

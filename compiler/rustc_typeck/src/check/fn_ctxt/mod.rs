@@ -278,7 +278,7 @@ impl<'a, 'tcx> AstConv<'tcx> for FnCtxt<'a, 'tcx> {
             item_def_id,
             item_segment,
             trait_ref.substs,
-            ty::List::empty(),
+            Some(ty::List::empty()),
         );
 
         self.tcx().mk_projection(item_def_id, item_substs)

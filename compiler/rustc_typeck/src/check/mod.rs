@@ -504,6 +504,7 @@ fn typeck_with_fallback<'tcx>(
                     &hir::Generics::empty(),
                     None,
                     None,
+                    None,
                 )
             } else {
                 tcx.fn_sig(def_id)
@@ -529,7 +530,7 @@ fn typeck_with_fallback<'tcx>(
             let expected_type = body_ty
                 .and_then(|ty| match ty.kind {
                     hir::TyKind::Infer => {
-                        Some(AstConv::ast_ty_to_ty_inner(&fcx, ty, false, ty::List::empty()))
+                        Some(AstConv::ast_ty_to_ty(&fcx, ty))
                     }
                     _ => None,
                 })
