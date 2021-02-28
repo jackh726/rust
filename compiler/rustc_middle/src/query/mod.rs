@@ -1235,7 +1235,12 @@ rustc_queries! {
     }
 
     /// Lifetime resolution. See `middle::resolve_lifetimes`.
-    query resolve_lifetimes(_: CrateNum) -> ResolveLifetimes {
+    query resolve_lifetimes_definition(_: LocalDefId) -> ResolveLifetimes {
+        storage(ArenaCacheSelector<'tcx>)
+        desc { "resolving lifetimes in a definition" }
+    }
+    /// Lifetime resolution. See `middle::resolve_lifetimes`.
+    query resolve_lifetimes(_: LocalDefId) -> ResolveLifetimes {
         storage(ArenaCacheSelector<'tcx>)
         desc { "resolving lifetimes" }
     }
@@ -1248,8 +1253,8 @@ rustc_queries! {
         desc { "testing if a region is late bound" }
     }
     query object_lifetime_defaults_map(_: LocalDefId)
-        -> Option<&'tcx FxHashMap<ItemLocalId, Vec<ObjectLifetimeDefault>>> {
-        desc { "looking up lifetime defaults for a region" }
+        -> Option<Vec<ObjectLifetimeDefault>> {
+        desc { "looking up lifetime defaults for a region on an item" }
     }
 
     query visibility(def_id: DefId) -> ty::Visibility {
