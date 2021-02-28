@@ -59,15 +59,14 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
 
         // Determine whether the sub and sup consist of both anonymous (elided) regions.
         let anon_reg_sup = self.tcx().is_suitable_region(sup)?;
-
         let anon_reg_sub = self.tcx().is_suitable_region(sub)?;
+
         let scope_def_id_sup = anon_reg_sup.def_id;
         let bregion_sup = anon_reg_sup.boundregion;
         let scope_def_id_sub = anon_reg_sub.def_id;
         let bregion_sub = anon_reg_sub.boundregion;
 
         let ty_sup = self.find_anon_type(sup, &bregion_sup)?;
-
         let ty_sub = self.find_anon_type(sub, &bregion_sub)?;
 
         debug!(

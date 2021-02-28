@@ -74,7 +74,7 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
             return None;
         }
 
-        if let Some((_, fndecl)) = self.find_anon_type(anon, &br) {
+        if let Some(fndecl) = self.scope_of_region(anon) {
             if self.is_self_anon(is_first, scope_def_id) {
                 return None;
             }
