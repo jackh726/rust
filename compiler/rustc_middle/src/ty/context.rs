@@ -2633,6 +2633,7 @@ impl<'tcx> TyCtxt<'tcx> {
     }
 
     pub fn named_region(self, id: HirId) -> Option<resolve_lifetime::Region> {
+        debug!(?id, "named_region");
         self.named_region_map(id.owner).and_then(|map| map.get(&id.local_id).cloned())
     }
 
@@ -2641,9 +2642,8 @@ impl<'tcx> TyCtxt<'tcx> {
             .map_or(false, |(owner, set)| owner == id.owner && set.contains(&id.local_id))
     }
 
-    pub fn object_lifetime_defaults(self, id: HirId) -> Option<&'tcx [ObjectLifetimeDefault]> {
+    pub fn object_lifetime_defaults(self, id: HirId) -> Option<Vec<ObjectLifetimeDefault>> {
         self.object_lifetime_defaults_map(id.owner)
-            .and_then(|map| map.get(&id.local_id).map(|v| &**v))
     }
 
     pub fn late_bound_vars(self, id: HirId) -> &'tcx List<ty::BoundVariableKind> {

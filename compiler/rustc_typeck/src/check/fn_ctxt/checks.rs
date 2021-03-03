@@ -991,10 +991,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                         // would trigger in `is_send::<T::AssocType>();`
                                         // from `typeck-default-trait-impl-assoc-type.rs`.
                                     } else {
-                                        let ty = AstConv::ast_ty_to_ty(
-                                            self,
-                                            hir_ty,
-                                        );
+                                        let ty = AstConv::ast_ty_to_ty(self, hir_ty);
                                         let ty = self.resolve_vars_if_possible(ty);
                                         if ty == predicate.self_ty() {
                                             error.obligation.cause.make_mut().span = hir_ty.span;
