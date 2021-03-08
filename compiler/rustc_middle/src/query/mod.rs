@@ -1255,6 +1255,10 @@ rustc_queries! {
     }
 
     /// Lifetime resolution. See `middle::resolve_lifetimes`.
+    query resolve_lifetimes_definition(_: LocalDefId) -> ResolveLifetimes {
+        storage(ArenaCacheSelector<'tcx>)
+        desc { "resolving lifetimes in a definition" }
+    }
     query resolve_lifetimes(_: LocalDefId) -> ResolveLifetimes {
         storage(ArenaCacheSelector<'tcx>)
         desc { "resolving lifetimes" }
