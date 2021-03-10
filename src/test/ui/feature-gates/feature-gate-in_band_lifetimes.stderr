@@ -82,54 +82,6 @@ help: consider introducing lifetime `'b` here
 LL |     fn borrowed_lifetime<'b>(&'b self) -> &'b u8 { &*self.0 }
    |                         ^^^^
 
-error[E0261]: use of undeclared lifetime name `'b`
-  --> $DIR/feature-gate-in_band_lifetimes.rs:43:27
-   |
-LL |     fn any_lifetime() -> &'b u8;
-   |                           ^^ undeclared lifetime
-   |
-   = help: if you want to experiment with in-band lifetime bindings, add `#![feature(in_band_lifetimes)]` to the crate attributes
-help: consider introducing lifetime `'b` here
-   |
-LL | trait MyTrait<'b, 'a> {
-   |               ^^^
-help: consider introducing lifetime `'b` here
-   |
-LL |     fn any_lifetime<'b>() -> &'b u8;
-   |                    ^^^^
-
-error[E0261]: use of undeclared lifetime name `'b`
-  --> $DIR/feature-gate-in_band_lifetimes.rs:45:27
-   |
-LL |     fn borrowed_lifetime(&'b self) -> &'b u8;
-   |                           ^^ undeclared lifetime
-   |
-   = help: if you want to experiment with in-band lifetime bindings, add `#![feature(in_band_lifetimes)]` to the crate attributes
-help: consider introducing lifetime `'b` here
-   |
-LL | trait MyTrait<'b, 'a> {
-   |               ^^^
-help: consider introducing lifetime `'b` here
-   |
-LL |     fn borrowed_lifetime<'b>(&'b self) -> &'b u8;
-   |                         ^^^^
-
-error[E0261]: use of undeclared lifetime name `'b`
-  --> $DIR/feature-gate-in_band_lifetimes.rs:45:40
-   |
-LL |     fn borrowed_lifetime(&'b self) -> &'b u8;
-   |                                        ^^ undeclared lifetime
-   |
-   = help: if you want to experiment with in-band lifetime bindings, add `#![feature(in_band_lifetimes)]` to the crate attributes
-help: consider introducing lifetime `'b` here
-   |
-LL | trait MyTrait<'b, 'a> {
-   |               ^^^
-help: consider introducing lifetime `'b` here
-   |
-LL |     fn borrowed_lifetime<'b>(&'b self) -> &'b u8;
-   |                         ^^^^
-
 error[E0261]: use of undeclared lifetime name `'x`
   --> $DIR/feature-gate-in_band_lifetimes.rs:3:12
    |
@@ -225,6 +177,54 @@ help: consider introducing lifetime `'a` here
    |
 LL |     fn inner<'a>(&self) -> &'a u8 {
    |             ^^^^
+
+error[E0261]: use of undeclared lifetime name `'b`
+  --> $DIR/feature-gate-in_band_lifetimes.rs:43:27
+   |
+LL |     fn any_lifetime() -> &'b u8;
+   |                           ^^ undeclared lifetime
+   |
+   = help: if you want to experiment with in-band lifetime bindings, add `#![feature(in_band_lifetimes)]` to the crate attributes
+help: consider introducing lifetime `'b` here
+   |
+LL | trait MyTrait<'b, 'a> {
+   |               ^^^
+help: consider introducing lifetime `'b` here
+   |
+LL |     fn any_lifetime<'b>() -> &'b u8;
+   |                    ^^^^
+
+error[E0261]: use of undeclared lifetime name `'b`
+  --> $DIR/feature-gate-in_band_lifetimes.rs:45:27
+   |
+LL |     fn borrowed_lifetime(&'b self) -> &'b u8;
+   |                           ^^ undeclared lifetime
+   |
+   = help: if you want to experiment with in-band lifetime bindings, add `#![feature(in_band_lifetimes)]` to the crate attributes
+help: consider introducing lifetime `'b` here
+   |
+LL | trait MyTrait<'b, 'a> {
+   |               ^^^
+help: consider introducing lifetime `'b` here
+   |
+LL |     fn borrowed_lifetime<'b>(&'b self) -> &'b u8;
+   |                         ^^^^
+
+error[E0261]: use of undeclared lifetime name `'b`
+  --> $DIR/feature-gate-in_band_lifetimes.rs:45:40
+   |
+LL |     fn borrowed_lifetime(&'b self) -> &'b u8;
+   |                                        ^^ undeclared lifetime
+   |
+   = help: if you want to experiment with in-band lifetime bindings, add `#![feature(in_band_lifetimes)]` to the crate attributes
+help: consider introducing lifetime `'b` here
+   |
+LL | trait MyTrait<'b, 'a> {
+   |               ^^^
+help: consider introducing lifetime `'b` here
+   |
+LL |     fn borrowed_lifetime<'b>(&'b self) -> &'b u8;
+   |                         ^^^^
 
 error: aborting due to 17 previous errors
 

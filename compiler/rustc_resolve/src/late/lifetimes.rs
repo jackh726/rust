@@ -374,7 +374,7 @@ enum Elide {
     /// Use a fresh anonymous late-bound lifetime each time, by
     /// incrementing the counter to generate sequential indices. All
     /// anonymous lifetimes must start *after* named bound vars.
-    FreshLateAnon(hir::HirId, usize, RefCell<Vec<ty::BoundVariableKind>>),
+    FreshLateAnon(usize, RefCell<Vec<ty::BoundVariableKind>>),
     /// Always use this one lifetime.
     Exact(Region),
     /// Less or more than one lifetime were found, error on unspecified.
@@ -479,11 +479,15 @@ fn do_resolve(
 }
 
 fn resolve_lifetimes_for<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> &'tcx ResolveLifetimes {
-    let item = item_for(tcx, def_id);
-    if item == def_id {
-        tcx.resolve_lifetimes_definition(item)
+    let item_id = item_for(tcx, def_id);
+    if item_id == def_id {
+        let item = tcx.hir().item(hir::ItemId { def_id: item_id });
+        match item.kind {
+            hir::ItemKind::Trait(..) => tcx.resolve_lifetimes_definition(item_id),
+            _ => tcx.resolve_lifetimes(item_id),
+        }
     } else {
-        tcx.resolve_lifetimes(item)
+        tcx.resolve_lifetimes(item_id)
     }
 }
 
@@ -2660,11 +2664,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
         };
         let arg_scope = Scope::Elision {
-            elide: Elide::FreshLateAnon(
-                hir_id,
-                named_late_bound_vars as usize,
-                RefCell::new(vec![]),
-            ),
+            elide: Elide::FreshLateAnon(named_late_bound_vars as usize, RefCell::new(vec![])),
             s: self.scope,
         };
         self.with(&arg_scope, |_, this| {
@@ -2673,12 +2673,8 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
         });
 
-        let elide = match arg_scope {
-            Scope::Elision { elide, .. } => elide,
-            _ => bug!(),
-        };
-        let cell = match elide {
-            Elide::FreshLateAnon(_, _, cell) => cell,
+        let cell = match arg_scope {
+            Scope::Elision { elide: Elide::FreshLateAnon(_, cell), .. } => cell,
             _ => bug!(),
         };
         let anon_vars = cell.into_inner();
@@ -2980,7 +2976,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 
                 Scope::Elision { ref elide, ref s, .. } => {
                     let lifetime = match *elide {
-                        Elide::FreshLateAnon(_hir_id, named_late_bound_vars, ref counter) => {
+                        Elide::FreshLateAnon(named_late_bound_vars, ref counter) => {
                             for lifetime_ref in lifetime_refs {
                                 let lifetime = Region::late_anon(named_late_bound_vars, counter)
                                     .shifted(late_depth);
