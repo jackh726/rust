@@ -204,18 +204,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         lifetime: &hir::Lifetime,
         def: Option<&ty::GenericParamDef>,
     ) -> ty::Region<'tcx> {
-        self.shifted_ast_region_to_region(lifetime, def, None)
-    }
-
-    /// If `bound_vars_in_scope` is some list of bound vars, then late-bound
-    /// regions must be in that list and will be used as the index at debruijn 0.
-    #[tracing::instrument(level = "debug", skip(self))]
-    pub fn shifted_ast_region_to_region(
-        &self,
-        lifetime: &hir::Lifetime,
-        def: Option<&ty::GenericParamDef>,
-        bound_vars_in_scope: Option<&'tcx ty::List<ty::BoundVariableKind>>,
-    ) -> ty::Region<'tcx> {
         let tcx = self.tcx();
         let lifetime_name = |def_id| tcx.hir().name(tcx.hir().local_def_id_to_hir_id(def_id));
 
@@ -224,75 +212,19 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
             Some(rl::Region::LateBound(debruijn, index, def_id, _)) => {
                 let name = lifetime_name(def_id.expect_local());
-                if let Some(bound_vars) = bound_vars_in_scope {
-                    let index = bound_vars
-                        .iter()
-                        .position(|k| match k {
-                            ty::BoundVariableKind::Region(r) => match r {
-                                ty::BoundRegionKind::BrAnon(_) => false,
-                                ty::BoundRegionKind::BrNamed(bound_def_id, _) => {
-                                    def_id == bound_def_id
-                                }
-                                ty::BoundRegionKind::BrEnv => false,
-                            },
-                            _ => false,
-                        })
-                        .unwrap_or_else(|| {
-                            bug!(
-                                "Not found {:?} in {:?} when lowering {:?}",
-                                def_id,
-                                bound_vars_in_scope,
-                                lifetime
-                            )
-                        });
-                    let br = ty::BoundRegion {
-                        var: ty::BoundVar::from_usize(index),
-                        kind: ty::BrNamed(def_id, name),
-                    };
-                    tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
-                } else {
-                    let br = ty::BoundRegion {
-                        var: ty::BoundVar::from_u32(index),
-                        kind: ty::BrNamed(def_id, name),
-                    };
-                    tcx.mk_region(ty::ReLateBound(debruijn, br))
-                }
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(index),
+                    kind: ty::BrNamed(def_id, name),
+                };
+                tcx.mk_region(ty::ReLateBound(debruijn, br))
             }
 
             Some(rl::Region::LateBoundAnon(debruijn, index, anon_index)) => {
-                if let Some(bound_vars) = bound_vars_in_scope {
-                    // FIXME: I'm not sure this is 100% correct. This assumes that there can only be one
-                    // elided lifetime per anon index in a "type".
-                    let index = bound_vars
-                        .iter()
-                        .position(|k| match k {
-                            ty::BoundVariableKind::Region(r) => match r {
-                                ty::BoundRegionKind::BrAnon(i) => i == anon_index,
-                                ty::BoundRegionKind::BrNamed(_, _) => false,
-                                ty::BoundRegionKind::BrEnv => false,
-                            },
-                            _ => false,
-                        })
-                        .unwrap_or_else(|| {
-                            bug!(
-                                "Not found {:?} in {:?} when lowering {:?}",
-                                anon_index,
-                                bound_vars_in_scope,
-                                lifetime
-                            )
-                        });
-                    let br = ty::BoundRegion {
-                        var: ty::BoundVar::from_usize(index),
-                        kind: ty::BrAnon(anon_index),
-                    };
-                    tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
-                } else {
-                    let br = ty::BoundRegion {
-                        var: ty::BoundVar::from_u32(index),
-                        kind: ty::BrAnon(anon_index),
-                    };
-                    tcx.mk_region(ty::ReLateBound(debruijn, br))
-                }
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_u32(index),
+                    kind: ty::BrAnon(anon_index),
+                };
+                tcx.mk_region(ty::ReLateBound(debruijn, br))
             }
 
             Some(rl::Region::EarlyBound(index, id, _)) => {
@@ -339,7 +271,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         span: Span,
         def_id: DefId,
         item_segment: &hir::PathSegment<'_>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> SubstsRef<'tcx> {
         let (substs, _) = self.create_substs_for_ast_path(
             span,
@@ -349,10 +280,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             item_segment.args(),
             item_segment.infer_args,
             None,
-            bound_vars,
         );
-        let assoc_bindings =
-            self.create_assoc_bindings_for_generic_args(item_segment.args(), bound_vars);
+        let assoc_bindings = self.create_assoc_bindings_for_generic_args(item_segment.args());
 
         if let Some(b) = assoc_bindings.first() {
             Self::prohibit_assoc_ty_binding(self.tcx(), b.span);
@@ -402,7 +331,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         generic_args: &'a hir::GenericArgs<'_>,
         infer_args: bool,
         self_ty: Option<Ty<'tcx>>,
-        outer_bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> (SubstsRef<'tcx>, GenericArgCountResult) {
         // If the type is parameterized by this region, then replace this
         // region with the current anon region binding (in other words,
@@ -456,7 +384,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             inferred_params: Vec<Span>,
             infer_args: bool,
             is_object: bool,
-            outer_bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
         }
 
         impl<'tcx, 'a> SubstsForAstPathCtxt<'tcx, 'a> {
@@ -495,10 +422,9 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             ) -> subst::GenericArg<'tcx> {
                 let tcx = self.astconv.tcx();
                 match (&param.kind, arg) {
-                    (GenericParamDefKind::Lifetime, GenericArg::Lifetime(lt)) => self
-                        .astconv
-                        .shifted_ast_region_to_region(&lt, Some(param), self.outer_bound_vars)
-                        .into(),
+                    (GenericParamDefKind::Lifetime, GenericArg::Lifetime(lt)) => {
+                        self.astconv.ast_region_to_region(&lt, Some(param)).into()
+                    }
                     (&GenericParamDefKind::Type { has_default, .. }, GenericArg::Type(ty)) => {
                         if has_default {
                             tcx.check_optional_stability(
@@ -520,9 +446,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                             self.inferred_params.push(ty.span);
                             tcx.ty_error().into()
                         } else {
-                            self.astconv
-                                .ast_ty_to_ty_inner(&ty, false, self.outer_bound_vars)
-                                .into()
+                            self.astconv.ast_ty_to_ty_inner(&ty, false).into()
                         }
                     }
                     (GenericParamDefKind::Const, GenericArg::Const(ct)) => {
@@ -610,7 +534,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             inferred_params: vec![],
             infer_args,
             is_object,
-            outer_bound_vars,
         };
         let substs = Self::create_substs_for_generic_args(
             tcx,
@@ -640,7 +563,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     fn create_assoc_bindings_for_generic_args<'a>(
         &self,
         generic_args: &'a hir::GenericArgs<'_>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> Vec<ConvertedBinding<'a, 'tcx>> {
         // Convert associated-type bindings or constraints into a separate vector.
         // Example: Given this:
@@ -656,9 +578,9 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             .iter()
             .map(|binding| {
                 let kind = match binding.kind {
-                    hir::TypeBindingKind::Equality { ref ty } => ConvertedBindingKind::Equality(
-                        self.ast_ty_to_ty_inner(ty, false, bound_vars),
-                    ),
+                    hir::TypeBindingKind::Equality { ref ty } => {
+                        ConvertedBindingKind::Equality(self.ast_ty_to_ty_inner(ty, false))
+                    }
                     hir::TypeBindingKind::Constraint { ref bounds } => {
                         ConvertedBindingKind::Constraint(bounds)
                     }
@@ -682,7 +604,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         item_def_id: DefId,
         item_segment: &hir::PathSegment<'_>,
         parent_substs: SubstsRef<'tcx>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> SubstsRef<'tcx> {
         if tcx.generics_of(item_def_id).params.is_empty() {
             self.prohibit_generics(slice::from_ref(item_segment));
@@ -697,7 +618,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 item_segment.args(),
                 item_segment.infer_args,
                 None,
-                bound_vars,
             )
             .0
         }
@@ -721,7 +641,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             trait_ref.trait_def_id().unwrap_or_else(|| FatalError.raise()),
             self_ty,
             trait_ref.path.segments.last().unwrap(),
-            Some(ty::List::empty()),
         )
     }
 
@@ -753,17 +672,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         self_ty: Ty<'tcx>,
         bounds: &mut Bounds<'tcx>,
         speculative: bool,
-        outer_bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> GenericArgCountResult {
         let trait_def_id = trait_ref.trait_def_id().unwrap_or_else(|| FatalError.raise());
 
         self.prohibit_generics(trait_ref.path.segments.split_last().unwrap().1);
 
         let tcx = self.tcx();
-        let local_bound_vars = tcx.late_bound_vars(trait_ref.hir_ref_id);
-        let bound_vars = outer_bound_vars.map(|outer_bound_vars| {
-            tcx.mk_bound_variable_kinds(outer_bound_vars.iter().chain(local_bound_vars))
-        });
+        let bound_vars = tcx.late_bound_vars(trait_ref.hir_ref_id);
         debug!(?bound_vars);
 
         let (substs, arg_count) = self.create_substs_for_ast_trait_ref(
@@ -771,17 +686,12 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             trait_def_id,
             self_ty,
             trait_ref.path.segments.last().unwrap(),
-            bound_vars,
         );
-        let assoc_bindings = self.create_assoc_bindings_for_generic_args(
-            trait_ref.path.segments.last().unwrap().args(),
-            bound_vars,
-        );
+        let assoc_bindings = self
+            .create_assoc_bindings_for_generic_args(trait_ref.path.segments.last().unwrap().args());
 
-        let poly_trait_ref = ty::Binder::bind_with_vars(
-            ty::TraitRef::new(trait_def_id, substs),
-            bound_vars.unwrap_or(local_bound_vars),
-        );
+        let poly_trait_ref =
+            ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
 
         debug!(?poly_trait_ref, ?assoc_bindings);
         bounds.trait_bounds.push((poly_trait_ref, span, constness));
@@ -797,7 +707,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 speculative,
                 &mut dup_bindings,
                 binding.span,
-                outer_bound_vars.is_some(),
             );
             // Okay to ignore `Err` because of `ErrorReported` (see above).
         }
@@ -813,7 +722,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         args: &GenericArgs<'_>,
         self_ty: Ty<'tcx>,
         bounds: &mut Bounds<'tcx>,
-        outer_bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) {
         let trait_def_id = self.tcx().require_lang_item(lang_item, Some(span));
 
@@ -825,19 +733,12 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             args,
             false,
             Some(self_ty),
-            Some(ty::List::empty()),
         );
-        let assoc_bindings =
-            self.create_assoc_bindings_for_generic_args(args, Some(ty::List::empty()));
+        let assoc_bindings = self.create_assoc_bindings_for_generic_args(args);
         let tcx = self.tcx();
-        let local_bound_vars = tcx.late_bound_vars(hir_id);
-        let bound_vars = outer_bound_vars.map(|outer_bound_vars| {
-            tcx.mk_bound_variable_kinds(outer_bound_vars.iter().chain(local_bound_vars))
-        });
-        let poly_trait_ref = ty::Binder::bind_with_vars(
-            ty::TraitRef::new(trait_def_id, substs),
-            bound_vars.unwrap_or(local_bound_vars),
-        );
+        let bound_vars = tcx.late_bound_vars(hir_id);
+        let poly_trait_ref =
+            ty::Binder::bind_with_vars(ty::TraitRef::new(trait_def_id, substs), bound_vars);
         bounds.trait_bounds.push((poly_trait_ref, span, Constness::NotConst));
 
         let mut dup_bindings = FxHashMap::default();
@@ -850,7 +751,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 false,
                 &mut dup_bindings,
                 span,
-                outer_bound_vars.is_some(),
             );
         }
     }
@@ -861,17 +761,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         trait_def_id: DefId,
         self_ty: Ty<'tcx>,
         trait_segment: &hir::PathSegment<'_>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> ty::TraitRef<'tcx> {
-        let (substs, _) = self.create_substs_for_ast_trait_ref(
-            span,
-            trait_def_id,
-            self_ty,
-            trait_segment,
-            bound_vars,
-        );
-        let assoc_bindings =
-            self.create_assoc_bindings_for_generic_args(trait_segment.args(), bound_vars);
+        let (substs, _) =
+            self.create_substs_for_ast_trait_ref(span, trait_def_id, self_ty, trait_segment);
+        let assoc_bindings = self.create_assoc_bindings_for_generic_args(trait_segment.args());
         if let Some(b) = assoc_bindings.first() {
             Self::prohibit_assoc_ty_binding(self.tcx(), b.span);
         }
@@ -885,7 +778,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         trait_def_id: DefId,
         self_ty: Ty<'tcx>,
         trait_segment: &'a hir::PathSegment<'a>,
-        outer_bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> (SubstsRef<'tcx>, GenericArgCountResult) {
         self.complain_about_internal_fn_trait(span, trait_def_id, trait_segment);
 
@@ -897,7 +789,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             trait_segment.args(),
             trait_segment.infer_args,
             Some(self_ty),
-            outer_bound_vars,
         )
     }
 
@@ -983,7 +874,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         param_ty,
                         bounds,
                         false,
-                        Some(bound_vars),
                     );
                 }
                 hir::GenericBound::Trait(ref b, hir::TraitBoundModifier::MaybeConst) => {
@@ -994,25 +884,15 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         param_ty,
                         bounds,
                         false,
-                        Some(bound_vars),
                     );
                 }
                 hir::GenericBound::Trait(_, hir::TraitBoundModifier::Maybe) => {}
                 hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => self
                     .instantiate_lang_item_trait_ref(
-                        lang_item,
-                        span,
-                        hir_id,
-                        args,
-                        param_ty,
-                        bounds,
-                        Some(bound_vars),
+                        lang_item, span, hir_id, args, param_ty, bounds,
                     ),
                 hir::GenericBound::Outlives(ref l) => bounds.region_bounds.push((
-                    ty::Binder::bind_with_vars(
-                        self.shifted_ast_region_to_region(l, None, Some(bound_vars)),
-                        bound_vars,
-                    ),
+                    ty::Binder::bind_with_vars(self.ast_region_to_region(l, None), bound_vars),
                     l.span,
                 )),
             }
@@ -1112,7 +992,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         speculative: bool,
         dup_bindings: &mut FxHashMap<DefId, Span>,
         path_span: Span,
-        propagate_bound_vars: bool,
     ) -> Result<(), ErrorReported> {
         // Given something like `U: SomeTrait<T = X>`, we want to produce a
         // predicate like `<U as SomeTrait>::T = X`. This is somewhat
@@ -1205,7 +1084,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 assoc_ty.def_id,
                 &item_segment,
                 trait_ref.substs,
-                propagate_bound_vars.then(|| candidate.bound_vars()),
             );
 
             debug!(
@@ -1292,9 +1170,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         span: Span,
         did: DefId,
         item_segment: &hir::PathSegment<'_>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> Ty<'tcx> {
-        let substs = self.ast_path_substs_for_ty(span, did, item_segment, bound_vars);
+        let substs = self.ast_path_substs_for_ty(span, did, item_segment);
         self.normalize_ty(span, self.tcx().at(span).type_of(did).subst(self.tcx(), substs))
     }
 
@@ -1304,7 +1181,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         trait_bounds: &[hir::PolyTraitRef<'_>],
         lifetime: &hir::Lifetime,
         borrowed: bool,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> Ty<'tcx> {
         let tcx = self.tcx();
 
@@ -1323,7 +1199,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 dummy_self,
                 &mut bounds,
                 false,
-                bound_vars,
             ) {
                 potential_assoc_types.extend(cur_potential_assoc_types);
             }
@@ -1520,11 +1395,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         // Use explicitly-specified region bound.
         let region_bound = if !lifetime.is_elided() {
-            self.shifted_ast_region_to_region(lifetime, None, bound_vars)
+            self.ast_region_to_region(lifetime, None)
         } else {
             self.compute_object_lifetime_bound(span, existential_predicates).unwrap_or_else(|| {
                 if tcx.named_region(lifetime.hir_id).is_some() {
-                    self.shifted_ast_region_to_region(lifetime, None, bound_vars)
+                    self.ast_region_to_region(lifetime, None)
                 } else {
                     self.re_infer(None, span).unwrap_or_else(|| {
                         let mut err = struct_span_err!(
@@ -1932,7 +1807,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         item_def_id: DefId,
         trait_segment: &hir::PathSegment<'_>,
         item_segment: &hir::PathSegment<'_>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> Ty<'tcx> {
         let tcx = self.tcx();
 
@@ -1979,8 +1853,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         debug!("qpath_to_ty: self_type={:?}", self_ty);
 
-        let trait_ref =
-            self.ast_path_to_mono_trait_ref(span, trait_def_id, self_ty, trait_segment, bound_vars);
+        let trait_ref = self.ast_path_to_mono_trait_ref(span, trait_def_id, self_ty, trait_segment);
 
         let item_substs = self.create_substs_for_associated_item(
             tcx,
@@ -1988,7 +1861,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             item_def_id,
             item_segment,
             trait_ref.substs,
-            bound_vars,
         );
 
         debug!("qpath_to_ty: trait_ref={:?}", trait_ref);
@@ -2186,7 +2058,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         opt_self_ty: Option<Ty<'tcx>>,
         path: &hir::Path<'_>,
         permit_variants: bool,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> Ty<'tcx> {
         let tcx = self.tcx();
 
@@ -2202,7 +2073,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 assert!(ty::is_impl_trait_defn(tcx, did).is_none());
                 let item_segment = path.segments.split_last().unwrap();
                 self.prohibit_generics(item_segment.1);
-                let substs = self.ast_path_substs_for_ty(span, did, item_segment.0, bound_vars);
+                let substs = self.ast_path_substs_for_ty(span, did, item_segment.0);
                 self.normalize_ty(span, tcx.mk_opaque(did, substs))
             }
             Res::Def(
@@ -2215,7 +2086,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             ) => {
                 assert_eq!(opt_self_ty, None);
                 self.prohibit_generics(path.segments.split_last().unwrap().1);
-                self.ast_path_to_ty(span, did, path.segments.last().unwrap(), bound_vars)
+                self.ast_path_to_ty(span, did, path.segments.last().unwrap())
             }
             Res::Def(kind @ DefKind::Variant, def_id) if permit_variants => {
                 // Convert "variant type" as if it were a real type.
@@ -2233,7 +2104,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 ));
 
                 let PathSeg(def_id, index) = path_segs.last().unwrap();
-                self.ast_path_to_ty(span, *def_id, &path.segments[*index], bound_vars)
+                self.ast_path_to_ty(span, *def_id, &path.segments[*index])
             }
             Res::Def(DefKind::TyParam, def_id) => {
                 assert_eq!(opt_self_ty, None);
@@ -2285,7 +2156,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     def_id,
                     &path.segments[path.segments.len() - 2],
                     path.segments.last().unwrap(),
-                    bound_vars,
                 )
             }
             Res::PrimTy(prim_ty) => {
@@ -2309,7 +2179,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     }
 
     pub fn ast_ty_to_ty(&self, ast_ty: &hir::Ty<'_>) -> Ty<'tcx> {
-        self.ast_ty_to_ty_inner(ast_ty, false, None)
+        self.ast_ty_to_ty_inner(ast_ty, false)
     }
 
     /// Parses the programmer's textual representation of a type into our
@@ -2318,31 +2188,24 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     /// Turns a `hir::Ty` into a `Ty`. For diagnostics' purposes we keep track of whether trait
     /// objects are borrowed like `&dyn Trait` to avoid emitting redundant errors.
     #[tracing::instrument(level = "debug", skip(self))]
-    pub fn ast_ty_to_ty_inner(
-        &self,
-        ast_ty: &hir::Ty<'_>,
-        borrowed: bool,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
-    ) -> Ty<'tcx> {
+    pub fn ast_ty_to_ty_inner(&self, ast_ty: &hir::Ty<'_>, borrowed: bool) -> Ty<'tcx> {
         let tcx = self.tcx();
 
         let result_ty = match ast_ty.kind {
-            hir::TyKind::Slice(ref ty) => {
-                tcx.mk_slice(self.ast_ty_to_ty_inner(&ty, false, bound_vars))
-            }
+            hir::TyKind::Slice(ref ty) => tcx.mk_slice(self.ast_ty_to_ty_inner(&ty, false)),
             hir::TyKind::Ptr(ref mt) => tcx.mk_ptr(ty::TypeAndMut {
-                ty: self.ast_ty_to_ty_inner(&mt.ty, false, bound_vars),
+                ty: self.ast_ty_to_ty_inner(&mt.ty, false),
                 mutbl: mt.mutbl,
             }),
             hir::TyKind::Rptr(ref region, ref mt) => {
-                let r = self.shifted_ast_region_to_region(region, None, bound_vars);
+                let r = self.ast_region_to_region(region, None);
                 debug!(?r);
-                let t = self.ast_ty_to_ty_inner(&mt.ty, true, bound_vars);
+                let t = self.ast_ty_to_ty_inner(&mt.ty, true);
                 tcx.mk_ref(r, ty::TypeAndMut { ty: t, mutbl: mt.mutbl })
             }
             hir::TyKind::Never => tcx.types.never,
             hir::TyKind::Tup(ref fields) => {
-                tcx.mk_tup(fields.iter().map(|t| self.ast_ty_to_ty_inner(&t, false, bound_vars)))
+                tcx.mk_tup(fields.iter().map(|t| self.ast_ty_to_ty_inner(&t, false)))
             }
             hir::TyKind::BareFn(ref bf) => {
                 require_c_abi_if_c_variadic(tcx, &bf.decl, bf.abi, ast_ty.span);
@@ -2355,36 +2218,31 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     &hir::Generics::empty(),
                     None,
                     Some(ast_ty),
-                    bound_vars,
                 ))
             }
-            hir::TyKind::TraitObject(ref bounds, ref lifetime) => self
-                .conv_object_ty_poly_trait_ref(ast_ty.span, bounds, lifetime, borrowed, bound_vars),
+            hir::TyKind::TraitObject(ref bounds, ref lifetime) => {
+                self.conv_object_ty_poly_trait_ref(ast_ty.span, bounds, lifetime, borrowed)
+            }
             hir::TyKind::Path(hir::QPath::Resolved(ref maybe_qself, ref path)) => {
                 debug!(?maybe_qself, ?path);
-                let opt_self_ty = maybe_qself
-                    .as_ref()
-                    .map(|qself| self.ast_ty_to_ty_inner(qself, false, bound_vars));
-                self.res_to_ty(opt_self_ty, path, false, bound_vars)
+                let opt_self_ty =
+                    maybe_qself.as_ref().map(|qself| self.ast_ty_to_ty_inner(qself, false));
+                self.res_to_ty(opt_self_ty, path, false)
             }
             hir::TyKind::OpaqueDef(item_id, ref lifetimes) => {
                 let opaque_ty = tcx.hir().item(item_id);
                 let def_id = item_id.def_id.to_def_id();
 
                 match opaque_ty.kind {
-                    hir::ItemKind::OpaqueTy(hir::OpaqueTy { impl_trait_fn, .. }) => self
-                        .impl_trait_ty_to_ty(
-                            def_id,
-                            lifetimes,
-                            impl_trait_fn.is_some(),
-                            bound_vars,
-                        ),
+                    hir::ItemKind::OpaqueTy(hir::OpaqueTy { impl_trait_fn, .. }) => {
+                        self.impl_trait_ty_to_ty(def_id, lifetimes, impl_trait_fn.is_some())
+                    }
                     ref i => bug!("`impl Trait` pointed to non-opaque type?? {:#?}", i),
                 }
             }
             hir::TyKind::Path(hir::QPath::TypeRelative(ref qself, ref segment)) => {
                 debug!(?qself, ?segment);
-                let ty = self.ast_ty_to_ty_inner(qself, false, bound_vars);
+                let ty = self.ast_ty_to_ty_inner(qself, false);
 
                 let res = if let hir::TyKind::Path(hir::QPath::Resolved(_, ref path)) = qself.kind {
                     path.res
@@ -2405,15 +2263,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     &GenericArgs::none(),
                     true,
                     None,
-                    bound_vars,
                 );
                 self.normalize_ty(span, tcx.at(span).type_of(def_id).subst(tcx, substs))
             }
             hir::TyKind::Array(ref ty, ref length) => {
                 let length_def_id = tcx.hir().local_def_id(length.hir_id);
                 let length = ty::Const::from_anon_const(tcx, length_def_id);
-                let array_ty =
-                    tcx.mk_ty(ty::Array(self.ast_ty_to_ty_inner(&ty, false, bound_vars), length));
+                let array_ty = tcx.mk_ty(ty::Array(self.ast_ty_to_ty_inner(&ty, false), length));
                 self.normalize_ty(ast_ty.span, array_ty)
             }
             hir::TyKind::Typeof(ref _e) => {
@@ -2441,7 +2297,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         def_id: DefId,
         lifetimes: &[hir::GenericArg<'_>],
         replace_parent_lifetimes: bool,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> Ty<'tcx> {
         debug!("impl_trait_ty_to_ty(def_id={:?}, lifetimes={:?})", def_id, lifetimes);
         let tcx = self.tcx();
@@ -2455,7 +2310,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 match param.kind {
                     GenericParamDefKind::Lifetime => {
                         if let hir::GenericArg::Lifetime(lifetime) = &lifetimes[i] {
-                            self.shifted_ast_region_to_region(lifetime, None, bound_vars).into()
+                            self.ast_region_to_region(lifetime, None).into()
                         } else {
                             bug!()
                         }
@@ -2486,18 +2341,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ty
     }
 
-    pub fn ty_of_arg(
-        &self,
-        ty: &hir::Ty<'_>,
-        expected_ty: Option<Ty<'tcx>>,
-        bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
-    ) -> Ty<'tcx> {
+    pub fn ty_of_arg(&self, ty: &hir::Ty<'_>, expected_ty: Option<Ty<'tcx>>) -> Ty<'tcx> {
         match ty.kind {
             hir::TyKind::Infer if expected_ty.is_some() => {
                 self.record_ty(ty.hir_id, expected_ty.unwrap(), ty.span);
                 expected_ty.unwrap()
             }
-            _ => self.ast_ty_to_ty_inner(ty, false, bound_vars),
+            _ => self.ast_ty_to_ty_inner(ty, false),
         }
     }
 
@@ -2510,15 +2360,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         generics: &hir::Generics<'_>,
         ident_span: Option<Span>,
         hir_ty: Option<&hir::Ty<'_>>,
-        outer_bound_vars: Option<&'tcx ty::List<ty::BoundVariableKind>>,
     ) -> ty::PolyFnSig<'tcx> {
         debug!("ty_of_fn");
 
         let tcx = self.tcx();
-        let local_bound_vars = tcx.late_bound_vars(hir_id);
-        let bound_vars = outer_bound_vars.map(|outer_bound_vars| {
-            tcx.mk_bound_variable_kinds(outer_bound_vars.iter().chain(local_bound_vars))
-        });
+        let bound_vars = tcx.late_bound_vars(hir_id);
         debug!(?bound_vars);
 
         // We proactively collect all the inferred type params to emit a single error per fn def.
@@ -2528,11 +2374,11 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         }
         walk_generics(&mut visitor, generics);
 
-        let input_tys = decl.inputs.iter().map(|a| self.ty_of_arg(a, None, bound_vars));
+        let input_tys = decl.inputs.iter().map(|a| self.ty_of_arg(a, None));
         let output_ty = match decl.output {
             hir::FnRetTy::Return(ref output) => {
                 visitor.visit_ty(output);
-                self.ast_ty_to_ty_inner(output, false, bound_vars)
+                self.ast_ty_to_ty_inner(output, false)
             }
             hir::FnRetTy::DefaultReturn(..) => tcx.mk_unit(),
         };
@@ -2540,7 +2386,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         debug!("ty_of_fn: output_ty={:?}", output_ty);
 
         let fn_ty = tcx.mk_fn_sig(input_tys, output_ty, decl.c_variadic, unsafety, abi);
-        let bare_fn_ty = ty::Binder::bind_with_vars(fn_ty, bound_vars.unwrap_or(local_bound_vars));
+        let bare_fn_ty = ty::Binder::bind_with_vars(fn_ty, bound_vars);
 
         if !self.allow_ty_infer() {
             // We always collect the spans for placeholder types when evaluating `fn`s, but we

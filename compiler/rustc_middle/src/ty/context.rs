@@ -2653,19 +2653,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 .unwrap_or_else(|| {
                     bug!("No bound vars found for {:?} ({:?})", self.hir().node_to_string(id), id)
                 })
-                .iter()
-                .map(|b| match b {
-                    resolve_lifetime::Region::LateBound(_, _, def_id, _) => {
-                        let name = self
-                            .hir()
-                            .name(self.hir().local_def_id_to_hir_id(def_id.expect_local()));
-                        ty::BoundVariableKind::Region(ty::BrNamed(*def_id, name))
-                    }
-                    resolve_lifetime::Region::LateBoundAnon(_, _, anon_idx) => {
-                        ty::BoundVariableKind::Region(ty::BrAnon(*anon_idx))
-                    }
-                    _ => bug!(),
-                }),
+                .iter(),
         )
     }
 }

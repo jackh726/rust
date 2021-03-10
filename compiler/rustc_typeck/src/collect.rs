@@ -389,7 +389,6 @@ impl AstConv<'tcx> for ItemCtxt<'tcx> {
                 item_def_id,
                 item_segment,
                 trait_ref.substs,
-                Some(ty::List::empty()),
             );
             self.tcx().mk_projection(item_def_id, item_substs)
         } else {
@@ -1695,7 +1694,6 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
                     &generics,
                     Some(ident.span),
                     None,
-                    None,
                 ),
             }
         }
@@ -1713,7 +1711,6 @@ fn fn_sig(tcx: TyCtxt<'_>, def_id: DefId) -> ty::PolyFnSig<'_> {
             decl,
             &generics,
             Some(ident.span),
-            None,
             None,
         ),
 
@@ -2108,7 +2105,6 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                                 ty,
                                 &mut bounds,
                                 false,
-                                Some(ty::List::empty()),
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
@@ -2123,7 +2119,6 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                                 args,
                                 ty,
                                 &mut bounds,
-                                Some(ty::List::empty()),
                             );
                             predicates.extend(bounds.predicates(tcx, ty));
                         }
@@ -2364,7 +2359,6 @@ fn predicates_from_bound<'tcx>(
                 param_ty,
                 &mut bounds,
                 false,
-                Some(ty::List::empty()),
             );
             bounds.predicates(astconv.tcx(), param_ty)
         }
@@ -2377,7 +2371,6 @@ fn predicates_from_bound<'tcx>(
                 args,
                 param_ty,
                 &mut bounds,
-                Some(ty::List::empty()),
             );
             bounds.predicates(astconv.tcx(), param_ty)
         }
@@ -2411,7 +2404,6 @@ fn compute_sig_of_foreign_fn_decl<'tcx>(
         decl,
         &hir::Generics::empty(),
         Some(ident.span),
-        None,
         None,
     );
 

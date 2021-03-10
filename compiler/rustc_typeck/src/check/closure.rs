@@ -559,12 +559,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let bound_vars = self.tcx.late_bound_vars(hir_id);
 
         // First, convert the types that the user supplied (if any).
-        let supplied_arguments =
-            decl.inputs.iter().map(|a| astconv.ast_ty_to_ty_inner(a, false, Some(bound_vars)));
+        let supplied_arguments = decl.inputs.iter().map(|a| astconv.ast_ty_to_ty_inner(a, false));
         let supplied_return = match decl.output {
-            hir::FnRetTy::Return(ref output) => {
-                astconv.ast_ty_to_ty_inner(&output, false, Some(bound_vars))
-            }
+            hir::FnRetTy::Return(ref output) => astconv.ast_ty_to_ty_inner(&output, false),
             hir::FnRetTy::DefaultReturn(_) => match body.generator_kind {
                 // In the case of the async block that we create for a function body,
                 // we expect the return type of the block to match that of the enclosing

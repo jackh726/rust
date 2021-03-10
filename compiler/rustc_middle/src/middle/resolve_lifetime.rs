@@ -84,5 +84,5 @@ pub struct ResolveLifetimes {
     /// (b) it DOES appear in the arguments.
     pub late_bound: FxHashMap<LocalDefId, FxHashSet<ItemLocalId>>,
 
-    pub late_bound_vars: FxHashMap<LocalDefId, FxHashMap<ItemLocalId, Vec<Region>>>,
+    pub late_bound_vars: FxHashMap<LocalDefId, FxHashMap<ItemLocalId, Vec<ty::BoundVariableKind>>>,
 }

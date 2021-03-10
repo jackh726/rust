@@ -12,11 +12,7 @@ pub struct Elaborator<'tcx> {
 
 #[allow(dead_code)]
 pub fn supertraits<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> Elaborator<'tcx> {
-    Elaborator {
-        tcx,
-        stack: smallvec![(def_id, smallvec![])],
-        visited: Default::default(),
-    }
+    Elaborator { tcx, stack: smallvec![(def_id, smallvec![])], visited: Default::default() }
 }
 
 impl<'tcx> Elaborator<'tcx> {
@@ -34,7 +30,7 @@ impl<'tcx> Elaborator<'tcx> {
                     let super_def_id = data.trait_ref.def_id;
                     Some((super_def_id, all_bound_vars))
                 }
-                _ => None
+                _ => None,
             }
         });
 
