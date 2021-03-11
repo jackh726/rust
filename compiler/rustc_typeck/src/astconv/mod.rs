@@ -210,21 +210,21 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let r = match tcx.named_region(lifetime.hir_id) {
             Some(rl::Region::Static) => tcx.lifetimes.re_static,
 
-            Some(rl::Region::LateBound(debruijn, index, def_id, _)) => {
+            Some(rl::Region::LateBound(index, def_id, _)) => {
                 let name = lifetime_name(def_id.expect_local());
                 let br = ty::BoundRegion {
                     var: ty::BoundVar::from_u32(index),
                     kind: ty::BrNamed(def_id, name),
                 };
-                tcx.mk_region(ty::ReLateBound(debruijn, br))
+                tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
             }
 
-            Some(rl::Region::LateBoundAnon(debruijn, index, anon_index)) => {
+            Some(rl::Region::LateBoundAnon(index, anon_index)) => {
                 let br = ty::BoundRegion {
                     var: ty::BoundVar::from_u32(index),
                     kind: ty::BrAnon(anon_index),
                 };
-                tcx.mk_region(ty::ReLateBound(debruijn, br))
+                tcx.mk_region(ty::ReLateBound(ty::INNERMOST, br))
             }
 
             Some(rl::Region::EarlyBound(index, id, _)) => {
@@ -1097,7 +1097,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             }
         });
 
-        if !speculative {
+        if false && !speculative {
             // Find any late-bound regions declared in `ty` that are not
             // declared in the trait-ref or assoc_ty. These are not well-formed.
             //

@@ -51,10 +51,6 @@ trait RegionExt {
 
     fn id(&self) -> Option<DefId>;
 
-    fn shifted(self, amount: u32) -> Region;
-
-    fn shifted_out_to_binder(self, binder: ty::DebruijnIndex) -> Region;
-
     fn subst<'a, L>(self, params: L, map: &NamedRegionMap) -> Option<Region>
     where
         L: Iterator<Item = &'a hir::Lifetime>;
@@ -71,16 +67,12 @@ impl RegionExt for Region {
     }
 
     fn late(idx: usize, hir_map: &Map<'_>, param: &GenericParam<'_>) -> (ParamName, Region) {
-        let depth = ty::INNERMOST;
         let def_id = hir_map.local_def_id(param.hir_id);
         let origin = LifetimeDefOrigin::from_param(param);
-        debug!(
-            "Region::late: param={:?} depth={:?} def_id={:?} origin={:?}",
-            param, depth, def_id, origin,
-        );
+        debug!("Region::late: param={:?} def_id={:?} origin={:?}", param, def_id, origin,);
         (
             param.name.normalize_to_macros_2_0(),
-            Region::LateBound(depth, idx as u32, def_id.to_def_id(), origin),
+            Region::LateBound(idx as u32, def_id.to_def_id(), origin),
         )
     }
 
@@ -91,41 +83,16 @@ impl RegionExt for Region {
         let mut anons = index.borrow_mut();
         let i = anons.len();
         anons.push(ty::BoundVariableKind::Region(ty::BrAnon(i as u32)));
-        let depth = ty::INNERMOST;
-        Region::LateBoundAnon(depth, (named_late_bound_vars + i) as u32, i as u32)
+        Region::LateBoundAnon((named_late_bound_vars + i) as u32, i as u32)
     }
 
     fn id(&self) -> Option<DefId> {
         match *self {
             Region::Static | Region::LateBoundAnon(..) => None,
 
-            Region::EarlyBound(_, id, _) | Region::LateBound(_, _, id, _) | Region::Free(_, id) => {
+            Region::EarlyBound(_, id, _) | Region::LateBound(_, id, _) | Region::Free(_, id) => {
                 Some(id)
             }
-        }
-    }
-
-    fn shifted(self, amount: u32) -> Region {
-        match self {
-            Region::LateBound(debruijn, idx, id, origin) => {
-                Region::LateBound(debruijn.shifted_in(amount), idx, id, origin)
-            }
-            Region::LateBoundAnon(debruijn, index, anon_index) => {
-                Region::LateBoundAnon(debruijn.shifted_in(amount), index, anon_index)
-            }
-            _ => self,
-        }
-    }
-
-    fn shifted_out_to_binder(self, binder: ty::DebruijnIndex) -> Region {
-        match self {
-            Region::LateBound(debruijn, index, id, origin) => {
-                Region::LateBound(debruijn.shifted_out_to_binder(binder), index, id, origin)
-            }
-            Region::LateBoundAnon(debruijn, index, anon_index) => {
-                Region::LateBoundAnon(debruijn.shifted_out_to_binder(binder), index, anon_index)
-            }
-            _ => self,
         }
     }
 
@@ -391,7 +358,6 @@ crate struct ElisionFailureInfo {
     /// The index of the argument in the original definition.
     index: usize,
     lifetime_count: usize,
-    have_bound_regions: bool,
     crate span: Span,
 }
 
@@ -581,13 +547,11 @@ fn late_lifetimes_in_scope<'tcx>(
 
 fn late_region_as_bound_region<'tcx>(tcx: TyCtxt<'tcx>, region: &Region) -> ty::BoundVariableKind {
     match region {
-        Region::LateBound(_, _, def_id, _) => {
+        Region::LateBound(_, def_id, _) => {
             let name = tcx.hir().name(tcx.hir().local_def_id_to_hir_id(def_id.expect_local()));
             ty::BoundVariableKind::Region(ty::BrNamed(*def_id, name))
         }
-        Region::LateBoundAnon(_, _, anon_idx) => {
-            ty::BoundVariableKind::Region(ty::BrAnon(*anon_idx))
-        }
+        Region::LateBoundAnon(_, anon_idx) => ty::BoundVariableKind::Region(ty::BrAnon(*anon_idx)),
         _ => bug!("{:?} is not a late region", region),
     }
 }
@@ -984,7 +948,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         // well-supported at the moment, so this doesn't work.
                         // In the future, this should be fixed and this error should be removed.
                         let def = self.map.defs.get(&lifetime.hir_id).cloned();
-                        if let Some(Region::LateBound(_, _, def_id, _)) = def {
+                        if let Some(Region::LateBound(_, def_id, _)) = def {
                             if let Some(def_id) = def_id.as_local() {
                                 let hir_id = self.tcx.hir().local_def_id_to_hir_id(def_id);
                                 // Ensure that the parent of the def is an item, not HRTB
@@ -2025,7 +1989,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             .values()
             .flat_map(|region| match region {
                 Region::EarlyBound(_, def_id, _)
-                | Region::LateBound(_, _, def_id, _)
+                | Region::LateBound(_, def_id, _)
                 | Region::Free(_, def_id) => Some(*def_id),
 
                 Region::LateBoundAnon(..) | Region::Static => None,
@@ -2304,7 +2268,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         // that we pass through, until we find a lifetime with the
         // given name or we run out of scopes.
         // search.
-        let mut late_depth = 0;
         let mut scope = self.scope;
         let mut outermost_body = None;
         let result = loop {
@@ -2327,13 +2290,12 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                         LifetimeName::Param(param_name) => {
                             if let Some(&def) = lifetimes.get(&param_name.normalize_to_macros_2_0())
                             {
-                                break Some(def.shifted(late_depth));
+                                break Some(def);
                             }
                         }
                         _ => bug!("expected LifetimeName::Param"),
                     }
 
-                    late_depth += 1;
                     scope = s;
                 }
 
@@ -2368,7 +2330,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             if !self.definition_only && self.is_in_fn_syntax {
                 match def {
                     Region::EarlyBound(_, _, LifetimeDefOrigin::InBand)
-                    | Region::LateBound(_, _, _, LifetimeDefOrigin::InBand) => {
+                    | Region::LateBound(_, _, LifetimeDefOrigin::InBand) => {
                         struct_span_err!(
                             self.tcx.sess,
                             lifetime_ref.span,
@@ -2387,7 +2349,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                         LifetimeDefOrigin::ExplicitOrElided | LifetimeDefOrigin::Error,
                     )
                     | Region::LateBound(
-                        _,
                         _,
                         _,
                         LifetimeDefOrigin::ExplicitOrElided | LifetimeDefOrigin::Error,
@@ -2663,6 +2624,15 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 Scope::Root => bug!("In fn_like_elision without appropriate scope above"),
             }
         };
+        let mut gather = GatherAnonLifetimes { anon_count: 0 };
+        //dbg!(&inputs);
+        for input in inputs {
+            gather.visit_ty(input);
+        }
+        //dbg!(gather.anon_count);
+        self.map.late_bound_vars.entry(hir_id).or_default().extend(
+            (0..gather.anon_count).map(|var| ty::BoundVariableKind::Region(ty::BrAnon(var))),
+        );
         let arg_scope = Scope::Elision {
             elide: Elide::FreshLateAnon(named_late_bound_vars as usize, RefCell::new(vec![])),
             s: self.scope,
@@ -2673,12 +2643,14 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
         });
 
+        /*
         let cell = match arg_scope {
             Scope::Elision { elide: Elide::FreshLateAnon(_, cell), .. } => cell,
             _ => bug!(),
         };
         let anon_vars = cell.into_inner();
         self.map.late_bound_vars.entry(hir_id).or_default().extend(anon_vars.into_iter());
+        */
 
         let output = match output {
             Some(ty) => ty,
@@ -2820,9 +2792,9 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             .map(|(i, input)| {
                 let mut gather = GatherLifetimes {
                     map: self.map,
-                    outer_index: ty::INNERMOST,
-                    have_bound_regions: false,
                     lifetimes: Default::default(),
+                    available_bound_vars: self.map.late_bound_vars.get(&hir_id),
+                    anon_reset: false,
                 };
                 gather.visit_ty(input);
 
@@ -2839,7 +2811,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                     parent: body,
                     index: i,
                     lifetime_count: gather.lifetimes.len(),
-                    have_bound_regions: gather.have_bound_regions,
                     span: input.span,
                 }
             })
@@ -2858,9 +2829,9 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 
         struct GatherLifetimes<'a> {
             map: &'a NamedRegionMap,
-            outer_index: ty::DebruijnIndex,
-            have_bound_regions: bool,
             lifetimes: FxHashSet<Region>,
+            available_bound_vars: Option<&'a Vec<ty::BoundVariableKind>>,
+            anon_reset: bool,
         }
 
         impl<'v, 'a> Visitor<'v> for GatherLifetimes<'a> {
@@ -2871,8 +2842,9 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
 
             fn visit_ty(&mut self, ty: &hir::Ty<'_>) {
+                let was_anon_reset = self.anon_reset;
                 if let hir::TyKind::BareFn(_) = ty.kind {
-                    self.outer_index.shift_in(1);
+                    self.anon_reset = true;
                 }
                 match ty.kind {
                     hir::TyKind::TraitObject(bounds, ref lifetime) => {
@@ -2890,54 +2862,54 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                         intravisit::walk_ty(self, ty);
                     }
                 }
-                if let hir::TyKind::BareFn(_) = ty.kind {
-                    self.outer_index.shift_out(1);
-                }
-            }
-
-            fn visit_generic_param(&mut self, param: &hir::GenericParam<'_>) {
-                if let hir::GenericParamKind::Lifetime { .. } = param.kind {
-                    // FIXME(eddyb) Do we want this? It only makes a difference
-                    // if this `for<'a>` lifetime parameter is never used.
-                    self.have_bound_regions = true;
-                }
-
-                intravisit::walk_generic_param(self, param);
-            }
-
-            fn visit_poly_trait_ref(
-                &mut self,
-                trait_ref: &hir::PolyTraitRef<'_>,
-                modifier: hir::TraitBoundModifier,
-            ) {
-                self.outer_index.shift_in(1);
-                intravisit::walk_poly_trait_ref(self, trait_ref, modifier);
-                self.outer_index.shift_out(1);
-            }
-
-            fn visit_param_bound(&mut self, bound: &hir::GenericBound<'_>) {
-                if let hir::GenericBound::LangItemTrait { .. } = bound {
-                    self.outer_index.shift_in(1);
-                    intravisit::walk_param_bound(self, bound);
-                    self.outer_index.shift_out(1);
-                } else {
-                    intravisit::walk_param_bound(self, bound);
-                }
+                self.anon_reset = was_anon_reset;
             }
 
             fn visit_lifetime(&mut self, lifetime_ref: &hir::Lifetime) {
                 if let Some(&lifetime) = self.map.defs.get(&lifetime_ref.hir_id) {
                     match lifetime {
-                        Region::LateBound(debruijn, _, _, _)
-                        | Region::LateBoundAnon(debruijn, _, _)
-                            if debruijn < self.outer_index =>
-                        {
-                            self.have_bound_regions = true;
-                        }
+                        // Only include bound vars available at the function level
+                        Region::LateBound(_, def_id, _)
+                            if !self.available_bound_vars.map_or(false, |b| {
+                                b.iter().any(|b| match b {
+                                    ty::BoundVariableKind::Region(ty::BrNamed(did, _)) => {
+                                        *did == def_id
+                                    }
+                                    _ => false,
+                                })
+                            }) => {}
+                        // If we pass through an elision context (`fn`s), then we can't reference
+                        // outer anon vars
+                        Region::LateBoundAnon(_, _) if self.anon_reset => {}
                         _ => {
-                            self.lifetimes.insert(lifetime.shifted_out_to_binder(self.outer_index));
+                            self.lifetimes.insert(lifetime);
                         }
                     }
+                }
+            }
+        }
+
+        struct GatherAnonLifetimes {
+            anon_count: u32,
+        }
+
+        impl<'v> Visitor<'v> for GatherAnonLifetimes {
+            type Map = intravisit::ErasedMap<'v>;
+
+            fn nested_visit_map(&mut self) -> NestedVisitorMap<Self::Map> {
+                NestedVisitorMap::None
+            }
+
+            fn visit_ty(&mut self, ty: &hir::Ty<'_>) {
+                if let hir::TyKind::BareFn(_) = ty.kind {
+                    return;
+                }
+                intravisit::walk_ty(self, ty);
+            }
+
+            fn visit_lifetime(&mut self, lifetime_ref: &hir::Lifetime) {
+                if lifetime_ref.is_elided() {
+                    self.anon_count += 1;
                 }
             }
         }
@@ -2951,7 +2923,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         }
 
         let span = lifetime_refs[0].span;
-        let mut late_depth = 0;
         let mut scope = self.scope;
         let mut lifetime_names = FxHashSet::default();
         let mut lifetime_spans = vec![];
@@ -2970,7 +2941,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                             lifetime_spans.push(name.span);
                         }
                     }
-                    late_depth += 1;
                     scope = s;
                 }
 
@@ -2978,14 +2948,13 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                     let lifetime = match *elide {
                         Elide::FreshLateAnon(named_late_bound_vars, ref counter) => {
                             for lifetime_ref in lifetime_refs {
-                                let lifetime = Region::late_anon(named_late_bound_vars, counter)
-                                    .shifted(late_depth);
+                                let lifetime = Region::late_anon(named_late_bound_vars, counter);
 
                                 self.insert_lifetime(lifetime_ref, lifetime);
                             }
                             return;
                         }
-                        Elide::Exact(l) => l.shifted(late_depth),
+                        Elide::Exact(l) => l,
                         Elide::Error(ref e) => {
                             let mut scope = s;
                             loop {
@@ -3058,8 +3027,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         let elided_len = elided_params.len();
 
         for (i, info) in elided_params.into_iter().enumerate() {
-            let ElisionFailureInfo { parent, index, lifetime_count: n, have_bound_regions, span } =
-                info;
+            let ElisionFailureInfo { parent, index, lifetime_count: n, span } = info;
 
             db.span_label(span, "");
             let help_name = if let Some(ident) =
@@ -3074,12 +3042,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 &(if n == 1 {
                     help_name
                 } else {
-                    format!(
-                        "one of {}'s {} {}lifetimes",
-                        help_name,
-                        n,
-                        if have_bound_regions { "free " } else { "" }
-                    )
+                    format!("one of {}'s {} lifetimes", help_name, n,)
                 })[..],
             );
 
@@ -3124,12 +3087,10 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 
     fn resolve_object_lifetime_default(&mut self, lifetime_ref: &'tcx hir::Lifetime) {
         debug!("resolve_object_lifetime_default(lifetime_ref={:?})", lifetime_ref);
-        let mut late_depth = 0;
         let mut scope = self.scope;
         let lifetime = loop {
             match *scope {
                 Scope::Binder { s, .. } => {
-                    late_depth += 1;
                     scope = s;
                 }
 
@@ -3144,7 +3105,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 }
             }
         };
-        self.insert_lifetime(lifetime_ref, lifetime.shifted(late_depth));
+        self.insert_lifetime(lifetime_ref, lifetime);
     }
 
     fn check_lifetime_params(
@@ -3344,7 +3305,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
 
             Region::Free(_, def_id)
-            | Region::LateBound(_, _, def_id, _)
+            | Region::LateBound(_, def_id, _)
             | Region::EarlyBound(_, def_id, _) => {
                 // A lifetime declared by the user.
                 let track_lifetime_uses = self.track_lifetime_uses();

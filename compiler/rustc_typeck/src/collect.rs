@@ -1185,11 +1185,17 @@ fn trait_def(tcx: TyCtxt<'_>, def_id: DefId) -> ty::TraitDef {
     ty::TraitDef::new(def_id, unsafety, paren_sugar, is_auto, is_marker, spec_kind, def_path_hash)
 }
 
-fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<Span> {
+// FIXME(jackh726): this should just be stored by `rustc_resolve::late::lifetimes`
+fn has_late_bound_regions<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    node: Node<'tcx>,
+    hir_id: HirId,
+) -> Option<Span> {
     struct LateBoundRegionsDetector<'tcx> {
         tcx: TyCtxt<'tcx>,
-        outer_index: ty::DebruijnIndex,
         has_late_bound_regions: Option<Span>,
+        bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
+        anon_reset: bool,
     }
 
     impl Visitor<'tcx> for LateBoundRegionsDetector<'tcx> {
@@ -1205,9 +1211,10 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
             }
             match ty.kind {
                 hir::TyKind::BareFn(..) => {
-                    self.outer_index.shift_in(1);
+                    let was_anon_reset = self.anon_reset;
+                    self.anon_reset = true;
                     intravisit::walk_ty(self, ty);
-                    self.outer_index.shift_out(1);
+                    self.anon_reset = was_anon_reset;
                 }
                 _ => intravisit::walk_ty(self, ty),
             }
@@ -1221,9 +1228,7 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
             if self.has_late_bound_regions.is_some() {
                 return;
             }
-            self.outer_index.shift_in(1);
             intravisit::walk_poly_trait_ref(self, tr, m);
-            self.outer_index.shift_out(1);
         }
 
         fn visit_lifetime(&mut self, lt: &'tcx hir::Lifetime) {
@@ -1233,10 +1238,12 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
 
             match self.tcx.named_region(lt.hir_id) {
                 Some(rl::Region::Static | rl::Region::EarlyBound(..)) => {}
-                Some(
-                    rl::Region::LateBound(debruijn, _, _, _)
-                    | rl::Region::LateBoundAnon(debruijn, _, _),
-                ) if debruijn < self.outer_index => {}
+                Some(rl::Region::LateBound(_, def_id, _))
+                    if !self.bound_vars.iter().any(|b| match b {
+                        ty::BoundVariableKind::Region(ty::BrNamed(did, _)) => did == def_id,
+                        _ => false,
+                    }) => {}
+                Some(rl::Region::LateBoundAnon(_, _)) if self.anon_reset => {}
                 Some(
                     rl::Region::LateBound(..)
                     | rl::Region::LateBoundAnon(..)
@@ -1253,12 +1260,8 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
         tcx: TyCtxt<'tcx>,
         generics: &'tcx hir::Generics<'tcx>,
         decl: &'tcx hir::FnDecl<'tcx>,
+        hir_id: HirId,
     ) -> Option<Span> {
-        let mut visitor = LateBoundRegionsDetector {
-            tcx,
-            outer_index: ty::INNERMOST,
-            has_late_bound_regions: None,
-        };
         for param in generics.params {
             if let GenericParamKind::Lifetime { .. } = param.kind {
                 if tcx.is_late_bound(param.hir_id) {
@@ -1266,6 +1269,13 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
                 }
             }
         }
+        let bound_vars = tcx.late_bound_vars(hir_id);
+        let mut visitor = LateBoundRegionsDetector {
+            tcx,
+            has_late_bound_regions: None,
+            bound_vars,
+            anon_reset: false,
+        };
         visitor.visit_fn_decl(decl);
         visitor.has_late_bound_regions
     }
@@ -1273,25 +1283,25 @@ fn has_late_bound_regions<'tcx>(tcx: TyCtxt<'tcx>, node: Node<'tcx>) -> Option<S
     match node {
         Node::TraitItem(item) => match item.kind {
             hir::TraitItemKind::Fn(ref sig, _) => {
-                has_late_bound_regions(tcx, &item.generics, &sig.decl)
+                has_late_bound_regions(tcx, &item.generics, &sig.decl, hir_id)
             }
             _ => None,
         },
         Node::ImplItem(item) => match item.kind {
             hir::ImplItemKind::Fn(ref sig, _) => {
-                has_late_bound_regions(tcx, &item.generics, &sig.decl)
+                has_late_bound_regions(tcx, &item.generics, &sig.decl, hir_id)
             }
             _ => None,
         },
         Node::ForeignItem(item) => match item.kind {
             hir::ForeignItemKind::Fn(ref fn_decl, _, ref generics) => {
-                has_late_bound_regions(tcx, generics, fn_decl)
+                has_late_bound_regions(tcx, generics, fn_decl, hir_id)
             }
             _ => None,
         },
         Node::Item(item) => match item.kind {
             hir::ItemKind::Fn(ref sig, .., ref generics, _) => {
-                has_late_bound_regions(tcx, generics, &sig.decl)
+                has_late_bound_regions(tcx, generics, &sig.decl, hir_id)
             }
             _ => None,
         },
@@ -1590,7 +1600,7 @@ fn generics_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::Generics {
         params,
         param_def_id_to_index,
         has_self: has_self || parent_has_self,
-        has_late_bound_regions: has_late_bound_regions(tcx, node),
+        has_late_bound_regions: has_late_bound_regions(tcx, node, hir_id),
     }
 }
 
