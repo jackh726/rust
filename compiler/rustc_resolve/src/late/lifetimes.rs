@@ -241,6 +241,8 @@ enum Scope<'a> {
         /// these.
         named_late_bound_vars: u32,
 
+        from_poly_trait_ref: bool,
+
         /// The late bound vars for a given item are stored by `HirId` to be
         /// queried later. However, if we enter an elision scope, we have to
         /// later append the elided bound vars to the list and need to know what
@@ -330,6 +332,7 @@ impl<'a> fmt::Debug for TruncatedScopeDebug<'a> {
                 track_lifetime_uses,
                 opaque_type_parent,
                 named_late_bound_vars,
+                from_poly_trait_ref,
                 hir_id,
                 s: _,
             } => f
@@ -339,6 +342,7 @@ impl<'a> fmt::Debug for TruncatedScopeDebug<'a> {
                 .field("track_lifetime_uses", track_lifetime_uses)
                 .field("opaque_type_parent", opaque_type_parent)
                 .field("named_late_bound_vars", named_late_bound_vars)
+                .field("from_poly_trait_ref", from_poly_trait_ref)
                 .field("hir_id", hir_id)
                 .field("s", &"..")
                 .finish(),
@@ -554,11 +558,15 @@ fn late_lifetimes_in_scope<'tcx>(
     let mut supertrait_lifetimes = vec![];
     loop {
         match scope {
-            Scope::Body { s, .. }
-            | Scope::Elision { s, .. }
-            | Scope::ObjectLifetimeDefault { s, .. }
-            | Scope::TraitRefHackInner { s, .. } => {
-                scope = s;
+            Scope::Body { .. }
+            | Scope::Elision { .. }
+            | Scope::ObjectLifetimeDefault { .. }
+            | Scope::Root => {
+                return vec![];
+            }
+
+            Scope::TraitRefHackInner { hir_id, .. } => {
+                return map.late_bound_vars.entry(*hir_id).or_default().clone();
             }
 
             Scope::Supertrait { s, lifetimes } => {
@@ -566,14 +574,16 @@ fn late_lifetimes_in_scope<'tcx>(
                 scope = s;
             }
 
-            Scope::Root => {
-                break vec![];
-            }
-
-            Scope::Binder { hir_id, .. } => {
+            Scope::Binder { hir_id, from_poly_trait_ref, .. } => {
+                if !from_poly_trait_ref {
+                    // We should only see super trait lifetimes if there is a `Binder` above
+                    assert!(supertrait_lifetimes.is_empty());
+                    return supertrait_lifetimes;
+                }
+                // Nested poly trait refs have the binders concatenated
                 let mut full_binders = map.late_bound_vars.entry(*hir_id).or_default().clone();
                 full_binders.extend(supertrait_lifetimes.into_iter());
-                break full_binders;
+                return full_binders;
             }
         }
     }
@@ -678,9 +688,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 intravisit::walk_fn(self, fk, fd, b, s, hir_id)
             }
             intravisit::FnKind::Closure(..) => {
-                let binders = late_lifetimes_in_scope(self.map, self.scope);
-                let named_late_bound_vars = binders.len() as u32;
-                self.map.late_bound_vars.insert(hir_id, binders);
+                self.map.late_bound_vars.insert(hir_id, vec![]);
                 let scope = Scope::Binder {
                     hir_id,
                     lifetimes: FxHashMap::default(),
@@ -688,7 +696,8 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     s: self.scope,
                     track_lifetime_uses: true,
                     opaque_type_parent: false,
-                    named_late_bound_vars,
+                    named_late_bound_vars: 0,
+                    from_poly_trait_ref: false,
                 };
                 self.with(&scope, move |_old_scope, this| {
                     intravisit::walk_fn(this, fk, fd, b, s, hir_id)
@@ -801,8 +810,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         }
                     })
                     .collect();
-                let binders = late_lifetimes_in_scope(self.map, self.scope);
-                self.map.late_bound_vars.insert(item.hir_id(), binders);
+                self.map.late_bound_vars.insert(item.hir_id(), vec![]);
                 let scope = Scope::Binder {
                     hir_id: item.hir_id(),
                     lifetimes,
@@ -810,6 +818,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     opaque_type_parent: true,
                     track_lifetime_uses,
                     named_late_bound_vars: 0,
+                    from_poly_trait_ref: false,
                     s: ROOT_SCOPE,
                 };
                 self.with(&scope, |old_scope, this| {
@@ -859,9 +868,8 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 };
                 self.missing_named_lifetime_spots
                     .push(MissingLifetimeSpot::HigherRanked { span, span_type });
-                let mut binders = late_lifetimes_in_scope(self.map, self.scope);
-                let mut named_late_bound_vars = binders.len();
-                let (lifetimes, local_binders): (FxHashMap<hir::ParamName, Region>, Vec<_>) = c
+                let mut named_late_bound_vars = 0;
+                let (lifetimes, binders): (FxHashMap<hir::ParamName, Region>, Vec<_>) = c
                     .generic_params
                     .iter()
                     .filter_map(|param| match param.kind {
@@ -870,14 +878,12 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             named_late_bound_vars += 1;
                             let pair = Region::late(late_bound_idx, &self.tcx.hir(), param);
                             let r = pair.1.clone();
+                            let r = late_region_as_bound_region(self.tcx, &r);
                             Some((pair, r))
                         }
                         _ => None,
                     })
                     .unzip();
-                binders.extend(
-                    local_binders.into_iter().map(|r| late_region_as_bound_region(self.tcx, &r)),
-                );
                 self.map.late_bound_vars.insert(ty.hir_id, binders);
                 let scope = Scope::Binder {
                     hir_id: ty.hir_id,
@@ -887,6 +893,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     track_lifetime_uses: true,
                     opaque_type_parent: false,
                     named_late_bound_vars: named_late_bound_vars as u32,
+                    from_poly_trait_ref: false,
                 };
                 self.with(&scope, |old_scope, this| {
                     // a bare fn has no bounds, so everything
@@ -1063,8 +1070,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     }
                 }
                 let next_early_index = index + non_lifetime_count;
-                let binders = late_lifetimes_in_scope(self.map, self.scope);
-                self.map.late_bound_vars.insert(ty.hir_id, binders);
+                self.map.late_bound_vars.insert(ty.hir_id, vec![]);
 
                 if let Some(elision_region) = elision {
                     let scope =
@@ -1078,6 +1084,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             track_lifetime_uses: true,
                             opaque_type_parent: false,
                             named_late_bound_vars: 0,
+                            from_poly_trait_ref: false,
                         };
                         this.with(&scope, |_old_scope, this| {
                             this.visit_generics(generics);
@@ -1095,6 +1102,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         track_lifetime_uses: true,
                         opaque_type_parent: false,
                         named_late_bound_vars: 0,
+                        from_poly_trait_ref: false,
                     };
                     self.with(&scope, |_old_scope, this| {
                         this.visit_generics(generics);
@@ -1142,8 +1150,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         }
                     })
                     .collect();
-                let binders = late_lifetimes_in_scope(self.map, self.scope);
-                self.map.late_bound_vars.insert(trait_item.hir_id(), binders);
+                self.map.late_bound_vars.insert(trait_item.hir_id(), vec![]);
                 let scope = Scope::Binder {
                     hir_id: trait_item.hir_id(),
                     lifetimes,
@@ -1152,6 +1159,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     track_lifetime_uses: true,
                     opaque_type_parent: true,
                     named_late_bound_vars: 0,
+                    from_poly_trait_ref: false,
                 };
                 self.with(&scope, |old_scope, this| {
                     this.check_lifetime_params(old_scope, &generics.params);
@@ -1209,8 +1217,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                         }
                     })
                     .collect();
-                let binders = late_lifetimes_in_scope(self.map, self.scope);
-                self.map.late_bound_vars.insert(ty.hir_id, binders);
+                self.map.late_bound_vars.insert(ty.hir_id, vec![]);
                 let scope = Scope::Binder {
                     hir_id: ty.hir_id,
                     lifetimes,
@@ -1219,6 +1226,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     track_lifetime_uses: true,
                     opaque_type_parent: true,
                     named_late_bound_vars: 0,
+                    from_poly_trait_ref: false,
                 };
                 self.with(&scope, |old_scope, this| {
                     this.check_lifetime_params(old_scope, &generics.params);
@@ -1301,9 +1309,8 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     ref bound_generic_params,
                     ..
                 }) => {
-                    let mut binders = late_lifetimes_in_scope(self.map, self.scope);
-                    let mut named_late_bound_vars = binders.len();
-                    let (lifetimes, local_binders): (FxHashMap<_, _>, Vec<_>) =
+                    let mut named_late_bound_vars = 0;
+                    let (lifetimes, binders): (FxHashMap<_, _>, Vec<_>) =
                         bound_generic_params
                             .iter()
                             .filter_map(|param| match param.kind {
@@ -1312,16 +1319,12 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                                     named_late_bound_vars += 1;
                                     let pair = Region::late(late_bound_idx, &self.tcx.hir(), param);
                                     let r = pair.1.clone();
+                                    let r = late_region_as_bound_region(self.tcx, &r);
                                     Some((pair, r))
                                 }
                                 _ => None,
                             })
                             .unzip();
-                    binders.extend(
-                        local_binders
-                            .into_iter()
-                            .map(|r| late_region_as_bound_region(self.tcx, &r)),
-                    );
                     self.map.late_bound_vars.insert(bounded_ty.hir_id, binders.clone());
                     if !lifetimes.is_empty() {
                         let next_early_index = self.next_early_index();
@@ -1333,6 +1336,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                             track_lifetime_uses: true,
                             opaque_type_parent: false,
                             named_late_bound_vars: named_late_bound_vars as u32,
+                            from_poly_trait_ref: true,
                         };
                         let result = self.with(&scope, |old_scope, this| {
                             this.check_lifetime_params(old_scope, &bound_generic_params);
@@ -1370,8 +1374,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
     fn visit_param_bound(&mut self, bound: &'tcx hir::GenericBound<'tcx>) {
         match bound {
             hir::GenericBound::LangItemTrait(_, _, hir_id, _) if self.trait_ref_hack.is_none() => {
-                let binders = late_lifetimes_in_scope(self.map, self.scope);
-                self.map.late_bound_vars.insert(*hir_id, binders);
+                self.map.late_bound_vars.insert(*hir_id, vec![]);
                 let scope = Scope::Binder {
                     hir_id: *hir_id,
                     lifetimes: FxHashMap::default(),
@@ -1380,6 +1383,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                     track_lifetime_uses: true,
                     opaque_type_parent: false,
                     named_late_bound_vars: 0,
+                    from_poly_trait_ref: false,
                 };
                 self.with(&scope, |_, this| {
                     intravisit::walk_param_bound(this, bound);
@@ -1494,6 +1498,7 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
                 track_lifetime_uses: true,
                 opaque_type_parent: false,
                 named_late_bound_vars: named_late_bound_vars as u32,
+                from_poly_trait_ref: true,
             };
             self.with(&scope, |old_scope, this| {
                 this.check_lifetime_params(old_scope, &trait_ref.bound_generic_params);
@@ -2196,10 +2201,8 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             }
         }
 
-        let mut binders = late_lifetimes_in_scope(self.map, self.scope);
-
         let mut non_lifetime_count = 0;
-        let mut named_late_bound_vars = binders.len();
+        let mut named_late_bound_vars = 0;
         let lifetimes: FxHashMap<hir::ParamName, Region> = generics
             .params
             .iter()
@@ -2221,8 +2224,8 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             .collect();
         let next_early_index = next_early_index + non_lifetime_count;
 
-        let mut named_late_bound_vars = binders.len();
-        let local_binders: Vec<_> = generics
+        let mut named_late_bound_vars = 0;
+        let binders: Vec<_> = generics
             .params
             .iter()
             .filter_map(|param| match param.kind {
@@ -2230,7 +2233,9 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                     if self.map.late_bound.contains(&param.hir_id) {
                         let late_bound_idx = named_late_bound_vars;
                         named_late_bound_vars += 1;
-                        Some(Region::late(late_bound_idx, &self.tcx.hir(), param).1)
+                        let r = Region::late(late_bound_idx, &self.tcx.hir(), param).1;
+                        let r = late_region_as_bound_region(self.tcx, &r);
+                        Some(r)
                     } else {
                         None
                     }
@@ -2238,8 +2243,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => None,
             })
             .collect();
-        binders
-            .extend(local_binders.into_iter().map(|r| late_region_as_bound_region(self.tcx, &r)));
         self.map.late_bound_vars.insert(hir_id, binders);
         let scope = Scope::Binder {
             hir_id,
@@ -2249,6 +2252,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
             opaque_type_parent: true,
             track_lifetime_uses: false,
             named_late_bound_vars: named_late_bound_vars as u32,
+            from_poly_trait_ref: false,
         };
         self.with(&scope, move |old_scope, this| {
             this.check_lifetime_params(old_scope, &generics.params);
@@ -2305,6 +2309,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
         // given name or we run out of scopes.
         // search.
         let mut late_depth = 0;
+        let mut in_poly_trait_ref = false;
         let mut scope = self.scope;
         let mut outermost_body = None;
         let result = loop {
@@ -2322,7 +2327,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                     break None;
                 }
 
-                Scope::Binder { ref lifetimes, s, .. } => {
+                Scope::Binder { ref lifetimes, from_poly_trait_ref, s, .. } => {
                     match lifetime_ref.name {
                         LifetimeName::Param(param_name) => {
                             if let Some(&def) = lifetimes.get(&param_name.normalize_to_macros_2_0())
@@ -2333,7 +2338,28 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                         _ => bug!("expected LifetimeName::Param"),
                     }
 
-                    late_depth += 1;
+                    match (from_poly_trait_ref, in_poly_trait_ref) {
+                        // This is the first binder we see that is a poly trait ref; add one to the
+                        // late depth and mark that we're potentially in nested trait refs.
+                        (true, false) => {
+                            in_poly_trait_ref = true;
+                            late_depth += 1;
+                        }
+                        // We've already seen a binder that is a poly trait ref and this one is too,
+                        // that means that they are nested and we are concatenating the bound vars;
+                        // don't increase the late depth.
+                        (true, true) => {}
+                        // We've exited nested poly trait refs; add one to the late depth and mark
+                        // that we are no longer in nested trait refs
+                        (false, true) => {
+                            in_poly_trait_ref = false;
+                            late_depth += 1;
+                        }
+                        // Any other kind of nested binders: just increase late depth.
+                        (false, false) => {
+                            late_depth += 1;
+                        }
+                    }
                     scope = s;
                 }
 
@@ -2952,6 +2978,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 
         let span = lifetime_refs[0].span;
         let mut late_depth = 0;
+        let mut in_poly_trait_ref = false;
         let mut scope = self.scope;
         let mut lifetime_names = FxHashSet::default();
         let mut lifetime_spans = vec![];
@@ -2962,7 +2989,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 
                 Scope::Root => break None,
 
-                Scope::Binder { s, ref lifetimes, .. } => {
+                Scope::Binder { s, ref lifetimes, from_poly_trait_ref, .. } => {
                     // collect named lifetimes for suggestions
                     for name in lifetimes.keys() {
                         if let hir::ParamName::Plain(name) = name {
@@ -2970,7 +2997,28 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                             lifetime_spans.push(name.span);
                         }
                     }
-                    late_depth += 1;
+                    match (from_poly_trait_ref, in_poly_trait_ref) {
+                        // This is the first binder we see that is a poly trait ref; add one to the
+                        // late depth and mark that we're potentially in nested trait refs.
+                        (true, false) => {
+                            in_poly_trait_ref = true;
+                            late_depth += 1;
+                        }
+                        // We've already seen a binder that is a poly trait ref and this one is too,
+                        // that means that they are nested and we are concatenating the bound vars;
+                        // don't increase the late depth.
+                        (true, true) => {}
+                        // We've exited nested poly trait refs; add one to the late depth and mark
+                        // that we are no longer in nested trait refs
+                        (false, true) => {
+                            in_poly_trait_ref = false;
+                            late_depth += 1;
+                        }
+                        // Any other kind of nested binders: just increase late depth.
+                        (false, false) => {
+                            late_depth += 1;
+                        }
+                    }
                     scope = s;
                 }
 
@@ -3125,11 +3173,33 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
     fn resolve_object_lifetime_default(&mut self, lifetime_ref: &'tcx hir::Lifetime) {
         debug!("resolve_object_lifetime_default(lifetime_ref={:?})", lifetime_ref);
         let mut late_depth = 0;
+        let mut in_poly_trait_ref = false;
         let mut scope = self.scope;
         let lifetime = loop {
             match *scope {
-                Scope::Binder { s, .. } => {
-                    late_depth += 1;
+                Scope::Binder { s, from_poly_trait_ref, .. } => {
+                    match (from_poly_trait_ref, in_poly_trait_ref) {
+                        // This is the first binder we see that is a poly trait ref; add one to the
+                        // late depth and mark that we're potentially in nested trait refs.
+                        (true, false) => {
+                            in_poly_trait_ref = true;
+                            late_depth += 1;
+                        }
+                        // We've already seen a binder that is a poly trait ref and this one is too,
+                        // that means that they are nested and we are concatenating the bound vars;
+                        // don't increase the late depth.
+                        (true, true) => {}
+                        // We've exited nested poly trait refs; add one to the late depth and mark
+                        // that we are no longer in nested trait refs
+                        (false, true) => {
+                            in_poly_trait_ref = false;
+                            late_depth += 1;
+                        }
+                        // Any other kind of nested binders: just increase late depth.
+                        (false, false) => {
+                            late_depth += 1;
+                        }
+                    }
                     scope = s;
                 }
 
