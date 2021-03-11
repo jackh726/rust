@@ -446,7 +446,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                             self.inferred_params.push(ty.span);
                             tcx.ty_error().into()
                         } else {
-                            self.astconv.ast_ty_to_ty_inner(&ty, false).into()
+                            self.astconv.ast_ty_to_ty(&ty).into()
                         }
                     }
                     (GenericParamDefKind::Const, GenericArg::Const(ct)) => {
@@ -579,7 +579,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             .map(|binding| {
                 let kind = match binding.kind {
                     hir::TypeBindingKind::Equality { ref ty } => {
-                        ConvertedBindingKind::Equality(self.ast_ty_to_ty_inner(ty, false))
+                        ConvertedBindingKind::Equality(self.ast_ty_to_ty(ty))
                     }
                     hir::TypeBindingKind::Constraint { ref bounds } => {
                         ConvertedBindingKind::Constraint(bounds)
@@ -921,9 +921,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ast_bounds: &[hir::GenericBound<'_>],
         sized_by_default: SizedByDefault,
         span: Span,
-        bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
     ) -> Bounds<'tcx> {
-        self.compute_bounds_inner(param_ty, &ast_bounds, sized_by_default, span, bound_vars)
+        self.compute_bounds_inner(param_ty, &ast_bounds, sized_by_default, span)
     }
 
     /// Convert the bounds in `ast_bounds` that refer to traits which define an associated type
@@ -948,7 +947,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             }
         }
 
-        self.compute_bounds_inner(param_ty, &result, sized_by_default, span, ty::List::empty())
+        self.compute_bounds_inner(param_ty, &result, sized_by_default, span)
     }
 
     fn compute_bounds_inner(
@@ -957,11 +956,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ast_bounds: &[hir::GenericBound<'_>],
         sized_by_default: SizedByDefault,
         span: Span,
-        bound_vars: &'tcx ty::List<ty::BoundVariableKind>,
     ) -> Bounds<'tcx> {
         let mut bounds = Bounds::default();
 
-        self.add_bounds(param_ty, ast_bounds, &mut bounds, bound_vars);
+        self.add_bounds(param_ty, ast_bounds, &mut bounds, ty::List::empty());
         bounds.trait_bounds.sort_by_key(|(t, _, _)| t.def_id());
 
         bounds.implicitly_sized = if let SizedByDefault::Yes = sized_by_default {
@@ -2188,15 +2186,14 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
     /// Turns a `hir::Ty` into a `Ty`. For diagnostics' purposes we keep track of whether trait
     /// objects are borrowed like `&dyn Trait` to avoid emitting redundant errors.
     #[tracing::instrument(level = "debug", skip(self))]
-    pub fn ast_ty_to_ty_inner(&self, ast_ty: &hir::Ty<'_>, borrowed: bool) -> Ty<'tcx> {
+    fn ast_ty_to_ty_inner(&self, ast_ty: &hir::Ty<'_>, borrowed: bool) -> Ty<'tcx> {
         let tcx = self.tcx();
 
         let result_ty = match ast_ty.kind {
-            hir::TyKind::Slice(ref ty) => tcx.mk_slice(self.ast_ty_to_ty_inner(&ty, false)),
-            hir::TyKind::Ptr(ref mt) => tcx.mk_ptr(ty::TypeAndMut {
-                ty: self.ast_ty_to_ty_inner(&mt.ty, false),
-                mutbl: mt.mutbl,
-            }),
+            hir::TyKind::Slice(ref ty) => tcx.mk_slice(self.ast_ty_to_ty(&ty)),
+            hir::TyKind::Ptr(ref mt) => {
+                tcx.mk_ptr(ty::TypeAndMut { ty: self.ast_ty_to_ty(&mt.ty), mutbl: mt.mutbl })
+            }
             hir::TyKind::Rptr(ref region, ref mt) => {
                 let r = self.ast_region_to_region(region, None);
                 debug!(?r);
@@ -2205,7 +2202,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             }
             hir::TyKind::Never => tcx.types.never,
             hir::TyKind::Tup(ref fields) => {
-                tcx.mk_tup(fields.iter().map(|t| self.ast_ty_to_ty_inner(&t, false)))
+                tcx.mk_tup(fields.iter().map(|t| self.ast_ty_to_ty(&t)))
             }
             hir::TyKind::BareFn(ref bf) => {
                 require_c_abi_if_c_variadic(tcx, &bf.decl, bf.abi, ast_ty.span);
@@ -2225,8 +2222,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             }
             hir::TyKind::Path(hir::QPath::Resolved(ref maybe_qself, ref path)) => {
                 debug!(?maybe_qself, ?path);
-                let opt_self_ty =
-                    maybe_qself.as_ref().map(|qself| self.ast_ty_to_ty_inner(qself, false));
+                let opt_self_ty = maybe_qself.as_ref().map(|qself| self.ast_ty_to_ty(qself));
                 self.res_to_ty(opt_self_ty, path, false)
             }
             hir::TyKind::OpaqueDef(item_id, ref lifetimes) => {
@@ -2242,7 +2238,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             }
             hir::TyKind::Path(hir::QPath::TypeRelative(ref qself, ref segment)) => {
                 debug!(?qself, ?segment);
-                let ty = self.ast_ty_to_ty_inner(qself, false);
+                let ty = self.ast_ty_to_ty(qself);
 
                 let res = if let hir::TyKind::Path(hir::QPath::Resolved(_, ref path)) = qself.kind {
                     path.res
@@ -2269,7 +2265,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             hir::TyKind::Array(ref ty, ref length) => {
                 let length_def_id = tcx.hir().local_def_id(length.hir_id);
                 let length = ty::Const::from_anon_const(tcx, length_def_id);
-                let array_ty = tcx.mk_ty(ty::Array(self.ast_ty_to_ty_inner(&ty, false), length));
+                let array_ty = tcx.mk_ty(ty::Array(self.ast_ty_to_ty(&ty), length));
                 self.normalize_ty(ast_ty.span, array_ty)
             }
             hir::TyKind::Typeof(ref _e) => {
@@ -2347,7 +2343,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 self.record_ty(ty.hir_id, expected_ty.unwrap(), ty.span);
                 expected_ty.unwrap()
             }
-            _ => self.ast_ty_to_ty_inner(ty, false),
+            _ => self.ast_ty_to_ty(ty),
         }
     }
 
@@ -2378,7 +2374,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let output_ty = match decl.output {
             hir::FnRetTy::Return(ref output) => {
                 visitor.visit_ty(output);
-                self.ast_ty_to_ty_inner(output, false)
+                self.ast_ty_to_ty(output)
             }
             hir::FnRetTy::DefaultReturn(..) => tcx.mk_unit(),
         };

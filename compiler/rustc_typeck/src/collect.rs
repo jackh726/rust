@@ -1100,14 +1100,7 @@ fn super_predicates_that_define_assoc_type(
                 assoc_name,
             )
         } else {
-            AstConv::compute_bounds(
-                &icx,
-                self_param_ty,
-                &bounds,
-                SizedByDefault::No,
-                item.span,
-                ty::List::empty(),
-            )
+            AstConv::compute_bounds(&icx, self_param_ty, &bounds, SizedByDefault::No, item.span)
         };
 
         let superbounds1 = superbounds1.predicates(tcx, self_param_ty);
@@ -2036,14 +2029,8 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
                 index += 1;
 
                 let sized = SizedByDefault::Yes;
-                let bounds = AstConv::compute_bounds(
-                    &icx,
-                    param_ty,
-                    &param.bounds,
-                    sized,
-                    param.span,
-                    ty::List::empty(),
-                );
+                let bounds =
+                    AstConv::compute_bounds(&icx, param_ty, &param.bounds, sized, param.span);
                 predicates.extend(bounds.predicates(tcx, param_ty));
             }
             GenericParamKind::Const { .. } => {

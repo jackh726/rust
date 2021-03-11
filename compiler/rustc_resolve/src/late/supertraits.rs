@@ -24,6 +24,7 @@ impl<'tcx> Elaborator<'tcx> {
             let bound_predicate = pred.kind();
             match bound_predicate.skip_binder() {
                 ty::PredicateKind::Trait(data, _) => {
+                    // The order here needs to match what we would get from `subst_supertrait`
                     let pred_bound_vars = bound_predicate.bound_vars();
                     let mut all_bound_vars = bound_vars.clone();
                     all_bound_vars.extend(pred_bound_vars.iter());
