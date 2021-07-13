@@ -203,6 +203,7 @@ use rustc_session::lint::builtin::LARGE_ASSIGNMENTS;
 use rustc_session::Limit;
 use rustc_span::source_map::{dummy_spanned, respan, Span, Spanned, DUMMY_SP};
 use rustc_target::abi::Size;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 use smallvec::SmallVec;
 use std::iter;
 use std::ops::Range;
@@ -1316,7 +1317,7 @@ fn create_mono_items_for_default_impls<'tcx>(
 
             if let Some(trait_ref) = tcx.impl_trait_ref(item.def_id) {
                 let param_env = ty::ParamEnv::reveal_all();
-                let trait_ref = tcx.normalize_erasing_regions(param_env, trait_ref);
+                let trait_ref = normalize_erasing_regions(tcx, param_env, trait_ref);
                 let overridden_methods: FxHashSet<_> =
                     impl_.items.iter().map(|iiref| iiref.ident.normalize_to_macros_2_0()).collect();
                 for method in tcx.provided_trait_methods(trait_ref.def_id) {

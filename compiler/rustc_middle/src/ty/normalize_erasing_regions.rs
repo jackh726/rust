@@ -33,10 +33,10 @@ impl<'tcx> TyCtxt<'tcx> {
         // cache from being too polluted.
         let value = self.erase_regions(value);
         if !value.has_projections() {
-            value
-        } else {
-            value.fold_with(&mut NormalizeAfterErasingRegionsFolder { tcx: self, param_env })
+            return value;
         }
+
+        value.fold_with(&mut NormalizeAfterErasingRegionsFolder { tcx: self, param_env })
     }
 
     /// If you have a `Binder<'tcx, T>`, you can do this to strip out the

@@ -6,6 +6,7 @@ use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::subst::{InternalSubsts, Subst};
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_target::abi::VariantIdx;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 
 use rustc_index::vec::{Idx, IndexVec};
 
@@ -871,7 +872,7 @@ pub fn build_adt_ctor(tcx: TyCtxt<'_>, ctor_id: DefId) -> Body<'_> {
 
     // Normalize the sig.
     let sig = tcx.fn_sig(ctor_id).no_bound_vars().expect("LBR in ADT constructor signature");
-    let sig = tcx.normalize_erasing_regions(param_env, sig);
+    let sig = normalize_erasing_regions(tcx, param_env, sig);
 
     let (adt_def, substs) = match sig.output().kind() {
         ty::Adt(adt_def, substs) => (adt_def, substs),

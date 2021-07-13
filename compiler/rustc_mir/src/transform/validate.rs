@@ -18,6 +18,7 @@ use rustc_middle::mir::{
 use rustc_middle::ty::fold::BottomUpFolder;
 use rustc_middle::ty::{self, ParamEnv, Ty, TyCtxt, TypeFoldable};
 use rustc_target::abi::Size;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 
 #[derive(Copy, Clone, Debug)]
 enum EdgeKind {
@@ -82,7 +83,8 @@ pub fn equal_up_to_regions(
     // Normalize lifetimes away on both sides, then compare.
     let param_env = param_env.with_reveal_all_normalized(tcx);
     let normalize = |ty: Ty<'tcx>| {
-        tcx.normalize_erasing_regions(
+        normalize_erasing_regions(
+            tcx,
             param_env,
             ty.fold_with(&mut BottomUpFolder {
                 tcx,
@@ -171,8 +173,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         // FIXME: We need to reveal_all, as some optimizations change types in ways
         // that require unfolding opaque types.
         let param_env = self.param_env.with_reveal_all_normalized(self.tcx);
-        let src = self.tcx.normalize_erasing_regions(param_env, src);
-        let dest = self.tcx.normalize_erasing_regions(param_env, dest);
+        let src = normalize_erasing_regions(self.tcx, param_env, src);
+        let dest = normalize_erasing_regions(self.tcx, param_env, dest);
 
         // Type-changing assignments can happen when subtyping is used. While
         // all normal lifetimes are erased, higher-ranked types with their

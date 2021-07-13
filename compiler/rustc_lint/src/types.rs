@@ -14,6 +14,7 @@ use rustc_span::{Span, DUMMY_SP};
 use rustc_target::abi::Abi;
 use rustc_target::abi::{Integer, LayoutOf, TagEncoding, Variants};
 use rustc_target::spec::abi::Abi as SpecAbi;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 
 use std::cmp;
 use std::iter;
@@ -834,7 +835,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         if field_ty.has_opaque_types() {
             self.check_type_for_ffi(cache, field_ty)
         } else {
-            let field_ty = self.cx.tcx.normalize_erasing_regions(self.cx.param_env, field_ty);
+            let field_ty = normalize_erasing_regions(self.cx.tcx, self.cx.param_env, field_ty);
             self.check_type_for_ffi(cache, field_ty)
         }
     }
@@ -1167,7 +1168,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
                     // Consider opaque types within projections FFI-safe if they do not normalize
                     // to more opaque types.
                     ty::Projection(..) => {
-                        let ty = self.cx.tcx.normalize_erasing_regions(self.cx.param_env, ty);
+                        let ty = normalize_erasing_regions(self.cx.tcx, self.cx.param_env, ty);
 
                         // If `ty` is a opaque type directly then `super_visit_with` won't invoke
                         // this function again.
@@ -1206,7 +1207,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
 
         // it is only OK to use this function because extern fns cannot have
         // any generic types right now:
-        let ty = self.cx.tcx.normalize_erasing_regions(self.cx.param_env, ty);
+        let ty = normalize_erasing_regions(self.cx.tcx, self.cx.param_env, ty);
 
         // C doesn't really support passing arrays by value - the only way to pass an array by value
         // is through a struct. So, first test that the top level isn't an array, and then

@@ -71,6 +71,7 @@ use rustc_middle::ty::GeneratorSubsts;
 use rustc_middle::ty::{self, AdtDef, Ty, TyCtxt};
 use rustc_target::abi::VariantIdx;
 use rustc_target::spec::PanicStrategy;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 use std::{iter, ops};
 
 pub struct StateTransform;
@@ -743,7 +744,7 @@ fn sanitize_witness<'tcx>(
         if !saved_locals.contains(local) || decl.internal {
             continue;
         }
-        let decl_ty = tcx.normalize_erasing_regions(param_env, decl.ty);
+        let decl_ty = normalize_erasing_regions(tcx, param_env, decl.ty);
 
         // Sanity check that typeck knows about the type of locals which are
         // live across a suspension point

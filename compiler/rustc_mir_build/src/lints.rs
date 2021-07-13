@@ -7,6 +7,7 @@ use rustc_middle::mir::{BasicBlock, Body, Operand, TerminatorKind};
 use rustc_middle::ty::subst::{GenericArg, InternalSubsts};
 use rustc_middle::ty::{self, AssocItem, AssocItemContainer, Instance, TyCtxt};
 use rustc_session::lint::builtin::UNCONDITIONAL_RECURSION;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 use rustc_span::Span;
 use std::ops::ControlFlow;
 
@@ -72,7 +73,7 @@ impl<'mir, 'tcx> Search<'mir, 'tcx> {
 
         let func_ty = func.ty(body, tcx);
         if let ty::FnDef(callee, substs) = *func_ty.kind() {
-            let normalized_substs = tcx.normalize_erasing_regions(param_env, substs);
+            let normalized_substs = normalize_erasing_regions(tcx, param_env, substs);
             let (callee, call_substs) = if let Ok(Some(instance)) =
                 Instance::resolve(tcx, param_env, callee, normalized_substs)
             {

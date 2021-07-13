@@ -11,6 +11,7 @@ use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::{self, ConstKind, Instance, InstanceDef, ParamEnv, Ty, TyCtxt};
 use rustc_span::{hygiene::ExpnKind, ExpnData, Span};
 use rustc_target::spec::abi::Abi;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 
 use super::simplify::{remove_dead_blocks, CfgSimplifier};
 use crate::transform::MirPass;
@@ -255,7 +256,7 @@ impl Inliner<'tcx> {
             let func_ty = func.ty(caller_body, self.tcx);
             if let ty::FnDef(def_id, substs) = *func_ty.kind() {
                 // To resolve an instance its substs have to be fully normalized.
-                let substs = self.tcx.normalize_erasing_regions(self.param_env, substs);
+                let substs = normalize_erasing_regions(self.tcx, self.param_env, substs);
                 let callee =
                     Instance::resolve(self.tcx, self.param_env, def_id, substs).ok().flatten()?;
 
@@ -409,7 +410,7 @@ impl Inliner<'tcx> {
                     if let ty::FnDef(def_id, substs) =
                         *callsite.callee.subst_mir(self.tcx, &f.literal.ty()).kind()
                     {
-                        let substs = self.tcx.normalize_erasing_regions(self.param_env, substs);
+                        let substs = normalize_erasing_regions(self.tcx, self.param_env, substs);
                         if let Ok(Some(instance)) =
                             Instance::resolve(self.tcx, self.param_env, def_id, substs)
                         {

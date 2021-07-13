@@ -4,6 +4,7 @@
 // general routines.
 
 use crate::infer::{InferCtxt, TyCtxtInferExt};
+use crate::traits::normalize::normalize_erasing_regions;
 use crate::traits::{
     FulfillmentContext, ImplSource, Obligation, ObligationCause, SelectionContext, TraitEngine,
     Unimplemented,
@@ -27,7 +28,7 @@ pub fn codegen_fulfill_obligation<'tcx>(
     // Remove any references to regions; this helps improve caching.
     let trait_ref = tcx.erase_regions(trait_ref);
     // We expect the input to be fully normalized.
-    debug_assert_eq!(trait_ref, tcx.normalize_erasing_regions(param_env, trait_ref));
+    debug_assert_eq!(trait_ref, normalize_erasing_regions(tcx, param_env, trait_ref));
     debug!(
         "codegen_fulfill_obligation(trait_ref={:?}, def_id={:?})",
         (param_env, trait_ref),

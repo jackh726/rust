@@ -1,4 +1,5 @@
 use crate::infer::{InferCtxt, TyCtxtInferExt};
+use crate::traits::normalize::normalize_erasing_regions;
 use crate::traits::ObligationCause;
 use crate::traits::{self, TraitEngine};
 
@@ -233,7 +234,7 @@ impl<'a, 'tcx> TypeVisitor<'tcx> for Search<'a, 'tcx> {
         // fields of ADT.
         let tcx = self.tcx();
         adt_def.all_fields().map(|field| field.ty(tcx, substs)).try_for_each(|field_ty| {
-            let ty = self.tcx().normalize_erasing_regions(ty::ParamEnv::empty(), field_ty);
+            let ty = normalize_erasing_regions(self.tcx(), ty::ParamEnv::empty(), field_ty);
             debug!("structural-match ADT: field_ty={:?}, ty={:?}", field_ty, ty);
             ty.visit_with(self)
         })

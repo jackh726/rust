@@ -8,6 +8,7 @@ use rustc_middle::ty::subst::SubstsRef;
 use rustc_middle::ty::util::IntTypeExt;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_target::abi::VariantIdx;
+use rustc_trait_selection::traits::normalize::normalize_erasing_regions;
 use std::fmt;
 
 /// The value of an inserted drop flag.
@@ -275,7 +276,7 @@ where
 
                 assert_eq!(self.elaborator.param_env().reveal(), Reveal::All);
                 let field_ty =
-                    tcx.normalize_erasing_regions(self.elaborator.param_env(), f.ty(tcx, substs));
+                    normalize_erasing_regions(tcx, self.elaborator.param_env(), f.ty(tcx, substs));
                 (tcx.mk_place_field(base_place, field, field_ty), subpath)
             })
             .collect()

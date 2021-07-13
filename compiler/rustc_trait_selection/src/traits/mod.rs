@@ -11,6 +11,7 @@ mod engine;
 pub mod error_reporting;
 mod fulfill;
 pub mod misc;
+pub mod normalize;
 mod object_safety;
 mod on_unimplemented;
 mod project;
