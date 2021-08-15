@@ -1364,7 +1364,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     hir::TyKind::BareFn(this.arena.alloc(hir::BareFnTy {
                         generic_params: this.lower_generic_params(
                             &f.generic_params,
-                            &NodeMap::default(),
                             ImplTraitContext::disallowed(),
                         ),
                         unsafety: this.lower_unsafety(f.unsafety),
@@ -2209,30 +2208,25 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     fn lower_generic_params_mut<'s>(
         &'s mut self,
         params: &'s [GenericParam],
-        add_bounds: &'s NodeMap<Vec<GenericBound>>,
         mut itctx: ImplTraitContext<'s, 'hir>,
     ) -> impl Iterator<Item = hir::GenericParam<'hir>> + Captures<'a> + Captures<'s> {
-        params
-            .iter()
-            .map(move |param| self.lower_generic_param(param, add_bounds, itctx.reborrow()))
+        params.iter().map(move |param| self.lower_generic_param(param, itctx.reborrow()))
     }
 
     fn lower_generic_params(
         &mut self,
         params: &[GenericParam],
-        add_bounds: &NodeMap<Vec<GenericBound>>,
         itctx: ImplTraitContext<'_, 'hir>,
     ) -> &'hir [hir::GenericParam<'hir>] {
-        self.arena.alloc_from_iter(self.lower_generic_params_mut(params, add_bounds, itctx))
+        self.arena.alloc_from_iter(self.lower_generic_params_mut(params, itctx))
     }
 
     fn lower_generic_param(
         &mut self,
         param: &GenericParam,
-        add_bounds: &NodeMap<Vec<GenericBound>>,
         mut itctx: ImplTraitContext<'_, 'hir>,
     ) -> hir::GenericParam<'hir> {
-        let mut bounds: Vec<_> = self
+        let bounds: Vec<_> = self
             .with_anonymous_lifetime_mode(AnonymousLifetimeMode::ReportError, |this| {
                 this.lower_param_bounds_mut(&param.bounds, itctx.reborrow()).collect()
             });
@@ -2268,12 +2262,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 (param_name, kind)
             }
             GenericParamKind::Type { ref default, .. } => {
-                let add_bounds = add_bounds.get(&param.id).map_or(&[][..], |x| &x);
-                if !add_bounds.is_empty() {
-                    let params = self.lower_param_bounds_mut(add_bounds, itctx.reborrow());
-                    bounds.extend(params);
-                }
-
                 let kind = hir::GenericParamKind::Type {
                     default: default.as_ref().map(|x| {
                         self.lower_ty(x, ImplTraitContext::Disallowed(ImplTraitPosition::Other))
@@ -2327,11 +2315,8 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         p: &PolyTraitRef,
         mut itctx: ImplTraitContext<'_, 'hir>,
     ) -> hir::PolyTraitRef<'hir> {
-        let bound_generic_params = self.lower_generic_params(
-            &p.bound_generic_params,
-            &NodeMap::default(),
-            itctx.reborrow(),
-        );
+        let bound_generic_params =
+            self.lower_generic_params(&p.bound_generic_params, itctx.reborrow());
 
         let trait_ref = self.with_in_scope_lifetime_defs(&p.bound_generic_params, |this| {
             // Any impl Trait types defined within this scope can capture
