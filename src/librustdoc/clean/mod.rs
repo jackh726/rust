@@ -129,22 +129,6 @@ impl Clean<GenericBound> for hir::GenericBound<'_> {
     fn clean(&self, cx: &mut DocContext<'_>) -> GenericBound {
         match *self {
             hir::GenericBound::Outlives(lt) => GenericBound::Outlives(lt.clean(cx)),
-            hir::GenericBound::LangItemTrait(lang_item, span, _, generic_args) => {
-                let def_id = cx.tcx.require_lang_item(lang_item, Some(span));
-
-                let trait_ref = ty::TraitRef::identity(cx.tcx, def_id);
-
-                let generic_args = generic_args.clean(cx);
-                let bindings = match generic_args {
-                    GenericArgs::AngleBracketed { bindings, .. } => bindings,
-                    _ => bug!("clean: parenthesized `GenericBound::LangItemTrait`"),
-                };
-
-                GenericBound::TraitBound(
-                    PolyTrait { trait_: (trait_ref, &*bindings).clean(cx), generic_params: vec![] },
-                    hir::TraitBoundModifier::None,
-                )
-            }
             hir::GenericBound::Trait(ref t, modifier) => {
                 GenericBound::TraitBound(t.clean(cx), modifier)
             }
@@ -919,9 +903,24 @@ impl Clean<Type> for hir::TraitRef<'_> {
 
 impl Clean<PolyTrait> for hir::PolyTraitRef<'_> {
     fn clean(&self, cx: &mut DocContext<'_>) -> PolyTrait {
-        PolyTrait {
-            trait_: self.trait_ref.clean(cx),
-            generic_params: self.bound_generic_params.clean(cx),
+        match self {
+            hir::PolyTraitRef::Written { trait_ref, bound_generic_params, .. } => PolyTrait {
+                trait_: trait_ref.clean(cx),
+                generic_params: bound_generic_params.clean(cx),
+            },
+            &hir::PolyTraitRef::Lang(lang_item, span, _, generic_args) => {
+                let def_id = cx.tcx.require_lang_item(lang_item, Some(span));
+
+                let trait_ref = ty::TraitRef::identity(cx.tcx, def_id);
+
+                let generic_args = generic_args.clean(cx);
+                let bindings = match generic_args {
+                    GenericArgs::AngleBracketed { bindings, .. } => bindings,
+                    _ => bug!("clean: parenthesized `GenericBound::Trait(Lang, _)`"),
+                };
+
+                PolyTrait { trait_: (trait_ref, &*bindings).clean(cx), generic_params: vec![] }
+            }
         }
     }
 }

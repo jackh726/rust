@@ -806,39 +806,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         )
     }
 
-    pub(crate) fn instantiate_lang_item_trait_ref(
-        &self,
-        lang_item: hir::LangItem,
-        span: Span,
-        hir_id: hir::HirId,
-        args: &GenericArgs<'_>,
-        self_ty: Ty<'tcx>,
-        bounds: &mut Bounds<'tcx>,
-    ) {
-        let binding_span = Some(span);
-        let constness = Constness::NotConst;
-        let speculative = false;
-        let trait_ref_span = span;
-        let trait_def_id = self.tcx().require_lang_item(lang_item, Some(span));
-        let trait_segment = &hir::PathSegment::invalid();
-        let infer_args = false;
-
-        self.instantiate_poly_trait_ref_inner(
-            hir_id,
-            span,
-            binding_span,
-            constness,
-            bounds,
-            speculative,
-            trait_ref_span,
-            trait_def_id,
-            trait_segment,
-            args,
-            infer_args,
-            self_ty,
-        );
-    }
-
     fn ast_path_to_mono_trait_ref(
         &self,
         span: Span,
@@ -897,9 +864,13 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let mut unbound = None;
         let mut search_bounds = |ast_bounds: &'hir [hir::GenericBound<'hir>]| {
             for ab in ast_bounds {
-                if let hir::GenericBound::Trait(ptr, hir::TraitBoundModifier::Maybe) = ab {
+                if let hir::GenericBound::Trait(
+                    hir::PolyTraitRef::Written { trait_ref, .. },
+                    hir::TraitBoundModifier::Maybe,
+                ) = ab
+                {
                     if unbound.is_none() {
-                        unbound = Some(&ptr.trait_ref);
+                        unbound = Some(trait_ref);
                     } else {
                         tcx.sess.emit_err(MultipleRelaxedDefaultBounds { span });
                     }
@@ -981,7 +952,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let constness = self.default_constness_for_trait_bounds();
         for ast_bound in ast_bounds {
             match ast_bound {
-                hir::GenericBound::Trait(poly_trait_ref, modifier) => {
+                hir::GenericBound::Trait(
+                    hir::PolyTraitRef::Written { trait_ref, span, .. },
+                    modifier,
+                ) => {
                     let constness = match modifier {
                         hir::TraitBoundModifier::MaybeConst => hir::Constness::NotConst,
                         hir::TraitBoundModifier::None => constness,
@@ -989,17 +963,34 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     };
 
                     let _ = self.instantiate_poly_trait_ref(
-                        &poly_trait_ref.trait_ref,
-                        poly_trait_ref.span,
-                        constness,
-                        param_ty,
-                        bounds,
-                        false,
+                        &trait_ref, *span, constness, param_ty, bounds, false,
                     );
                 }
-                &hir::GenericBound::LangItemTrait(lang_item, span, hir_id, args) => {
-                    self.instantiate_lang_item_trait_ref(
-                        lang_item, span, hir_id, args, param_ty, bounds,
+                &hir::GenericBound::Trait(
+                    hir::PolyTraitRef::Lang(lang_item, span, hir_id, args),
+                    _,
+                ) => {
+                    let binding_span = Some(span);
+                    let constness = Constness::NotConst;
+                    let speculative = false;
+                    let trait_ref_span = span;
+                    let trait_def_id = self.tcx().require_lang_item(lang_item, Some(span));
+                    let trait_segment = &hir::PathSegment::invalid();
+                    let infer_args = false;
+
+                    self.instantiate_poly_trait_ref_inner(
+                        hir_id,
+                        span,
+                        binding_span,
+                        constness,
+                        bounds,
+                        speculative,
+                        trait_ref_span,
+                        trait_def_id,
+                        trait_segment,
+                        args,
+                        infer_args,
+                        param_ty,
                     );
                 }
                 hir::GenericBound::Outlives(lifetime) => {
@@ -1287,19 +1278,21 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         let mut potential_assoc_types = Vec::new();
         let dummy_self = self.tcx().types.trait_object_dummy_self;
         for trait_bound in trait_bounds.iter().rev() {
-            if let GenericArgCountResult {
-                correct:
-                    Err(GenericArgCountMismatch { invalid_args: cur_potential_assoc_types, .. }),
-                ..
-            } = self.instantiate_poly_trait_ref(
-                &trait_bound.trait_ref,
-                trait_bound.span,
-                Constness::NotConst,
-                dummy_self,
-                &mut bounds,
-                false,
-            ) {
-                potential_assoc_types.extend(cur_potential_assoc_types);
+            if let hir::PolyTraitRef::Written { trait_ref, span, .. } = trait_bound {
+                if let GenericArgCountResult {
+                    correct:
+                        Err(GenericArgCountMismatch { invalid_args: cur_potential_assoc_types, .. }),
+                    ..
+                } = self.instantiate_poly_trait_ref(
+                    &trait_ref,
+                    *span,
+                    Constness::NotConst,
+                    dummy_self,
+                    &mut bounds,
+                    false,
+                ) {
+                    potential_assoc_types.extend(cur_potential_assoc_types);
+                }
             }
         }
 

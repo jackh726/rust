@@ -113,11 +113,14 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
                         ..
                     })) => {
                         for b in bounds.iter() {
-                            if let hir::GenericBound::LangItemTrait(
-                                hir::LangItem::Future,
-                                _span,
-                                _hir_id,
-                                generic_args,
+                            if let hir::GenericBound::Trait(
+                                hir::PolyTraitRef::Lang(
+                                    hir::LangItem::Future,
+                                    _span,
+                                    _hir_id,
+                                    generic_args,
+                                ),
+                                _,
                             ) = b
                             {
                                 for type_binding in generic_args.bindings.iter() {

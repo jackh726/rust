@@ -205,10 +205,12 @@ pub fn check_trait_item(tcx: TyCtxt<'_>, def_id: LocalDefId) {
 
 fn could_be_self(trait_def_id: LocalDefId, ty: &hir::Ty<'_>) -> bool {
     match ty.kind {
-        hir::TyKind::TraitObject([trait_ref], ..) => match trait_ref.trait_ref.path.segments {
-            [s] => s.res.and_then(|r| r.opt_def_id()) == Some(trait_def_id.to_def_id()),
-            _ => false,
-        },
+        hir::TyKind::TraitObject([hir::PolyTraitRef::Written { trait_ref, .. }], ..) => {
+            match trait_ref.path.segments {
+                [s] => s.res.and_then(|r| r.opt_def_id()) == Some(trait_def_id.to_def_id()),
+                _ => false,
+            }
+        }
         _ => false,
     }
 }

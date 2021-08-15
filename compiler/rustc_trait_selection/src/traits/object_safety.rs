@@ -198,14 +198,16 @@ fn sized_trait_bound_spans<'tcx>(
     bounds: hir::GenericBounds<'tcx>,
 ) -> impl 'tcx + Iterator<Item = Span> {
     bounds.iter().filter_map(move |b| match b {
-        hir::GenericBound::Trait(trait_ref, hir::TraitBoundModifier::None)
-            if trait_has_sized_self(
-                tcx,
-                trait_ref.trait_ref.trait_def_id().unwrap_or_else(|| FatalError.raise()),
-            ) =>
+        hir::GenericBound::Trait(
+            hir::PolyTraitRef::Written { trait_ref, span, .. },
+            hir::TraitBoundModifier::None,
+        ) if trait_has_sized_self(
+            tcx,
+            trait_ref.trait_def_id().unwrap_or_else(|| FatalError.raise()),
+        ) =>
         {
             // Fetch spans for supertraits that are `Sized`: `trait T: Super`
-            Some(trait_ref.span)
+            Some(*span)
         }
         _ => None,
     })

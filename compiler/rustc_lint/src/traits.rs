@@ -119,20 +119,22 @@ impl<'tcx> LateLintPass<'tcx> for DropTraitConstraints {
             _ => return,
         };
         for bound in &bounds[..] {
-            let def_id = bound.trait_ref.trait_def_id();
-            if cx.tcx.lang_items().drop_trait() == def_id {
-                cx.struct_span_lint(DYN_DROP, bound.span, |lint| {
-                    let needs_drop = match cx.tcx.get_diagnostic_item(sym::needs_drop) {
-                        Some(needs_drop) => needs_drop,
-                        None => return,
-                    };
-                    let msg = format!(
-                        "types that do not implement `Drop` can still have drop glue, consider \
-                        instead using `{}` to detect whether a type is trivially dropped",
-                        cx.tcx.def_path_str(needs_drop)
-                    );
-                    lint.build(&msg).emit()
-                });
+            if let hir::PolyTraitRef::Written { trait_ref, span, .. } = bound {
+                let def_id = trait_ref.trait_def_id();
+                if cx.tcx.lang_items().drop_trait() == def_id {
+                    cx.struct_span_lint(DYN_DROP, *span, |lint| {
+                        let needs_drop = match cx.tcx.get_diagnostic_item(sym::needs_drop) {
+                            Some(needs_drop) => needs_drop,
+                            None => return,
+                        };
+                        let msg = format!(
+                            "types that do not implement `Drop` can still have drop glue, consider \
+                            instead using `{}` to detect whether a type is trivially dropped",
+                            cx.tcx.def_path_str(needs_drop)
+                        );
+                        lint.build(&msg).emit()
+                    });
+                }
             }
         }
     }

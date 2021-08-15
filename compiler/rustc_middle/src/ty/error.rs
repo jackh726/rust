@@ -937,25 +937,35 @@ fn foo(&self) -> Self::T { String::new() }
         // FIXME: we would want to call `resolve_vars_if_possible` on `ty` before suggesting.
 
         let trait_bounds = bounds.iter().filter_map(|bound| match bound {
-            hir::GenericBound::Trait(ptr, hir::TraitBoundModifier::None) => Some(ptr),
+            hir::GenericBound::Trait(
+                hir::PolyTraitRef::Written { trait_ref, span, .. },
+                hir::TraitBoundModifier::None,
+            ) => Some((trait_ref, span)),
             _ => None,
         });
 
         let matching_trait_bounds = trait_bounds
             .clone()
-            .filter(|ptr| ptr.trait_ref.trait_def_id() == Some(trait_ref.def_id))
+            .filter(|ptr| ptr.0.trait_def_id() == Some(trait_ref.def_id))
             .collect::<Vec<_>>();
 
         let span = match &matching_trait_bounds[..] {
-            &[ptr] => ptr.span,
+            &[ptr] => ptr.1,
             &[] if is_bound_surely_present => match &trait_bounds.collect::<Vec<_>>()[..] {
-                &[ptr] => ptr.span,
+                &[ptr] => ptr.1,
                 _ => return false,
             },
             _ => return false,
         };
 
-        self.constrain_associated_type_structured_suggestion(db, span, assoc, assoc_substs, ty, msg)
+        self.constrain_associated_type_structured_suggestion(
+            db,
+            *span,
+            assoc,
+            assoc_substs,
+            ty,
+            msg,
+        )
     }
 
     /// Given a span corresponding to a bound, provide a structured suggestion to set an

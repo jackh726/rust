@@ -2145,12 +2145,15 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             span_ext: DUMMY_SP,
         });
 
-        hir::GenericBound::LangItemTrait(
-            // ::std::future::Future<future_params>
-            hir::LangItem::Future,
-            span,
-            self.next_id(),
-            future_args,
+        hir::GenericBound::Trait(
+            hir::PolyTraitRef::Lang(
+                // ::std::future::Future<future_params>
+                hir::LangItem::Future,
+                span,
+                self.next_id(),
+                future_args,
+            ),
+            hir::TraitBoundModifier::None,
         )
     }
 
@@ -2345,7 +2348,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             res
         });
 
-        hir::PolyTraitRef { bound_generic_params, trait_ref, span: p.span }
+        hir::PolyTraitRef::Written { bound_generic_params, trait_ref, span: p.span }
     }
 
     fn lower_mt(&mut self, mt: &MutTy, itctx: ImplTraitContext<'_, 'hir>) -> hir::MutTy<'hir> {
@@ -2637,7 +2640,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 // Turn trait object paths into `TyKind::TraitObject` instead.
                 match path.res {
                     Res::Def(DefKind::Trait | DefKind::TraitAlias, _) => {
-                        let principal = hir::PolyTraitRef {
+                        let principal = hir::PolyTraitRef::Written {
                             bound_generic_params: &[],
                             trait_ref: hir::TraitRef { path, hir_ref_id: hir_id },
                             span,

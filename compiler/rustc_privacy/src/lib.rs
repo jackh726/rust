@@ -1459,9 +1459,11 @@ impl<'a, 'tcx> ObsoleteVisiblePrivateTypesVisitor<'a, 'tcx> {
     }
 
     fn check_generic_bound(&mut self, bound: &hir::GenericBound<'_>) {
-        if let hir::GenericBound::Trait(ref trait_ref, _) = *bound {
-            if self.path_is_private_type(&trait_ref.trait_ref.path) {
-                self.old_error_set.insert(trait_ref.trait_ref.hir_ref_id);
+        if let hir::GenericBound::Trait(hir::PolyTraitRef::Written { ref trait_ref, .. }, _) =
+            *bound
+        {
+            if self.path_is_private_type(&trait_ref.path) {
+                self.old_error_set.insert(trait_ref.hir_ref_id);
             }
         }
     }

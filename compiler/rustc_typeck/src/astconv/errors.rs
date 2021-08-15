@@ -237,8 +237,10 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                 ));
             }
         }
-        if let ([], [bound]) = (&potential_assoc_types[..], &trait_bounds) {
-            match bound.trait_ref.path.segments {
+        if let ([], [hir::PolyTraitRef::Written { trait_ref, .. }]) =
+            (&potential_assoc_types[..], &trait_bounds)
+        {
+            match trait_ref.path.segments {
                 // FIXME: `trait_ref.path.span` can point to a full path with multiple
                 // segments, even though `trait_ref.path.segments` is of length `1`. Work
                 // around that bug here, even though it should be fixed elsewhere.

@@ -547,8 +547,16 @@ pub fn walk_poly_trait_ref<'v, V: Visitor<'v>>(
     trait_ref: &'v PolyTraitRef<'v>,
     _modifier: TraitBoundModifier,
 ) {
-    walk_list!(visitor, visit_generic_param, trait_ref.bound_generic_params);
-    visitor.visit_trait_ref(&trait_ref.trait_ref);
+    match trait_ref {
+        PolyTraitRef::Written { bound_generic_params, trait_ref, .. } => {
+            walk_list!(visitor, visit_generic_param, *bound_generic_params);
+            visitor.visit_trait_ref(&trait_ref);
+        }
+        PolyTraitRef::Lang(_, span, hir_id, args) => {
+            visitor.visit_id(*hir_id);
+            visitor.visit_generic_args(*span, args);
+        }
+    }
 }
 
 pub fn walk_trait_ref<'v, V: Visitor<'v>>(visitor: &mut V, trait_ref: &'v TraitRef<'v>) {
@@ -883,10 +891,6 @@ pub fn walk_param_bound<'v, V: Visitor<'v>>(visitor: &mut V, bound: &'v GenericB
     match *bound {
         GenericBound::Trait(ref typ, modifier) => {
             visitor.visit_poly_trait_ref(typ, modifier);
-        }
-        GenericBound::LangItemTrait(_, span, hir_id, args) => {
-            visitor.visit_id(hir_id);
-            visitor.visit_generic_args(span, args);
         }
         GenericBound::Outlives(ref lifetime) => visitor.visit_lifetime(lifetime),
     }

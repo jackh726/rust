@@ -685,11 +685,11 @@ impl<'tcx> DumpVisitor<'tcx> {
         // super-traits
         for super_bound in trait_refs.iter() {
             let (def_id, sub_span) = match *super_bound {
-                hir::GenericBound::Trait(ref trait_ref, _) => (
-                    self.lookup_def_id(trait_ref.trait_ref.hir_ref_id),
-                    trait_ref.trait_ref.path.segments.last().unwrap().ident.span,
+                hir::GenericBound::Trait(hir::PolyTraitRef::Written { ref trait_ref, .. }, _) => (
+                    self.lookup_def_id(trait_ref.hir_ref_id),
+                    trait_ref.path.segments.last().unwrap().ident.span,
                 ),
-                hir::GenericBound::LangItemTrait(lang_item, span, _, _) => {
+                hir::GenericBound::Trait(hir::PolyTraitRef::Lang(lang_item, span, ..), _) => {
                     (Some(self.tcx.require_lang_item(lang_item, Some(span))), span)
                 }
                 hir::GenericBound::Outlives(..) => continue,
@@ -1126,10 +1126,12 @@ impl<'tcx> DumpVisitor<'tcx> {
 
     fn process_bounds(&mut self, bounds: hir::GenericBounds<'tcx>) {
         for bound in bounds {
-            if let hir::GenericBound::Trait(ref trait_ref, _) = *bound {
+            if let hir::GenericBound::Trait(hir::PolyTraitRef::Written { ref trait_ref, .. }, _) =
+                *bound
+            {
                 self.process_path(
-                    trait_ref.trait_ref.hir_ref_id,
-                    &hir::QPath::Resolved(None, &trait_ref.trait_ref.path),
+                    trait_ref.hir_ref_id,
+                    &hir::QPath::Resolved(None, &trait_ref.path),
                 )
             }
         }

@@ -1426,34 +1426,6 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
         })
     }
 
-    fn visit_param_bound(&mut self, bound: &'tcx hir::GenericBound<'tcx>) {
-        match bound {
-            hir::GenericBound::LangItemTrait(_, _, hir_id, _) => {
-                // FIXME(jackh726): This is pretty weird. `LangItemTrait` doesn't go
-                // through the regular poly trait ref code, so we don't get another
-                // chance to introduce a binder. For now, I'm keeping the existing logic
-                // of "if there isn't a Binder scope above us, add one", but I
-                // imagine there's a better way to go about this.
-                let (binders, scope_type) = self.poly_trait_ref_binder_info();
-
-                self.map.late_bound_vars.insert(*hir_id, binders);
-                let scope = Scope::Binder {
-                    hir_id: *hir_id,
-                    lifetimes: FxIndexMap::default(),
-                    s: self.scope,
-                    next_early_index: self.next_early_index(),
-                    track_lifetime_uses: true,
-                    opaque_type_parent: false,
-                    scope_type,
-                };
-                self.with(scope, |_, this| {
-                    intravisit::walk_param_bound(this, bound);
-                });
-            }
-            _ => intravisit::walk_param_bound(self, bound),
-        }
-    }
-
     fn visit_poly_trait_ref(
         &mut self,
         trait_ref: &'tcx hir::PolyTraitRef<'tcx>,
@@ -1463,51 +1435,56 @@ impl<'a, 'tcx> Visitor<'tcx> for LifetimeContext<'a, 'tcx> {
 
         let should_pop_missing_lt = self.is_trait_ref_fn_scope(trait_ref);
 
-        let next_early_index = self.next_early_index();
         let (mut binders, scope_type) = self.poly_trait_ref_binder_info();
 
-        let initial_bound_vars = binders.len() as u32;
-        let mut lifetimes: FxIndexMap<hir::ParamName, Region> = FxIndexMap::default();
-        let binders_iter = trait_ref
-            .bound_generic_params
-            .iter()
-            .filter_map(|param| match param.kind {
-                GenericParamKind::Lifetime { .. } => Some(param),
-                _ => None,
-            })
-            .enumerate()
-            .map(|(late_bound_idx, param)| {
-                let pair = Region::late(
-                    initial_bound_vars + late_bound_idx as u32,
-                    &self.tcx.hir(),
-                    param,
-                );
-                let r = late_region_as_bound_region(self.tcx, &pair.1);
-                lifetimes.insert(pair.0, pair.1);
-                r
-            });
-        binders.extend(binders_iter);
+        let (hir_id, lifetimes) = match trait_ref {
+            hir::PolyTraitRef::Written { bound_generic_params, trait_ref, .. } => {
+                let initial_bound_vars = binders.len() as u32;
+                let mut lifetimes: FxIndexMap<hir::ParamName, Region> = FxIndexMap::default();
+                let binders_iter = bound_generic_params
+                    .iter()
+                    .filter_map(|param| match param.kind {
+                        GenericParamKind::Lifetime { .. } => Some(param),
+                        _ => None,
+                    })
+                    .enumerate()
+                    .map(|(late_bound_idx, param)| {
+                        let pair = Region::late(
+                            initial_bound_vars + late_bound_idx as u32,
+                            &self.tcx.hir(),
+                            param,
+                        );
+                        let r = late_region_as_bound_region(self.tcx, &pair.1);
+                        lifetimes.insert(pair.0, pair.1);
+                        r
+                    });
+                binders.extend(binders_iter);
+                (trait_ref.hir_ref_id, lifetimes)
+            }
+            hir::PolyTraitRef::Lang(_, _, hir_id, _) => (*hir_id, FxIndexMap::default()),
+        };
 
         debug!(?binders);
-        self.map.late_bound_vars.insert(trait_ref.trait_ref.hir_ref_id, binders);
+        self.map.late_bound_vars.insert(hir_id, binders);
 
         // Always introduce a scope here, even if this is in a where clause and
         // we introduced the binders around the bounded Ty. In that case, we
         // just reuse the concatenation functionality also present in nested trait
         // refs.
         let scope = Scope::Binder {
-            hir_id: trait_ref.trait_ref.hir_ref_id,
+            hir_id,
             lifetimes,
             s: self.scope,
-            next_early_index,
+            next_early_index: self.next_early_index(),
             track_lifetime_uses: true,
             opaque_type_parent: false,
             scope_type,
         };
         self.with(scope, |old_scope, this| {
-            this.check_lifetime_params(old_scope, &trait_ref.bound_generic_params);
-            walk_list!(this, visit_generic_param, trait_ref.bound_generic_params);
-            this.visit_trait_ref(&trait_ref.trait_ref);
+            if let hir::PolyTraitRef::Written { bound_generic_params, .. } = trait_ref {
+                this.check_lifetime_params(old_scope, &bound_generic_params);
+            }
+            intravisit::walk_poly_trait_ref(this, trait_ref, _modifier);
         });
 
         if should_pop_missing_lt {
@@ -2957,16 +2934,6 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
                 self.outer_index.shift_in(1);
                 intravisit::walk_poly_trait_ref(self, trait_ref, modifier);
                 self.outer_index.shift_out(1);
-            }
-
-            fn visit_param_bound(&mut self, bound: &hir::GenericBound<'_>) {
-                if let hir::GenericBound::LangItemTrait { .. } = bound {
-                    self.outer_index.shift_in(1);
-                    intravisit::walk_param_bound(self, bound);
-                    self.outer_index.shift_out(1);
-                } else {
-                    intravisit::walk_param_bound(self, bound);
-                }
             }
 
             fn visit_lifetime(&mut self, lifetime_ref: &hir::Lifetime) {

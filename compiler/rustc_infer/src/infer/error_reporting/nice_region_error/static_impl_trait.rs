@@ -508,8 +508,10 @@ impl<'a, 'tcx> Visitor<'tcx> for HirTraitObjectVisitor<'a> {
         ) = t.kind
         {
             for ptr in poly_trait_refs {
-                if Some(self.1) == ptr.trait_ref.trait_def_id() {
-                    self.0.push(ptr.span);
+                if let hir::PolyTraitRef::Written { trait_ref, span, .. } = ptr {
+                    if Some(self.1) == trait_ref.trait_def_id() {
+                        self.0.push(*span);
+                    }
                 }
             }
         }

@@ -709,8 +709,7 @@ impl ItemCtxt<'tcx> {
         debug!("bound_defines_assoc_item(b={:?}, assoc_name={:?})", b, assoc_name);
 
         match b {
-            hir::GenericBound::Trait(poly_trait_ref, _) => {
-                let trait_ref = &poly_trait_ref.trait_ref;
+            hir::GenericBound::Trait(hir::PolyTraitRef::Written { trait_ref, .. }, _) => {
                 if let Some(trait_did) = trait_ref.trait_def_id() {
                     self.tcx.trait_may_define_assoc_type(trait_did, assoc_name)
                 } else {

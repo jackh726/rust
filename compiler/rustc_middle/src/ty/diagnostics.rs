@@ -137,8 +137,10 @@ fn suggest_removing_unsized_bound(
             }) if segment.ident.as_str() == param_name => {
                 for (pos, bound) in bounds.iter().enumerate() {
                     match bound {
-                        hir::GenericBound::Trait(poly, hir::TraitBoundModifier::Maybe)
-                            if poly.trait_ref.trait_def_id() == def_id => {}
+                        hir::GenericBound::Trait(
+                            hir::PolyTraitRef::Written { trait_ref, .. },
+                            hir::TraitBoundModifier::Maybe,
+                        ) if trait_ref.trait_def_id() == def_id => {}
                         _ => continue,
                     }
                     let sp = match (
@@ -183,9 +185,10 @@ fn suggest_removing_unsized_bound(
     }
     for (pos, bound) in param.bounds.iter().enumerate() {
         match bound {
-            hir::GenericBound::Trait(poly, hir::TraitBoundModifier::Maybe)
-                if poly.trait_ref.trait_def_id() == def_id =>
-            {
+            hir::GenericBound::Trait(
+                hir::PolyTraitRef::Written { trait_ref, .. },
+                hir::TraitBoundModifier::Maybe,
+            ) if trait_ref.trait_def_id() == def_id => {
                 let sp = match (param.bounds.len(), pos) {
                     // T: ?Sized,
                     //  ^^^^^^^^

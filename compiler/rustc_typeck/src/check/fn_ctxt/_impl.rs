@@ -988,8 +988,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 self_ty.kind
             {
                 let msg = "trait objects without an explicit `dyn` are deprecated";
+                let is_global = if let hir::PolyTraitRef::Written { trait_ref, .. } = poly_trait_ref
+                {
+                    trait_ref.path.is_global()
+                } else {
+                    false
+                };
                 let (sugg, app) = match self.tcx.sess.source_map().span_to_snippet(self_ty.span) {
-                    Ok(s) if poly_trait_ref.trait_ref.path.is_global() => {
+                    Ok(s) if is_global => {
                         (format!("<dyn ({})>", s), Applicability::MachineApplicable)
                     }
                     Ok(s) => (format!("<dyn {}>", s), Applicability::MachineApplicable),
@@ -1190,17 +1196,25 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     ) if iter::zip(*last_bounds, *exp_bounds).all(|(left, right)| {
                         match (left, right) {
                             (
-                                hir::GenericBound::Trait(tl, ml),
-                                hir::GenericBound::Trait(tr, mr),
-                            ) if tl.trait_ref.trait_def_id() == tr.trait_ref.trait_def_id()
-                                && ml == mr =>
-                            {
-                                true
-                            }
+                                hir::GenericBound::Trait(
+                                    hir::PolyTraitRef::Written { trait_ref: tl, .. },
+                                    ml,
+                                ),
+                                hir::GenericBound::Trait(
+                                    hir::PolyTraitRef::Written { trait_ref: tr, .. },
+                                    mr,
+                                ),
+                            ) if tl.trait_def_id() == tr.trait_def_id() && ml == mr => true,
                             (
-                                hir::GenericBound::LangItemTrait(langl, _, _, argsl),
-                                hir::GenericBound::LangItemTrait(langr, _, _, argsr),
-                            ) if langl == langr => {
+                                hir::GenericBound::Trait(
+                                    hir::PolyTraitRef::Lang(langl, _, _, argsl),
+                                    ml,
+                                ),
+                                hir::GenericBound::Trait(
+                                    hir::PolyTraitRef::Lang(langr, _, _, argsr),
+                                    mr,
+                                ),
+                            ) if langl == langr && ml == mr => {
                                 // FIXME: consider the bounds!
                                 debug!("{:?} {:?}", argsl, argsr);
                                 true

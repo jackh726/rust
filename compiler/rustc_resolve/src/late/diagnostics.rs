@@ -1845,24 +1845,31 @@ impl<'tcx> LifetimeContext<'_, 'tcx> {
     }
 
     crate fn is_trait_ref_fn_scope(&mut self, trait_ref: &'tcx hir::PolyTraitRef<'tcx>) -> bool {
-        if let def::Res::Def(_, did) = trait_ref.trait_ref.path.res {
-            if [
-                self.tcx.lang_items().fn_once_trait(),
-                self.tcx.lang_items().fn_trait(),
-                self.tcx.lang_items().fn_mut_trait(),
-            ]
-            .contains(&Some(did))
-            {
-                let (span, span_type) = match &trait_ref.bound_generic_params {
-                    [] => (trait_ref.span.shrink_to_lo(), ForLifetimeSpanType::BoundEmpty),
-                    [.., bound] => (bound.span.shrink_to_hi(), ForLifetimeSpanType::BoundTail),
+        match trait_ref {
+            hir::PolyTraitRef::Written { bound_generic_params, trait_ref, span } => {
+                if let def::Res::Def(_, did) = trait_ref.path.res {
+                    if [
+                        self.tcx.lang_items().fn_once_trait(),
+                        self.tcx.lang_items().fn_trait(),
+                        self.tcx.lang_items().fn_mut_trait(),
+                    ]
+                    .contains(&Some(did))
+                    {
+                        let (span, span_type) = match &bound_generic_params {
+                            [] => (span.shrink_to_lo(), ForLifetimeSpanType::BoundEmpty),
+                            [.., bound] => {
+                                (bound.span.shrink_to_hi(), ForLifetimeSpanType::BoundTail)
+                            }
+                        };
+                        self.missing_named_lifetime_spots
+                            .push(MissingLifetimeSpot::HigherRanked { span, span_type });
+                        return true;
+                    }
                 };
-                self.missing_named_lifetime_spots
-                    .push(MissingLifetimeSpot::HigherRanked { span, span_type });
-                return true;
+                false
             }
-        };
-        false
+            hir::PolyTraitRef::Lang(..) => false,
+        }
     }
 
     crate fn add_missing_lifetime_specifiers_label(

@@ -675,10 +675,14 @@ impl<'a> State<'a> {
                 self.print_item_type(item, &opaque_ty.generics, |state| {
                     let mut real_bounds = Vec::with_capacity(opaque_ty.bounds.len());
                     for b in opaque_ty.bounds.iter() {
-                        if let GenericBound::Trait(ref ptr, hir::TraitBoundModifier::Maybe) = *b {
+                        if let GenericBound::Trait(
+                            hir::PolyTraitRef::Written { ref trait_ref, .. },
+                            hir::TraitBoundModifier::Maybe,
+                        ) = *b
+                        {
                             state.s.space();
                             state.word_space("for ?");
-                            state.print_trait_ref(&ptr.trait_ref);
+                            state.print_trait_ref(&trait_ref);
                         } else {
                             real_bounds.push(b);
                         }
@@ -754,10 +758,14 @@ impl<'a> State<'a> {
                 self.print_generic_params(&generics.params);
                 let mut real_bounds = Vec::with_capacity(bounds.len());
                 for b in bounds.iter() {
-                    if let GenericBound::Trait(ref ptr, hir::TraitBoundModifier::Maybe) = *b {
+                    if let GenericBound::Trait(
+                        hir::PolyTraitRef::Written { ref trait_ref, .. },
+                        hir::TraitBoundModifier::Maybe,
+                    ) = *b
+                    {
                         self.s.space();
                         self.word_space("for ?");
-                        self.print_trait_ref(&ptr.trait_ref);
+                        self.print_trait_ref(&trait_ref);
                     } else {
                         real_bounds.push(b);
                     }
@@ -780,10 +788,14 @@ impl<'a> State<'a> {
                 let mut real_bounds = Vec::with_capacity(bounds.len());
                 // FIXME(durka) this seems to be some quite outdated syntax
                 for b in bounds.iter() {
-                    if let GenericBound::Trait(ref ptr, hir::TraitBoundModifier::Maybe) = *b {
+                    if let GenericBound::Trait(
+                        hir::PolyTraitRef::Written { ref trait_ref, .. },
+                        hir::TraitBoundModifier::Maybe,
+                    ) = *b
+                    {
                         self.s.space();
                         self.word_space("for ?");
-                        self.print_trait_ref(&ptr.trait_ref);
+                        self.print_trait_ref(&trait_ref);
                     } else {
                         real_bounds.push(b);
                     }
@@ -810,8 +822,17 @@ impl<'a> State<'a> {
     }
 
     fn print_poly_trait_ref(&mut self, t: &hir::PolyTraitRef<'_>) {
-        self.print_formal_generic_params(&t.bound_generic_params);
-        self.print_trait_ref(&t.trait_ref)
+        match t {
+            hir::PolyTraitRef::Written { bound_generic_params, trait_ref, .. } => {
+                self.print_formal_generic_params(&bound_generic_params);
+                self.print_trait_ref(&trait_ref)
+            }
+            hir::PolyTraitRef::Lang(lang_item, span, ..) => {
+                self.s.word("#[lang = \"");
+                self.print_ident(Ident::new(lang_item.name(), *span));
+                self.s.word("\"]");
+            }
+        }
     }
 
     pub fn print_enum_def(
@@ -2221,11 +2242,6 @@ impl<'a> State<'a> {
                         self.s.word("?");
                     }
                     self.print_poly_trait_ref(tref);
-                }
-                GenericBound::LangItemTrait(lang_item, span, ..) => {
-                    self.s.word("#[lang = \"");
-                    self.print_ident(Ident::new(lang_item.name(), *span));
-                    self.s.word("\"]");
                 }
                 GenericBound::Outlives(lt) => {
                     self.print_lifetime(lt);

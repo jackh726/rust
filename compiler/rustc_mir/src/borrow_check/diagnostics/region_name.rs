@@ -769,19 +769,22 @@ impl<'tcx> MirBorrowckCtxt<'_, 'tcx> {
             let opaque_ty = hir.item(id);
             if let hir::ItemKind::OpaqueTy(hir::OpaqueTy {
                 bounds:
-                    [hir::GenericBound::LangItemTrait(
-                        hir::LangItem::Future,
+                    [hir::GenericBound::Trait(
+                        hir::PolyTraitRef::Lang(
+                            hir::LangItem::Future,
+                            _,
+                            _,
+                            hir::GenericArgs {
+                                bindings:
+                                    [hir::TypeBinding {
+                                        ident: Ident { name: sym::Output, .. },
+                                        kind: hir::TypeBindingKind::Equality { ty },
+                                        ..
+                                    }],
+                                ..
+                            },
+                        ),
                         _,
-                        _,
-                        hir::GenericArgs {
-                            bindings:
-                                [hir::TypeBinding {
-                                    ident: Ident { name: sym::Output, .. },
-                                    kind: hir::TypeBindingKind::Equality { ty },
-                                    ..
-                                }],
-                            ..
-                        },
                     )],
                 ..
             }) = opaque_ty.kind

@@ -439,26 +439,24 @@ pub enum TraitBoundModifier {
 #[derive(Clone, Debug, HashStable_Generic)]
 pub enum GenericBound<'hir> {
     Trait(PolyTraitRef<'hir>, TraitBoundModifier),
-    // FIXME(davidtwco): Introduce `PolyTraitRef::LangItem`
-    LangItemTrait(LangItem, Span, HirId, &'hir GenericArgs<'hir>),
     Outlives(Lifetime),
 }
 
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-rustc_data_structures::static_assert_size!(GenericBound<'_>, 48);
+rustc_data_structures::static_assert_size!(GenericBound<'_>, 56);
 
 impl GenericBound<'_> {
     pub fn trait_ref(&self) -> Option<&TraitRef<'_>> {
         match self {
-            GenericBound::Trait(data, _) => Some(&data.trait_ref),
+            GenericBound::Trait(PolyTraitRef::Written { trait_ref, .. }, _) => Some(&trait_ref),
             _ => None,
         }
     }
 
     pub fn span(&self) -> Span {
         match self {
-            GenericBound::Trait(t, ..) => t.span,
-            GenericBound::LangItemTrait(_, span, ..) => *span,
+            GenericBound::Trait(PolyTraitRef::Written { span, .. }, _) => *span,
+            GenericBound::Trait(PolyTraitRef::Lang(_, span, ..), _) => *span,
             GenericBound::Outlives(l) => l.span,
         }
     }
@@ -2594,14 +2592,17 @@ impl TraitRef<'_> {
 }
 
 #[derive(Clone, Debug, HashStable_Generic)]
-pub struct PolyTraitRef<'hir> {
-    /// The `'a` in `for<'a> Foo<&'a T>`.
-    pub bound_generic_params: &'hir [GenericParam<'hir>],
+pub enum PolyTraitRef<'hir> {
+    Written {
+        /// The `'a` in `for<'a> Foo<&'a T>`.
+        bound_generic_params: &'hir [GenericParam<'hir>],
 
-    /// The `Foo<&'a T>` in `for<'a> Foo<&'a T>`.
-    pub trait_ref: TraitRef<'hir>,
+        /// The `Foo<&'a T>` in `for<'a> Foo<&'a T>`.
+        trait_ref: TraitRef<'hir>,
 
-    pub span: Span,
+        span: Span,
+    },
+    Lang(LangItem, Span, HirId, &'hir GenericArgs<'hir>),
 }
 
 pub type Visibility<'hir> = Spanned<VisibilityKind<'hir>>;
