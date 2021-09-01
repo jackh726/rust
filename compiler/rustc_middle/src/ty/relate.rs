@@ -138,6 +138,7 @@ pub fn relate_substs<R: TypeRelation<'tcx>>(
     a_subst: SubstsRef<'tcx>,
     b_subst: SubstsRef<'tcx>,
 ) -> RelateResult<'tcx, SubstsRef<'tcx>> {
+    debug!(?variances, ?a_subst, ?b_subst, "relate_substs");
     let tcx = relation.tcx();
 
     let params = iter::zip(a_subst, b_subst).enumerate().map(|(i, (a, b))| {

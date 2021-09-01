@@ -286,7 +286,18 @@ impl<'a, 'tcx> ConstraintContext<'a, 'tcx> {
             }
 
             ty::Projection(ref data) => {
-                self.add_constraints_from_invariant_substs(current, data.substs, variance);
+                for k in data.substs {
+                    match k.unpack() {
+                        GenericArgKind::Lifetime(lt) => {
+                            self.add_constraints_from_region(current, lt, variance)
+                        }
+                        GenericArgKind::Type(ty) => self.add_constraints_from_ty(current, ty, variance),
+                        GenericArgKind::Const(_) => {
+                            // Consts impose no constraints.
+                        }
+                    }
+                }
+                //self.add_constraints_from_invariant_substs(current, data.substs, variance);
             }
 
             ty::Opaque(_, substs) => {
