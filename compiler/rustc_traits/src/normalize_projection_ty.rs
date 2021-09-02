@@ -16,13 +16,13 @@ crate fn provide(p: &mut Providers) {
 
 fn normalize_projection_ty<'tcx>(
     tcx: TyCtxt<'tcx>,
-    goal: CanonicalProjectionGoal<'tcx>,
+    canonical_goal: CanonicalProjectionGoal<'tcx>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, NormalizationResult<'tcx>>>, NoSolution> {
-    debug!("normalize_provider(goal={:#?})", goal);
+    debug!("normalize_provider(goal={:#?})", canonical_goal);
 
     tcx.sess.perf_stats.normalize_projection_ty.fetch_add(1, Ordering::Relaxed);
     tcx.infer_ctxt().enter_canonical_trait_query(
-        &goal,
+        &canonical_goal,
         |infcx, fulfill_cx, ParamEnvAnd { param_env, value: goal }| {
             let selcx = &mut SelectionContext::new(infcx);
             let cause = ObligationCause::dummy();

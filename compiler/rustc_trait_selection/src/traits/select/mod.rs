@@ -2215,13 +2215,14 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         assert_eq!(predicates.parent, None);
         let mut obligations = Vec::with_capacity(predicates.predicates.len());
         for (predicate, _) in predicates.predicates {
+            let predicate = predicate.subst(tcx, substs);
             debug!(?predicate);
             let predicate = normalize_with_depth_to(
                 self,
                 param_env,
                 cause.clone(),
                 recursion_depth,
-                predicate.subst(tcx, substs),
+                predicate,
                 &mut obligations,
             );
             obligations.push(Obligation {

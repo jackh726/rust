@@ -90,7 +90,6 @@ impl ProjectionCacheKey<'tcx> {
 pub enum ProjectionCacheEntry<'tcx> {
     InProgress,
     Ambiguous,
-    Recur,
     Error,
     NormalizedTy(NormalizedTy<'tcx>),
 }
@@ -145,10 +144,6 @@ impl<'tcx> ProjectionCache<'_, 'tcx> {
             key, value
         );
         let mut map = self.map();
-        if let Some(ProjectionCacheEntry::Recur) = map.get(&key) {
-            debug!("Not overwriting Recur");
-            return;
-        }
         let fresh_key = map.insert(key, ProjectionCacheEntry::NormalizedTy(value));
         assert!(!fresh_key, "never started projecting `{:?}`", key);
     }
@@ -200,14 +195,6 @@ impl<'tcx> ProjectionCache<'_, 'tcx> {
     /// be different).
     pub fn ambiguous(&mut self, key: ProjectionCacheKey<'tcx>) {
         let fresh = self.map().insert(key, ProjectionCacheEntry::Ambiguous);
-        assert!(!fresh, "never started projecting `{:?}`", key);
-    }
-
-    /// Indicates that while trying to normalize `key`, `key` was required to
-    /// be normalized again. Selection or evaluation should eventually report
-    /// an error here.
-    pub fn recur(&mut self, key: ProjectionCacheKey<'tcx>) {
-        let fresh = self.map().insert(key, ProjectionCacheEntry::Recur);
         assert!(!fresh, "never started projecting `{:?}`", key);
     }
 

@@ -792,8 +792,6 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
     }
 
     fn start_snapshot(&self) -> CombinedSnapshot<'a, 'tcx> {
-        debug!("start_snapshot()");
-
         let in_snapshot = self.in_snapshot.replace(true);
 
         let mut inner = self.inner.borrow_mut();

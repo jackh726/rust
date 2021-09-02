@@ -273,7 +273,7 @@ where
     Normalized { value, obligations }
 }
 
-#[instrument(level = "info", skip(selcx, param_env, cause, obligations))]
+#[instrument(level = "info", skip(selcx, cause, obligations))]
 pub fn normalize_with_depth_to<'a, 'b, 'tcx, T>(
     selcx: &'a mut SelectionContext<'b, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
@@ -426,6 +426,56 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
                 // there won't be bound vars there.
 
                 let data = data.super_fold_with(self);
+
+                let mut orig_values = rustc_infer::infer::canonical::OriginalQueryValues::default();
+                // HACK(matthewjasper) `'static` is special-cased in selection,
+                // so we cannot canonicalize it.
+                let c_data = self
+                    .selcx
+                    .infcx()
+                    .canonicalize_query_keep_static(self.param_env.and(data), &mut orig_values);
+                let normalized_ty = match self.selcx.tcx().normalize_projection_ty(c_data) {
+                    Ok(result) if result.is_ambiguous() => normalize_projection_type(
+                        self.selcx,
+                        self.param_env,
+                        data,
+                        self.cause.clone(),
+                        self.depth,
+                        &mut self.obligations,
+                    ),
+                    Ok(result) => {
+                        match self.selcx.infcx().instantiate_query_response_and_region_obligations(
+                            &self.cause,
+                            self.param_env,
+                            &orig_values,
+                            result,
+                        ) {
+                            Ok(InferOk { value: result, obligations }) => {
+                                self.obligations.extend(obligations);
+                                result.normalized_ty
+                            }
+
+                            Err(_) => normalize_projection_type(
+                                self.selcx,
+                                self.param_env,
+                                data,
+                                self.cause.clone(),
+                                self.depth,
+                                &mut self.obligations,
+                            ),
+                        }
+                    }
+
+                    Err(_) => normalize_projection_type(
+                        self.selcx,
+                        self.param_env,
+                        data,
+                        self.cause.clone(),
+                        self.depth,
+                        &mut self.obligations,
+                    ),
+                };
+                /*
                 let normalized_ty = normalize_projection_type(
                     self.selcx,
                     self.param_env,
@@ -434,6 +484,7 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
                     self.depth,
                     &mut self.obligations,
                 );
+                */
                 debug!(
                     ?self.depth,
                     ?ty,
@@ -833,7 +884,7 @@ pub fn normalize_projection_type<'a, 'b, 'tcx>(
 /// often immediately appended to another obligations vector. So now this
 /// function takes an obligations vector and appends to it directly, which is
 /// slightly uglier but avoids the need for an extra short-lived allocation.
-#[instrument(level = "debug", skip(selcx, param_env, cause, obligations))]
+#[instrument(level = "debug", skip(selcx, cause, obligations))]
 fn opt_normalize_projection_type<'a, 'b, 'tcx>(
     selcx: &'a mut SelectionContext<'b, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
@@ -875,16 +926,6 @@ fn opt_normalize_projection_type<'a, 'b, 'tcx>(
             // normalization.
 
             debug!("found cache entry: in-progress");
-
-            // Cache that normalizing this projection resulted in a cycle. This
-            // should ensure that, unless this happens within a snapshot that's
-            // rolled back, fulfillment or evaluation will notice the cycle.
-
-            infcx.inner.borrow_mut().projection_cache().recur(cache_key);
-            return Err(InProgress);
-        }
-        Err(ProjectionCacheEntry::Recur) => {
-            debug!("recur cache");
             return Err(InProgress);
         }
         Err(ProjectionCacheEntry::NormalizedTy(ty)) => {
@@ -1251,6 +1292,10 @@ fn assemble_candidates_from_object_ty<'cx, 'tcx>(
     );
 }
 
+#[tracing::instrument(
+    level = "debug",
+    skip(selcx, candidate_set, ctor, env_predicates, potentially_unnormalized_candidates)
+)]
 fn assemble_candidates_from_predicates<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
@@ -1259,8 +1304,6 @@ fn assemble_candidates_from_predicates<'cx, 'tcx>(
     env_predicates: impl Iterator<Item = ty::Predicate<'tcx>>,
     potentially_unnormalized_candidates: bool,
 ) {
-    debug!(?obligation, "assemble_candidates_from_predicates");
-
     let infcx = selcx.infcx();
     for predicate in env_predicates {
         debug!(?predicate);
@@ -1296,13 +1339,12 @@ fn assemble_candidates_from_predicates<'cx, 'tcx>(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(selcx, obligation, candidate_set))]
 fn assemble_candidates_from_impls<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
     candidate_set: &mut ProjectionTyCandidateSet<'tcx>,
 ) {
-    debug!("assemble_candidates_from_impls");
-
     // If we are resolving `<T as TraitRef<...>>::Item == Type`,
     // start out by selecting the predicate `T as TraitRef<...>`:
     let poly_trait_ref = obligation.predicate.trait_ref(selcx.tcx()).to_poly_trait_ref();
@@ -1879,7 +1921,7 @@ fn assoc_ty_own_obligations<'cx, 'tcx>(
         .instantiate_own(tcx, obligation.predicate.substs)
         .predicates
     {
-        let normalized = normalize_with_depth_to(
+        let predicate = normalize_with_depth_to(
             selcx,
             obligation.param_env,
             obligation.cause.clone(),
@@ -1891,7 +1933,7 @@ fn assoc_ty_own_obligations<'cx, 'tcx>(
             obligation.cause.clone(),
             obligation.recursion_depth + 1,
             obligation.param_env,
-            normalized,
+            predicate,
         ));
     }
 }
