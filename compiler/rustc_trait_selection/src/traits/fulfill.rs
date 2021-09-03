@@ -4,13 +4,13 @@ use rustc_data_structures::obligation_forest::{Error, ForestObligation, Outcome}
 use rustc_data_structures::obligation_forest::{ObligationForest, ObligationProcessor};
 use rustc_errors::ErrorReported;
 use rustc_hir as hir;
-use rustc_infer::traits::{SelectionError, TraitEngine, TraitEngineExt as _, TraitObligation};
+use rustc_infer::traits::{SelectionError, TraitEngine, TraitObligation};
 use rustc_middle::mir::abstract_const::NotConstEvaluatable;
 use rustc_middle::mir::interpret::ErrorHandled;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::subst::SubstsRef;
 use rustc_middle::ty::ToPredicate;
-use rustc_middle::ty::{self, Binder, Const, Ty, TypeFoldable};
+use rustc_middle::ty::{self, Binder, Const, TypeFoldable};
 use std::marker::PhantomData;
 
 use super::const_evaluatable;
@@ -21,8 +21,7 @@ use super::CodeAmbiguity;
 use super::CodeProjectionError;
 use super::CodeSelectionError;
 use super::Unimplemented;
-use super::{FulfillmentError, FulfillmentErrorCode};
-use super::{ObligationCause, PredicateObligation};
+use super::{FulfillmentError, FulfillmentErrorCode, PredicateObligation};
 
 use crate::traits::error_reporting::InferCtxtExt as _;
 use crate::traits::project::PolyProjectionObligation;
@@ -161,42 +160,6 @@ impl<'a, 'tcx> FulfillmentContext<'tcx> {
 }
 
 impl<'tcx> TraitEngine<'tcx> for FulfillmentContext<'tcx> {
-    /// "Normalize" a projection type `<SomeType as SomeTrait>::X` by
-    /// creating a fresh type variable `$0` as well as a projection
-    /// predicate `<SomeType as SomeTrait>::X == $0`. When the
-    /// inference engine runs, it will attempt to find an impl of
-    /// `SomeTrait` or a where-clause that lets us unify `$0` with
-    /// something concrete. If this fails, we'll unify `$0` with
-    /// `projection_ty` again.
-    #[tracing::instrument(level = "debug", skip(self, infcx, param_env, cause))]
-    fn normalize_projection_type(
-        &mut self,
-        infcx: &InferCtxt<'_, 'tcx>,
-        param_env: ty::ParamEnv<'tcx>,
-        projection_ty: ty::ProjectionTy<'tcx>,
-        cause: ObligationCause<'tcx>,
-    ) -> Ty<'tcx> {
-        debug_assert!(!projection_ty.has_escaping_bound_vars());
-
-        // FIXME(#20304) -- cache
-
-        let mut selcx = SelectionContext::new(infcx);
-        let mut obligations = vec![];
-        let normalized_ty = project::normalize_projection_type(
-            &mut selcx,
-            param_env,
-            projection_ty,
-            cause,
-            0,
-            &mut obligations,
-        );
-        self.register_predicate_obligations(infcx, obligations);
-
-        debug!(?normalized_ty);
-
-        normalized_ty
-    }
-
     fn register_predicate_obligation(
         &mut self,
         infcx: &InferCtxt<'_, 'tcx>,

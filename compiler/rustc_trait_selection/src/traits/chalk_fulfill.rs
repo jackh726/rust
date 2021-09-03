@@ -4,11 +4,10 @@ use crate::infer::canonical::OriginalQueryValues;
 use crate::infer::InferCtxt;
 use crate::traits::query::NoSolution;
 use crate::traits::{
-    ChalkEnvironmentAndGoal, FulfillmentError, FulfillmentErrorCode, ObligationCause,
-    PredicateObligation, SelectionError, TraitEngine,
+    ChalkEnvironmentAndGoal, FulfillmentError, FulfillmentErrorCode, PredicateObligation,
+    SelectionError, TraitEngine,
 };
 use rustc_data_structures::fx::FxIndexSet;
-use rustc_middle::ty::{self, Ty};
 
 pub struct FulfillmentContext<'tcx> {
     obligations: FxIndexSet<PredicateObligation<'tcx>>,
@@ -21,16 +20,6 @@ impl FulfillmentContext<'tcx> {
 }
 
 impl TraitEngine<'tcx> for FulfillmentContext<'tcx> {
-    fn normalize_projection_type(
-        &mut self,
-        infcx: &InferCtxt<'_, 'tcx>,
-        _param_env: ty::ParamEnv<'tcx>,
-        projection_ty: ty::ProjectionTy<'tcx>,
-        _cause: ObligationCause<'tcx>,
-    ) -> Ty<'tcx> {
-        infcx.tcx.mk_ty(ty::Projection(projection_ty))
-    }
-
     fn register_predicate_obligation(
         &mut self,
         infcx: &InferCtxt<'_, 'tcx>,

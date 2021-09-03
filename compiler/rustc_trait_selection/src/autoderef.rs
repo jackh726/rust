@@ -1,8 +1,9 @@
 use crate::traits::query::evaluate_obligation::InferCtxtExt;
-use crate::traits::{self, TraitEngine};
+use crate::traits::{self, normalize_projection_type, SelectionContext, TraitEngine};
 use rustc_errors::struct_span_err;
 use rustc_hir as hir;
 use rustc_infer::infer::InferCtxt;
+use rustc_infer::traits::TraitEngineExt;
 use rustc_middle::ty::{self, TraitRef, Ty, TyCtxt, WithConstness};
 use rustc_middle::ty::{ToPredicate, TypeFoldable};
 use rustc_session::DiagnosticMessageId;
@@ -142,16 +143,26 @@ impl<'a, 'tcx> Autoderef<'a, 'tcx> {
             return None;
         }
 
-        let mut fulfillcx = traits::FulfillmentContext::new_in_snapshot();
-        let normalized_ty = fulfillcx.normalize_projection_type(
-            &self.infcx,
+        let projection_ty = ty::ProjectionTy {
+            item_def_id: tcx.lang_items().deref_target()?,
+            substs: trait_ref.substs,
+        };
+        debug_assert!(!projection_ty.has_escaping_bound_vars());
+
+        let infcx = self.infcx;
+        let mut selcx = SelectionContext::new(infcx);
+        let mut obligations = vec![];
+        let normalized_ty = normalize_projection_type(
+            &mut selcx,
             self.param_env,
-            ty::ProjectionTy {
-                item_def_id: tcx.lang_items().deref_target()?,
-                substs: trait_ref.substs,
-            },
+            projection_ty,
             cause,
+            0,
+            &mut obligations,
         );
+        let mut fulfillcx = traits::FulfillmentContext::new_in_snapshot();
+        fulfillcx.register_predicate_obligations(infcx, obligations);
+
         if let Err(e) = fulfillcx.select_where_possible(&self.infcx) {
             // This shouldn't happen, except for evaluate/fulfill mismatches,
             // but that's not a reason for an ICE (`predicate_may_hold` is conservative
