@@ -7,9 +7,9 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::lang_items::LangItem;
 use rustc_infer::infer::outlives::env::OutlivesEnvironment;
 use rustc_infer::traits::ObligationCause;
+use rustc_infer::traits::query::NoSolution;
 use rustc_middle::arena::ArenaAllocatable;
 use rustc_middle::infer::canonical::{Canonical, CanonicalizedQueryResponse, QueryResponse};
-use rustc_middle::traits::query::Fallible;
 use rustc_middle::ty::subst::SubstsRef;
 use rustc_middle::ty::ToPredicate;
 use rustc_middle::ty::WithConstness;
@@ -122,14 +122,15 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
 }
 
 pub trait InferCtxtBuilderExt<'tcx> {
-    fn enter_canonical_trait_query<K, R>(
+    fn enter_canonical_trait_query<K, R, E>(
         &mut self,
         canonical_key: &Canonical<'tcx, K>,
-        operation: impl FnOnce(&InferCtxt<'_, 'tcx>, &mut dyn TraitEngine<'tcx>, K) -> Fallible<R>,
-    ) -> Fallible<CanonicalizedQueryResponse<'tcx, R>>
+        operation: impl FnOnce(&InferCtxt<'_, 'tcx>, &mut dyn TraitEngine<'tcx>, K) -> Result<R, E>,
+    ) -> Result<CanonicalizedQueryResponse<'tcx, R>, E>
     where
         K: TypeFoldable<'tcx>,
         R: Debug + TypeFoldable<'tcx>,
+        E: From<NoSolution>,
         Canonical<'tcx, QueryResponse<'tcx, R>>: ArenaAllocatable<'tcx>;
 }
 
@@ -150,14 +151,15 @@ impl<'tcx> InferCtxtBuilderExt<'tcx> for InferCtxtBuilder<'tcx> {
     /// bound for the closure and in part because it is convenient to
     /// have `'tcx` be free on this function so that we can talk about
     /// `K: TypeFoldable<'tcx>`.)
-    fn enter_canonical_trait_query<K, R>(
+    fn enter_canonical_trait_query<K, R, E>(
         &mut self,
         canonical_key: &Canonical<'tcx, K>,
-        operation: impl FnOnce(&InferCtxt<'_, 'tcx>, &mut dyn TraitEngine<'tcx>, K) -> Fallible<R>,
-    ) -> Fallible<CanonicalizedQueryResponse<'tcx, R>>
+        operation: impl FnOnce(&InferCtxt<'_, 'tcx>, &mut dyn TraitEngine<'tcx>, K) -> Result<R, E>,
+    ) -> Result<CanonicalizedQueryResponse<'tcx, R>, E>
     where
         K: TypeFoldable<'tcx>,
         R: Debug + TypeFoldable<'tcx>,
+        E: From<NoSolution>,
         Canonical<'tcx, QueryResponse<'tcx, R>>: ArenaAllocatable<'tcx>,
     {
         self.enter_with_canonical(
@@ -166,11 +168,12 @@ impl<'tcx> InferCtxtBuilderExt<'tcx> for InferCtxtBuilder<'tcx> {
             |ref infcx, key, canonical_inference_vars| {
                 let mut fulfill_cx = <dyn TraitEngine<'_>>::new(infcx.tcx);
                 let value = operation(infcx, &mut *fulfill_cx, key)?;
-                infcx.make_canonicalized_query_response(
+                let response = infcx.make_canonicalized_query_response(
                     canonical_inference_vars,
                     value,
                     &mut *fulfill_cx,
-                )
+                )?;
+                Ok(response)
             },
         )
     }

@@ -50,6 +50,14 @@ macro_rules! arena_types {
                         rustc_middle::traits::query::NormalizationResult<'tcx>
                     >
                 >,
+            /*
+            [] project_type:
+                rustc_middle::infer::canonical::Canonical<'tcx,
+                    rustc_middle::infer::canonical::QueryResponse<'tcx,
+                        rustc_middle::traits::query::NormalizationResult<'tcx>
+                    >
+                >,
+            */
             [] implied_outlives_bounds:
                 rustc_middle::infer::canonical::Canonical<'tcx,
                     rustc_middle::infer::canonical::QueryResponse<'tcx,

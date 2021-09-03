@@ -108,6 +108,34 @@ impl<'tcx> From<TypeError<'tcx>> for NoSolution {
     }
 }
 
+pub enum ProjectedTy<'tcx> {
+    Progress(Progress<'tcx>),
+    NoProgress(Ty<'tcx>),
+}
+
+pub struct Progress<'tcx> {
+    ty: Ty<'tcx>,
+    obligations: Vec<PredicateObligation<'tcx>>,
+}
+
+/// When attempting to resolve `<T as TraitRef>::Name` ...
+#[derive(Debug)]
+pub enum ProjectionTyError<'tcx> {
+    /// ...we found multiple sources of information and couldn't resolve the ambiguity.
+    TooManyCandidates,
+
+    /// ...an error occurred matching `T : TraitRef`
+    TraitSelectionError(SelectionError<'tcx>),
+
+    NoSolution,
+}
+
+impl<'tcx> From<NoSolution> for ProjectionTyError<'tcx> {
+    fn from(_: NoSolution) -> Self {
+        Self::NoSolution
+    }
+}
+
 #[derive(Clone, Debug, Default, HashStable, TypeFoldable, Lift)]
 pub struct DropckOutlivesResult<'tcx> {
     pub kinds: Vec<GenericArg<'tcx>>,

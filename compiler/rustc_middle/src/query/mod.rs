@@ -1532,6 +1532,12 @@ rustc_queries! {
         desc { "normalizing `{:?}`", goal }
     }
 
+    query project_type(
+        goal: CanonicalProjectionGoal<'tcx>
+    ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, ProjectedTy<'tcx>>>, ProjectionTyError<'tcx>> {
+        desc { "projecting `{:?}`", goal }
+    }
+
     /// Do not call this query directly: invoke `normalize_erasing_regions` instead.
     query normalize_generic_arg_after_erasing_regions(
         goal: ParamEnvAnd<'tcx, GenericArg<'tcx>>

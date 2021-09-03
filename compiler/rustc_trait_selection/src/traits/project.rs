@@ -41,16 +41,6 @@ pub type ProjectionTyObligation<'tcx> = Obligation<'tcx, ty::ProjectionTy<'tcx>>
 
 pub(super) struct InProgress;
 
-/// When attempting to resolve `<T as TraitRef>::Name` ...
-#[derive(Debug)]
-pub enum ProjectionTyError<'tcx> {
-    /// ...we found multiple sources of information and couldn't resolve the ambiguity.
-    TooManyCandidates,
-
-    /// ...an error occurred matching `T : TraitRef`
-    TraitSelectionError(SelectionError<'tcx>),
-}
-
 #[derive(PartialEq, Eq, Debug)]
 enum ProjectionTyCandidate<'tcx> {
     /// From a where-clause in the env or object type
@@ -1100,16 +1090,6 @@ fn normalize_to_error<'a, 'tcx>(
     Normalized { value: new_value, obligations: vec![trait_obligation] }
 }
 
-enum ProjectedTy<'tcx> {
-    Progress(Progress<'tcx>),
-    NoProgress(Ty<'tcx>),
-}
-
-struct Progress<'tcx> {
-    ty: Ty<'tcx>,
-    obligations: Vec<PredicateObligation<'tcx>>,
-}
-
 impl<'tcx> Progress<'tcx> {
     fn error(tcx: TyCtxt<'tcx>) -> Self {
         Progress { ty: tcx.ty_error(), obligations: vec![] }
@@ -1134,7 +1114,7 @@ impl<'tcx> Progress<'tcx> {
 /// IMPORTANT:
 /// - `obligation` must be fully normalized
 #[tracing::instrument(level = "info", skip(selcx))]
-fn project_type<'cx, 'tcx>(
+pub fn project_type<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
     obligation: &ProjectionTyObligation<'tcx>,
 ) -> Result<ProjectedTy<'tcx>, ProjectionTyError<'tcx>> {
