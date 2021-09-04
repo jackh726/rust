@@ -814,6 +814,132 @@ impl<'tcx> Relate<'tcx> for ty::ProjectionPredicate<'tcx> {
     }
 }
 
+
+pub struct Initialize<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    substs: smallvec::SmallVec<[GenericArg<'tcx>; 8]>,
+}
+
+impl<'tcx> Initialize<'tcx> {
+    pub fn initialize<T: Relate<'tcx>>(
+        tcx: TyCtxt<'tcx>,
+        item_def_id: DefId,
+        a: T,
+        b: T,
+        mk_var: impl Fn(u32) -> GenericArg<'tcx>,
+    ) -> RelateResult<'tcx, SubstsRef<'tcx>,> {
+        let defs = tcx.generics_of(item_def_id);
+        let count = defs.count();
+        let mut substs = smallvec::SmallVec::with_capacity(count);
+        ty::subst::InternalSubsts::fill_item(&mut substs, tcx, defs, &mut |param, _| tcx.mk_param_from_def(param));
+        let mut init = Self { tcx, substs };
+        Relate::relate(&mut init, a, b)?;
+        for s in init.substs.iter_mut() {
+            match (*s).unpack() {
+                GenericArgKind::Type(ty) => {
+                    match ty.kind {
+                        ty::Param(p) => *s = mk_var(p.index),
+                        _ => {}
+                    }
+                }
+                GenericArgKind::Lifetime(lt) => {
+                    match lt {
+                        ty::ReEarlyBound(p) => *s = mk_var(p.index),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(tcx.intern_substs(&init.substs))
+    }
+}
+
+impl TypeRelation<'tcx> for Initialize<'tcx> {
+    fn tag(&self) -> &'static str {
+        "Initialize"
+    }
+
+    fn tcx(&self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        ty::ParamEnv::empty()
+    }
+
+    fn a_is_expected(&self) -> bool {
+        true
+    }
+
+    fn relate_item_substs(
+        &mut self,
+        _item_def_id: DefId,
+        a_subst: SubstsRef<'tcx>,
+        b_subst: SubstsRef<'tcx>,
+    ) -> RelateResult<'tcx, SubstsRef<'tcx>> {
+        relate_substs(self, None, a_subst, b_subst)
+    }
+
+    fn relate_with_variance<T: Relate<'tcx>>(
+        &mut self,
+        _: ty::Variance,
+        _info: ty::VarianceDiagInfo<'tcx>,
+        a: T,
+        b: T,
+    ) -> RelateResult<'tcx, T> {
+        self.relate(a, b)
+    }
+
+    fn tys(&mut self, a: Ty<'tcx>, b: Ty<'tcx>) -> RelateResult<'tcx, Ty<'tcx>> {
+        debug!("{}.tys({:?}, {:?})", self.tag(), a, b);
+        if a == b {
+            return Ok(a);
+        }
+
+        match (a.kind(), b.kind()) {
+            (&ty::Param(p), _) => {
+                self.substs[p.index as usize] = b.into();
+                Ok(a)
+            }
+            (&ty::Infer(_), _) | (_, &ty::Infer(_)) => {
+                Ok(a)
+            }
+    
+            _ => ty::relate::super_relate_tys(self, a, b)
+        }
+    }
+
+    fn regions(
+        &mut self,
+        a: ty::Region<'tcx>,
+        b: ty::Region<'tcx>,
+    ) -> RelateResult<'tcx, ty::Region<'tcx>> {
+        debug!("{}.regions({:?}, {:?})", self.tag(), a, b);
+        Ok(a)
+    }
+
+    fn consts(
+        &mut self,
+        a: &'tcx ty::Const<'tcx>,
+        _b: &'tcx ty::Const<'tcx>,
+    ) -> RelateResult<'tcx, &'tcx ty::Const<'tcx>> {
+        Ok(a)
+    }
+
+    fn binders<T>(
+        &mut self,
+        a: ty::Binder<'tcx, T>,
+        b: ty::Binder<'tcx, T>,
+    ) -> RelateResult<'tcx, ty::Binder<'tcx, T>>
+    where
+        T: Relate<'tcx>,
+    {
+        Ok(a.rebind(self.relate(a.skip_binder(), b.skip_binder())?))
+    }
+}
+
+
 ///////////////////////////////////////////////////////////////////////////
 // Error handling
 

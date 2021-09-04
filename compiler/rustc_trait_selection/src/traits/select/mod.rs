@@ -1990,12 +1990,22 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             self.infcx().replace_bound_vars_with_placeholders(obligation.predicate);
         let placeholder_obligation_trait_ref = placeholder_obligation.trait_ref;
 
-        let impl_substs = self.infcx.fresh_substs_for_item(obligation.cause.span, impl_def_id);
+        let fresh_impl_substs = self.infcx.fresh_substs_for_item(obligation.cause.span, impl_def_id);
+
+        let impl_substs = ty::relate::Initialize::initialize(
+            self.infcx.tcx,
+            impl_def_id,
+            impl_trait_ref,
+            placeholder_obligation_trait_ref,
+            |var| fresh_impl_substs[var as usize],
+        )
+        .map_err(|e| debug!("match_impl: failed eq_trait_refs due to `{}`", e))?;
 
         let impl_trait_ref = impl_trait_ref.subst(self.tcx(), impl_substs);
+        self.infcx.tcx.sess.struct_warn(&format!("{:?} {:?}", impl_trait_ref, placeholder_obligation_trait_ref)).emit();
 
         debug!(?impl_trait_ref);
-
+/*
         let Normalized { value: impl_trait_ref, obligations: mut nested_obligations } =
             ensure_sufficient_stack(|| {
                 project::normalize_with_depth(
@@ -2008,7 +2018,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             });
 
         debug!(?impl_trait_ref, ?placeholder_obligation_trait_ref);
+*/
 
+        let mut nested_obligations = vec![];
         let cause = ObligationCause::new(
             obligation.cause.span,
             obligation.cause.body_id,

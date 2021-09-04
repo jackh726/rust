@@ -12,6 +12,7 @@ use rustc_hir::Constness;
 use rustc_index::bit_set::GrowableBitSet;
 use rustc_infer::infer::InferOk;
 use rustc_infer::infer::LateBoundRegionConversionTime::HigherRankedType;
+use rustc_infer::infer::resolve::OpportunisticVarResolver;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, Subst, SubstsRef};
 use rustc_middle::ty::{self, Ty};
 use rustc_middle::ty::{ToPolyTraitRef, ToPredicate, WithConstness};
@@ -327,6 +328,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         // this time not in a probe.
         self.infcx.commit_unconditionally(|_| {
             let substs = self.rematch_impl(impl_def_id, obligation);
+            let mut resolver = OpportunisticVarResolver::new(self.infcx());
+            use crate::rustc_middle::ty::TypeFoldable;
+            let substs = substs.fold_with(&mut resolver);
             debug!(?substs, "impl substs");
             let cause = obligation.derived_cause(ImplDerivedObligation);
             ensure_sufficient_stack(|| {
