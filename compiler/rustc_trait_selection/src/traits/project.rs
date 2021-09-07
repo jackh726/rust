@@ -1119,7 +1119,7 @@ fn project_type<'cx, 'tcx>(
 
     assemble_candidates_from_object_ty(selcx, obligation, &mut candidates);
 
-    if let ProjectionTyCandidateSet::Single(ProjectionTyCandidate::Object(_)) = candidates {
+    if let ProjectionTyCandidateSet::Single(_) = candidates {
         // Avoid normalization cycle from selection (see
         // `assemble_candidates_from_object_ty`).
         // FIXME(lazy_normalization): Lazy normalization should save us from

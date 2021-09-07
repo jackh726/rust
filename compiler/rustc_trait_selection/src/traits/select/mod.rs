@@ -2185,7 +2185,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     /// impl or trait. The obligations are substituted and fully
     /// normalized. This is used when confirming an impl or default
     /// impl.
-    #[tracing::instrument(level = "debug", skip(self, cause, param_env))]
+    #[tracing::instrument(level = "debug", skip(self, cause))]
     fn impl_or_trait_obligations(
         &mut self,
         cause: ObligationCause<'tcx>,
@@ -2215,13 +2215,15 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         assert_eq!(predicates.parent, None);
         let mut obligations = Vec::with_capacity(predicates.predicates.len());
         for (predicate, _) in predicates.predicates {
+            let predicate = predicate.subst(tcx, substs);
+            let predicate = self.infcx().resolve_vars_if_possible(predicate);
             debug!(?predicate);
             let predicate = normalize_with_depth_to(
                 self,
                 param_env,
                 cause.clone(),
                 recursion_depth,
-                predicate.subst(tcx, substs),
+                predicate,
                 &mut obligations,
             );
             obligations.push(Obligation {

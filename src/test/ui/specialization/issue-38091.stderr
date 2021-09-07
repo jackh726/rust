@@ -9,16 +9,26 @@ LL | #![feature(specialization)]
    = help: consider using `min_specialization` instead, which is more stable and complete
 
 error[E0277]: the trait bound `(): Valid` is not satisfied
-  --> $DIR/issue-38091.rs:12:5
+  --> $DIR/issue-38091.rs:18:55
    |
-LL |     default type Ty = ();
-   |     ^^^^^^^^^^^^^^^^^^^^^ the trait `Valid` is not implemented for `()`
+LL | impl<'a, T> Check for T where <T as Iterate<'a>>::Ty: Valid {}
+   |                                                       ^^^^^ the trait `Valid` is not implemented for `()`
    |
-note: required by a bound in `Iterate::Ty`
-  --> $DIR/issue-38091.rs:5:14
+note: required because of the requirements on the impl of `Check` for `T`
+  --> $DIR/issue-38091.rs:18:13
    |
-LL |     type Ty: Valid;
-   |              ^^^^^ required by this bound in `Iterate::Ty`
+LL | impl<'a, T> Check for T where <T as Iterate<'a>>::Ty: Valid {}
+   |             ^^^^^     ^
+note: required because of the requirements on the impl of `Iterate<'a>` for `T`
+  --> $DIR/issue-38091.rs:8:13
+   |
+LL | impl<'a, T> Iterate<'a> for T
+   |             ^^^^^^^^^^^     ^
+note: required by a bound in `Iterate`
+  --> $DIR/issue-38091.rs:4:1
+   |
+LL | trait Iterate<'a> {
+   | ^^^^^^^^^^^^^^^^^ required by this bound in `Iterate`
 
 error: aborting due to previous error; 1 warning emitted
 

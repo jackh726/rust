@@ -147,7 +147,7 @@ impl<'tcx> ProjectionCache<'_, 'tcx> {
         let mut map = self.map();
         if let Some(ProjectionCacheEntry::Recur) = map.get(&key) {
             debug!("Not overwriting Recur");
-            return;
+            //return;
         }
         let fresh_key = map.insert(key, ProjectionCacheEntry::NormalizedTy(value));
         assert!(!fresh_key, "never started projecting `{:?}`", key);

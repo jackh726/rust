@@ -13,7 +13,7 @@ use rustc_index::bit_set::GrowableBitSet;
 use rustc_infer::infer::InferOk;
 use rustc_infer::infer::LateBoundRegionConversionTime::HigherRankedType;
 use rustc_middle::ty::subst::{GenericArg, GenericArgKind, Subst, SubstsRef};
-use rustc_middle::ty::{self, Ty};
+use rustc_middle::ty::{self, AssocKind, Ty};
 use rustc_middle::ty::{ToPolyTraitRef, ToPredicate, WithConstness};
 use rustc_span::def_id::DefId;
 
@@ -351,10 +351,37 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
     ) -> ImplSourceUserDefinedData<'tcx, PredicateObligation<'tcx>> {
         debug!(?impl_def_id, ?substs, ?recursion_depth, "vtable_impl");
 
+        let tcx = self.tcx();
+        let impl_trait_ref = tcx.impl_trait_ref(impl_def_id).unwrap();
+        let impl_trait_ref = impl_trait_ref.subst(tcx, substs.value);
+        let impl_trait_ref = self.infcx().resolve_vars_if_possible(impl_trait_ref);
+        let trait_assoc_items = tcx.associated_items(impl_trait_ref.def_id);
+        let predicates = tcx
+            .associated_items(impl_def_id)
+            .in_definition_order()
+            .filter(|item| matches!(item.kind, AssocKind::Type))
+            .map(|item| {
+                // FIXME: GATs
+                let trait_item = trait_assoc_items.find_by_name_and_kind(tcx, item.ident, item.kind, impl_trait_ref.def_id).unwrap();
+
+                let projection_ty = ty::ProjectionTy {
+                    item_def_id: trait_item.def_id,
+                    substs: impl_trait_ref.substs,
+                };
+                let ty = tcx.type_of(item.def_id);
+                tcx.mk_predicate(ty::Binder::dummy(ty::PredicateKind::Projection(ty::ProjectionPredicate {
+                    projection_ty,
+                    ty,
+                })))
+            });
+        let new_bounds = predicates.chain(param_env.caller_bounds().into_iter());
+        let new_bounds = tcx.mk_predicates(new_bounds);
+        let new_param_env = ty::ParamEnv::new(new_bounds, param_env.reveal());
+        
         let mut impl_obligations = self.impl_or_trait_obligations(
             cause,
             recursion_depth,
-            param_env,
+            new_param_env,
             impl_def_id,
             &substs.value,
         );
