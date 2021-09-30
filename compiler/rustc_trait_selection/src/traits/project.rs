@@ -856,7 +856,13 @@ fn opt_normalize_projection_type<'a, 'b, 'tcx>(
         Ok(())
     };
     match cache_result {
-        Ok(()) => debug!("no cache"),
+        Ok(()) => {
+            if use_cache {
+                debug!("no cached value");
+            } else {
+                debug!("cache disabled");
+            }
+        }
         Err(ProjectionCacheEntry::Ambiguous) => {
             // If we found ambiguity the last time, that means we will continue
             // to do so until some type in the key changes (and we know it

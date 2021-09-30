@@ -57,6 +57,7 @@ pub fn check_legal_trait_for_method_call(
     }
 }
 
+#[derive(Debug)]
 enum CallStep<'tcx> {
     Builtin(Ty<'tcx>),
     DeferredClosure(ty::FnSig<'tcx>),
@@ -82,7 +83,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             _ => self.check_expr(callee_expr),
         };
 
+        debug!(?original_callee_ty);
+
         let expr_ty = self.structurally_resolved_type(call_expr.span, original_callee_ty);
+
+        debug!(?expr_ty);
 
         let mut autoderef = self.autoderef(callee_expr.span, expr_ty);
         let mut result = None;
@@ -90,6 +95,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             result = self.try_overloaded_call_step(call_expr, callee_expr, arg_exprs, &autoderef);
         }
         self.register_predicates(autoderef.into_obligations());
+
+        debug!(?result);
 
         let output = match result {
             None => {

@@ -1195,6 +1195,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
     // Instantiates the given path, which must refer to an item with the given
     // number of type parameters and type.
+    #[tracing::instrument(level = "debug", skip(self, span))]
     pub fn instantiate_value_path(
         &self,
         segments: &[hir::PathSegment<'_>],
@@ -1203,11 +1204,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         span: Span,
         hir_id: hir::HirId,
     ) -> (Ty<'tcx>, Res) {
-        debug!(
-            "instantiate_value_path(segments={:?}, self_ty={:?}, res={:?}, hir_id={})",
-            segments, self_ty, res, hir_id,
-        );
-
         let tcx = self.tcx;
 
         let path_segs = match res {
