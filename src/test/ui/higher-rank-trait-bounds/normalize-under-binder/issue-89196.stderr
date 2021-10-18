@@ -1,0 +1,20 @@
+error[E0277]: the trait bound `for<'a> <_ as Trait<'a>>::Out: Copy` is not satisfied
+  --> $DIR/issue-89196.rs:18:17
+   |
+LL |     let _: () = weird_bound();
+   |                 ^^^^^^^^^^^ the trait `for<'a> Copy` is not implemented for `<_ as Trait<'a>>::Out`
+   |
+   = help: the following implementations were found:
+             <&T as Copy>
+note: required by a bound in `weird_bound`
+  --> $DIR/issue-89196.rs:14:40
+   |
+LL | fn weird_bound<X>() -> X
+   |    ----------- required by a bound in this
+...
+LL |         for<'a> <X as Trait<'a>>::Out: Copy
+   |                                        ^^^^ required by this bound in `weird_bound`
+
+error: aborting due to previous error
+
+For more information about this error, try `rustc --explain E0277`.

@@ -12,8 +12,6 @@ const fn foo<T>() -> usize {
 
 fn test<T>() {
     let _ = [0; foo::<T>()];
-    //~^ WARN cannot use constants which depend on generic parameters in types
-    //~| WARN this was previously accepted by the compiler but is being phased out
 }
 
 fn main() {}

@@ -350,14 +350,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// generic type scheme.
     pub(in super::super) fn instantiate_bounds(
         &self,
-        span: Span,
+        _span: Span,
         def_id: DefId,
         substs: SubstsRef<'tcx>,
     ) -> (ty::InstantiatedPredicates<'tcx>, Vec<Span>) {
         let bounds = self.tcx.predicates_of(def_id);
         let spans: Vec<Span> = bounds.predicates.iter().map(|(_, span)| *span).collect();
         let result = bounds.instantiate(self.tcx, substs);
-        let result = self.normalize_associated_types_in(span, result);
+        //let result = self.normalize_associated_types_in(span, result);
         debug!(
             "instantiate_bounds(bounds={:?}, substs={:?}) = {:?}, {:?}",
             bounds, substs, result, spans,

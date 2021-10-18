@@ -35,8 +35,6 @@ fn break_ty2<T>() {
 
 fn break_ty3<T>() {
     let _ = [0; size_of::<*mut T>() + 1];
-    //~^ WARN cannot use constants which depend on generic parameters in types
-    //~| WARN this was previously accepted by the compiler but is being phased out
 }
 
 

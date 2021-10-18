@@ -385,7 +385,17 @@ impl<'a, 'b, 'tcx> FulfillProcessor<'a, 'b, 'tcx> {
 
         let infcx = self.selcx.infcx();
 
-        let binder = obligation.predicate.kind();
+        use crate::infer::InferCtxtExt;
+        let rustc_infer::infer::InferOk { mut obligations, value: predicate } = infcx.partially_normalize_associated_types_in(
+            obligation.cause.clone(),
+            obligation.param_env,
+            obligation.predicate,
+        );
+        if predicate != obligation.predicate {
+            obligations.push(obligation.with(predicate));
+            return ProcessResult::Changed(mk_pending(obligations));
+        }
+        let binder = predicate.kind();
         match binder.no_bound_vars() {
             None => match binder.skip_binder() {
                 // Evaluation will discard candidates using the leak check.

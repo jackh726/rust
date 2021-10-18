@@ -3,8 +3,6 @@
 
 fn foo<T>() {
     [0; std::mem::size_of::<*mut T>()];
-    //~^ WARN cannot use constants which depend on generic parameters in types
-    //~| WARN this was previously accepted by the compiler but is being phased out
 }
 
 struct Foo<T>(T);
@@ -14,8 +12,6 @@ impl<T> Foo<T> {
 
     fn test() {
         let _ = [0; Self::ASSOC];
-        //~^ WARN cannot use constants which depend on generic parameters in types
-        //~| WARN this was previously accepted by the compiler but is being phased out
     }
 }
 
@@ -26,8 +22,6 @@ impl<const N: usize> Bar<N> {
 
     fn test() {
         let _ = [0; Self::ASSOC];
-        //~^ WARN cannot use constants which depend on generic parameters in types
-        //~| WARN this was previously accepted by the compiler but is being phased out
     }
 }
 
