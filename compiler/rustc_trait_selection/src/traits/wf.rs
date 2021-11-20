@@ -89,6 +89,7 @@ pub fn trait_obligations<'a, 'tcx>(
     wf.normalize()
 }
 
+#[tracing::instrument(level = "debug", skip(infcx, body_id, span))]
 pub fn predicate_obligations<'a, 'tcx>(
     infcx: &InferCtxt<'a, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,

@@ -1304,6 +1304,9 @@ fn check_where_clauses<'tcx, 'fcx>(
         iter::zip(&predicates.predicates, &predicates.spans).flat_map(|(&p, &sp)| {
             traits::wf::predicate_obligations(fcx, fcx.param_env, fcx.body_id, p, sp)
         });
+    let wf_obligations: Vec<_> = wf_obligations.collect();
+    debug!(?wf_obligations);
+    let wf_obligations = wf_obligations.into_iter();
 
     for obligation in wf_obligations.chain(default_obligations) {
         debug!("next obligation cause: {:?}", obligation.cause);

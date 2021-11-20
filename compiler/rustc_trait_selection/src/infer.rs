@@ -77,6 +77,7 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
 
     /// Normalizes associated types in `value`, potentially returning
     /// new obligations that must further be processed.
+    #[tracing::instrument(level = "debug", skip(self))]
     fn partially_normalize_associated_types_in<T>(
         &self,
         cause: ObligationCause<'tcx>,
@@ -86,14 +87,10 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
     where
         T: TypeFoldable<'tcx>,
     {
-        debug!("partially_normalize_associated_types_in(value={:?})", value);
         let mut selcx = traits::SelectionContext::new(self);
         let traits::Normalized { value, obligations } =
             traits::normalize(&mut selcx, param_env, cause, value);
-        debug!(
-            "partially_normalize_associated_types_in: result={:?} predicates={:?}",
-            value, obligations
-        );
+        debug!(?value, ?obligations);
         InferOk { value, obligations }
     }
 
