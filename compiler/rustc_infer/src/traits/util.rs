@@ -179,8 +179,46 @@ impl<'tcx> Elaborator<'tcx> {
                 // Currently, we do not "elaborate" predicates like `X -> Y`,
                 // though conceivably we might.
             }
-            ty::PredicateKind::Projection(..) => {
-                // Nothing to elaborate in a projection predicate.
+            ty::PredicateKind::Projection(projection_pred) => {
+                let predicates = tcx.explicit_item_bounds(projection_pred.projection_ty.item_def_id);
+
+                debug!(?projection_pred, ?predicates);
+                //dbg!(&predicates);
+ 
+                use crate::rustc_middle::ty::subst::Subst;
+                let obligations = predicates.iter().filter_map(|&(pred, _)| {
+                    let predicate = tcx.mk_predicate(bound_predicate.map_bound(|_| pred.kind().skip_binder().subst(tcx, projection_pred.projection_ty.substs)));
+                    
+                    let predicate = match predicate.kind().skip_binder() {
+                        ty::PredicateKind::Trait(trait_predicate) => {
+                            let mut substs: smallvec::SmallVec<[_; 4]> = trait_predicate.trait_ref.substs.iter().collect();
+                            substs[0] = projection_pred.ty.into();
+                            let substs = tcx.mk_substs(substs.into_iter());
+                            let trait_predicate = ty::TraitPredicate {
+                                constness: trait_predicate.constness,
+                                polarity: trait_predicate.polarity,
+                                trait_ref: ty::TraitRef {
+                                    def_id: trait_predicate.def_id(),
+                                    substs,
+                                },
+                            };
+                            tcx.mk_predicate(predicate.kind().map_bound(|_| ty::PredicateKind::Trait(trait_predicate)))
+                        }
+                        ty::PredicateKind::Projection(_projection_predicate) => return None,
+                        _ => return None,
+                    };
+                    //dbg!(projection_pred, predicate, bound_predicate);
+                    Some(predicate_obligation(
+                        predicate,
+                        obligation.param_env,
+                        obligation.cause.clone(),
+                    ))
+                });
+
+                let visited = &mut self.visited;
+                let obligations = obligations.filter(|o| visited.insert(o.predicate));
+
+                self.stack.extend(obligations);
             }
             ty::PredicateKind::ClosureKind(..) => {
                 // Nothing to elaborate when waiting for a closure's kind to be inferred.
