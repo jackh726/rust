@@ -1,5 +1,6 @@
 use crate::infer::outlives::env::RegionBoundPairs;
 use crate::infer::{GenericKind, VerifyBound};
+use crate::traits::util::elaborate_predicates;
 use rustc_data_structures::captures::Captures;
 use rustc_data_structures::sso::SsoHashSet;
 use rustc_hir::def_id::DefId;
@@ -238,7 +239,10 @@ impl<'cx, 'tcx> VerifyBoundCx<'cx, 'tcx> {
         // like `T` and `T::Item`. It may not work as well for things
         // like `<T as Foo<'a>>::Item`.
         let c_b = self.param_env.caller_bounds();
-        let param_bounds = self.collect_outlives_from_predicate_list(&compare_ty, c_b.into_iter());
+        let param_bounds = elaborate_predicates(self.tcx, c_b.into_iter())
+            .filter_map(|p| p.predicate.to_opt_type_outlives())
+            .filter_map(|p| p.no_bound_vars())
+            .filter(|p| compare_ty(p.0));
 
         // Next, collect regions we scraped from the well-formedness
         // constraints in the fn signature. To do that, we walk the list
@@ -334,22 +338,5 @@ impl<'cx, 'tcx> VerifyBoundCx<'cx, 'tcx> {
             .filter_map(|p| p.to_opt_type_outlives())
             .filter_map(|p| p.no_bound_vars())
             .map(|b| b.1)
-    }
-
-    /// Searches through a predicate list for a predicate `T: 'a`.
-    ///
-    /// Careful: does not elaborate predicates, and just uses `==`
-    /// when comparing `ty` for equality, so `ty` must be something
-    /// that does not involve inference variables and where you
-    /// otherwise want a precise match.
-    fn collect_outlives_from_predicate_list(
-        &self,
-        compare_ty: impl Fn(Ty<'tcx>) -> bool,
-        predicates: impl Iterator<Item = ty::Predicate<'tcx>>,
-    ) -> impl Iterator<Item = ty::OutlivesPredicate<Ty<'tcx>, ty::Region<'tcx>>> {
-        predicates
-            .filter_map(|p| p.to_opt_type_outlives())
-            .filter_map(|p| p.no_bound_vars())
-            .filter(move |p| compare_ty(p.0))
     }
 }
