@@ -25,6 +25,7 @@ use super::{ObligationCause, PredicateObligation, TraitObligation};
 
 use crate::infer::{InferCtxt, InferOk, TypeFreshener};
 use crate::traits::error_reporting::InferCtxtExt;
+use crate::traits::project::ProjectAndUnifyResult;
 use crate::traits::project::ProjectionCacheKeyExt;
 use crate::traits::ProjectionCacheKey;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
@@ -551,7 +552,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     let data = bound_predicate.rebind(data);
                     let project_obligation = obligation.with(data);
                     match project::poly_project_and_unify_type(self, &project_obligation) {
-                        Ok(Ok(Some(mut subobligations))) => {
+                        ProjectAndUnifyResult::Holds(mut subobligations) => {
                             'compute_res: {
                                 // If we've previously marked this projection as 'complete', thne
                                 // use the final cached result (either `EvaluatedToOk` or
@@ -599,9 +600,9 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                                 res
                             }
                         }
-                        Ok(Ok(None)) => Ok(EvaluatedToAmbig),
-                        Ok(Err(project::InProgress)) => Ok(EvaluatedToRecur),
-                        Err(_) => Ok(EvaluatedToErr),
+                        ProjectAndUnifyResult::FailedNormalization => Ok(EvaluatedToAmbig),
+                        ProjectAndUnifyResult::Recursive => Ok(EvaluatedToRecur),
+                        ProjectAndUnifyResult::MismatchedProjectionTypes(_) => Ok(EvaluatedToErr),
                     }
                 }
 
