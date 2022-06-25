@@ -36,6 +36,7 @@ use rustc_hir::{GenericParamKind, HirId, Node};
 use rustc_middle::hir::nested_filter;
 use rustc_middle::middle::codegen_fn_attrs::{CodegenFnAttrFlags, CodegenFnAttrs};
 use rustc_middle::mir::mono::Linkage;
+use rustc_middle::ty::GenericParamDefKind;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::subst::InternalSubsts;
 use rustc_middle::ty::util::Discr;
@@ -2350,6 +2351,11 @@ fn gather_explicit_predicates_of(tcx: TyCtxt<'_>, def_id: DefId) -> ty::GenericP
         predicates.extend(const_evaluatable_predicates_of(tcx, def_id.expect_local()));
     }
 
+    if tcx.features().generic_associated_types_extended {
+        predicates
+            .extend(implicit_non_generic_associated_type_predicates_of(tcx, def_id.expect_local()));
+    }
+
     let mut predicates: Vec<_> = predicates.into_iter().collect();
 
     // Subtle: before we store the predicates into the tcx, we
@@ -2435,6 +2441,150 @@ fn const_evaluatable_predicates_of<'tcx>(
         collector.visit_fn_decl(fn_sig.decl);
     }
     debug!("const_evaluatable_predicates_of({:?}) = {:?}", def_id, collector.preds);
+
+    collector.preds
+}
+
+fn implicit_non_generic_associated_type_predicates_of<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def_id: LocalDefId,
+) -> FxIndexSet<(ty::Predicate<'tcx>, Span)> {
+    struct Collector<'tcx> {
+        tcx: TyCtxt<'tcx>,
+        icx: ItemCtxt<'tcx>,
+        preds: FxIndexSet<(ty::Predicate<'tcx>, Span)>,
+    }
+
+    impl<'tcx> intravisit::Visitor<'tcx> for Collector<'tcx> {
+        fn visit_fn_decl(&mut self, fd: &'tcx hir::FnDecl<'tcx>) {
+            let tcx = self.tcx;
+            for input in fd.inputs {
+                match input.kind {
+                    hir::TyKind::Path(hir::QPath::TypeRelative(qself, segment)) => {
+                        let res =
+                            if let hir::TyKind::Path(hir::QPath::Resolved(_, path)) = qself.kind {
+                                path.res
+                            } else {
+                                hir::def::Res::Err
+                            };
+                        let qself_ty = <dyn AstConv<'_>>::ast_ty_to_ty(&self.icx, qself);
+                        let Ok(Some(poly_trait_ref)) = <dyn AstConv<'_>>::bound_for_associated_path(&self.icx, DUMMY_SP, qself_ty, res, segment.ident, false) else {
+                            continue;
+                        };
+                        let Some(trait_ref) = poly_trait_ref.no_bound_vars() else {
+                            continue;
+                        };
+                        let item = tcx
+                            .associated_items(trait_ref.def_id)
+                            .in_definition_order()
+                            .find(|i| {
+                                i.kind.namespace() == hir::def::Namespace::TypeNS
+                                    && i.ident(tcx) == segment.ident
+                            });
+                        let Some(item) = item else {
+                            continue;
+                        };
+                        let generics = tcx.generics_of(item.def_id);
+                        if generics.params.is_empty() {
+                            continue;
+                        }
+                        if segment.args.is_none() {
+                            // Create a predicate of the form: `for<X0,..., U> T::Item<X0...> = U`
+
+                            let mut substs = smallvec::SmallVec::with_capacity(
+                                trait_ref.substs.len() + generics.params.len(),
+                            );
+                            let mut bound_vars: smallvec::SmallVec<[ty::BoundVariableKind; 8]> =
+                                smallvec::SmallVec::with_capacity(generics.params.len() + 1);
+
+                            substs.extend(trait_ref.substs.into_iter());
+                            InternalSubsts::fill_single(&mut substs, generics, &mut |param, _| {
+                                match param.kind {
+                                    GenericParamDefKind::Type { .. } => {
+                                        let kind = ty::BoundTyKind::Param(param.name);
+                                        let bound_var = ty::BoundVariableKind::Ty(kind);
+                                        bound_vars.push(bound_var);
+                                        tcx.mk_ty(ty::Bound(
+                                            ty::INNERMOST,
+                                            ty::BoundTy {
+                                                var: ty::BoundVar::from_usize(bound_vars.len() - 1),
+                                                kind,
+                                            },
+                                        ))
+                                        .into()
+                                    }
+                                    GenericParamDefKind::Lifetime => {
+                                        let kind =
+                                            ty::BoundRegionKind::BrNamed(param.def_id, param.name);
+                                        let bound_var = ty::BoundVariableKind::Region(kind);
+                                        bound_vars.push(bound_var);
+                                        tcx.mk_region(ty::ReLateBound(
+                                            ty::INNERMOST,
+                                            ty::BoundRegion {
+                                                var: ty::BoundVar::from_usize(bound_vars.len() - 1),
+                                                kind,
+                                            },
+                                        ))
+                                        .into()
+                                    }
+                                    GenericParamDefKind::Const { .. } => {
+                                        let bound_var = ty::BoundVariableKind::Const;
+                                        bound_vars.push(bound_var);
+                                        tcx.mk_const(ty::ConstS {
+                                            ty: tcx.type_of(param.def_id),
+                                            val: ty::ConstKind::Bound(
+                                                ty::INNERMOST,
+                                                ty::BoundVar::from_usize(bound_vars.len() - 1),
+                                            ),
+                                        })
+                                        .into()
+                                    }
+                                }
+                            });
+
+                            // `U` from above
+                            let kind = ty::BoundTyKind::Anon;
+                            bound_vars.push(ty::BoundVariableKind::Ty(kind));
+                            let u = tcx.mk_ty(ty::Bound(
+                                ty::INNERMOST,
+                                ty::BoundTy {
+                                    var: ty::BoundVar::from_usize(bound_vars.len() - 1),
+                                    kind,
+                                },
+                            ));
+
+                            let bound_vars = tcx.mk_bound_variable_kinds(bound_vars.into_iter());
+                            let substs = tcx.intern_substs(&substs);
+
+                            let projection_ty =
+                                ty::ProjectionTy { item_def_id: item.def_id, substs };
+                            let predicate =
+                                ty::ProjectionPredicate { projection_ty, term: ty::Term::Ty(u) };
+                            let _predicate = tcx.mk_predicate(ty::Binder::bind_with_vars(
+                                ty::PredicateKind::Projection(predicate),
+                                bound_vars,
+                            ));
+                            //self.preds.insert((predicate, DUMMY_SP));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let icx = ItemCtxt::new(tcx, def_id.to_def_id());
+    let mut collector = Collector { tcx, icx, preds: FxIndexSet::default() };
+
+    let hir_id = tcx.hir().local_def_id_to_hir_id(def_id);
+    let node = tcx.hir().get(hir_id);
+
+    match node {
+        hir::Node::Item(item) => collector.visit_item(item),
+        hir::Node::TraitItem(item) => collector.visit_trait_item(item),
+        hir::Node::ImplItem(item) => collector.visit_impl_item(item),
+        _ => {}
+    }
 
     collector.preds
 }

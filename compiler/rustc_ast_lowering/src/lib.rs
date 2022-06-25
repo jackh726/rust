@@ -384,7 +384,7 @@ pub fn lower_crate<'a, 'hir>(
     .lower_crate(krate)
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 enum ParamMode {
     /// Any path in a type context.
     Explicit,
@@ -1235,6 +1235,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     ) -> hir::Ty<'hir> {
         let id = self.lower_node_id(t.id);
         let qpath = self.lower_qpath(t.id, qself, path, param_mode, itctx);
+        debug!(?qpath);
         self.ty_path(id, t.span, qpath)
     }
 
@@ -1557,6 +1558,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     // `make_ret_async`: if `Some`, converts `-> T` into `-> impl Future<Output = T>` in the
     //      return type. This is used for `async fn` declarations. The `NodeId` is the ID of the
     //      return type `impl Trait` item.
+    #[tracing::instrument(level = "debug", skip(self))]
     fn lower_fn_decl(
         &mut self,
         decl: &FnDecl,
@@ -1564,14 +1566,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         kind: FnDeclKind,
         make_ret_async: Option<NodeId>,
     ) -> &'hir hir::FnDecl<'hir> {
-        debug!(
-            "lower_fn_decl(\
-            fn_decl: {:?}, \
-            in_band_ty_params: {:?}, \
-            kind: {:?}, \
-            make_ret_async: {:?})",
-            decl, in_band_ty_params, kind, make_ret_async,
-        );
         let lt_mode = if make_ret_async.is_some() {
             // In `async fn`, argument-position elided lifetimes
             // must be transformed into fresh generic parameters so that

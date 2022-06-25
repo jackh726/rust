@@ -53,7 +53,7 @@ use crate::mir;
 use crate::ty::{self, flags::FlagComputation, Binder, Ty, TyCtxt, TypeFlags};
 use rustc_hir::def_id::DefId;
 
-use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::sso::SsoHashSet;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -900,21 +900,33 @@ impl<'tcx> TyCtxt<'tcx> {
     where
         T: TypeFoldable<'tcx>,
     {
+        let old_bound_vars = sig.bound_vars();
+        let mut map = FxHashMap::<usize, u32>::default();
         let mut counter = 0;
         let inner = self
-            .replace_late_bound_regions(sig, |_| {
-                let br = ty::BoundRegion {
-                    var: ty::BoundVar::from_u32(counter),
-                    kind: ty::BrAnon(counter),
-                };
+            .replace_late_bound_regions(sig, |old_br| {
+                let anon_index = *map.entry(old_br.var.as_usize()).or_insert_with(|| {
+                    let i = counter;
+                    counter += 1;
+                    i
+                });
+                let br = ty::BoundRegion { var: old_br.var, kind: ty::BrAnon(anon_index) };
                 let r = self.mk_region(ty::ReLateBound(ty::INNERMOST, br));
-                counter += 1;
                 r
             })
             .0;
-        let bound_vars = self.mk_bound_variable_kinds(
-            (0..counter).map(|i| ty::BoundVariableKind::Region(ty::BrAnon(i))),
-        );
+        let bound_vars = self.mk_bound_variable_kinds(old_bound_vars.into_iter().enumerate().map(
+            |(i, b)| match b {
+                ty::BoundVariableKind::Region(_) => {
+                    ty::BoundVariableKind::Region(ty::BrAnon(*map.entry(i).or_insert_with(|| {
+                        let i = counter;
+                        counter += 1;
+                        i
+                    })))
+                }
+                _ => b,
+            },
+        ));
         Binder::bind_with_vars(inner, bound_vars)
     }
 }

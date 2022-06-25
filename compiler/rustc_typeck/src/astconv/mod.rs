@@ -655,10 +655,25 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             "create_substs_for_associated_item(span: {:?}, item_def_id: {:?}, item_segment: {:?}",
             span, item_def_id, item_segment
         );
-        if tcx.generics_of(item_def_id).params.is_empty() {
+        let generics = tcx.generics_of(item_def_id);
+        if generics.params.is_empty() {
             self.prohibit_generics(slice::from_ref(item_segment));
 
             parent_substs
+        } else if item_segment.args().is_empty() && tcx.features().generic_associated_types_extended
+        {
+            let mut substs = smallvec::SmallVec::with_capacity(generics.count());
+            substs.extend(parent_substs.into_iter());
+
+            InternalSubsts::fill_single(&mut substs, generics, &mut |param, _| match param.kind {
+                GenericParamDefKind::Type { .. } => tcx.types.unit.into(),
+                GenericParamDefKind::Lifetime => tcx.lifetimes.re_static.into(),
+                GenericParamDefKind::Const { .. } => {
+                    bug!("Unimplemented");
+                }
+            });
+
+            tcx.intern_substs(&substs)
         } else {
             self.create_substs_for_ast_path(
                 span,
@@ -1133,6 +1148,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                         ConvertedBindingKind::Equality(ty) => Some(ty.to_string()),
                         _ => None,
                     },
+                    true,
                 )?
             };
 
@@ -1606,6 +1622,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ty_param_def_id: LocalDefId,
         assoc_name: Ident,
         span: Span,
+        emit_errors: bool,
     ) -> Result<ty::PolyTraitRef<'tcx>, ErrorGuaranteed> {
         let tcx = self.tcx();
 
@@ -1636,6 +1653,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             assoc_name,
             span,
             || None,
+            emit_errors,
         )
     }
 
@@ -1648,6 +1666,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         assoc_name: Ident,
         span: Span,
         is_equality: impl Fn() -> Option<String>,
+        emit_errors: bool,
     ) -> Result<ty::PolyTraitRef<'tcx>, ErrorGuaranteed>
     where
         I: Iterator<Item = ty::PolyTraitRef<'tcx>>,
@@ -1661,12 +1680,14 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             (Some(bound), _) => (bound, matching_candidates.next()),
             (None, Some(bound)) => (bound, const_candidates.next()),
             (None, None) => {
-                self.complain_about_assoc_type_not_found(
-                    all_candidates,
-                    &ty_param_name(),
-                    assoc_name,
-                    span,
-                );
+                if emit_errors {
+                    self.complain_about_assoc_type_not_found(
+                        all_candidates,
+                        &ty_param_name(),
+                        assoc_name,
+                        span,
+                    );
+                }
                 return Err(ErrorGuaranteed);
             }
         };
@@ -1752,13 +1773,59 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
                     where_bounds.join(",\n"),
                 ));
             }
-            err.emit();
+            if emit_errors {
+                err.emit();
+            } else {
+                err.cancel();
+            }
             if !where_bounds.is_empty() {
                 return Err(ErrorGuaranteed);
             }
         }
 
         Ok(bound)
+    }
+
+    pub fn bound_for_associated_path(
+        &self,
+        span: Span,
+        qself_ty: Ty<'tcx>,
+        qself_res: Res,
+        assoc_ident: Ident,
+        emit_errors: bool,
+    ) -> Result<Option<ty::PolyTraitRef<'tcx>>, ErrorGuaranteed> {
+        let tcx = self.tcx();
+        let bound = match (qself_ty.kind(), qself_res) {
+            (_, Res::SelfTy { trait_: Some(_), alias_to: Some((impl_def_id, _)) }) => {
+                // `Self` in an impl of a trait -- we have a concrete self type and a
+                // trait reference.
+                let Some(trait_ref) = tcx.impl_trait_ref(impl_def_id) else {
+                    // A cycle error occurred, most likely.
+                    return Err(ErrorGuaranteed);
+                };
+
+                self.one_bound_for_assoc_type(
+                    || traits::supertraits(tcx, ty::Binder::dummy(trait_ref)),
+                    || "Self".to_string(),
+                    assoc_ident,
+                    span,
+                    || None,
+                    emit_errors,
+                )?
+            }
+            (
+                &ty::Param(_),
+                Res::SelfTy { trait_: Some(param_did), alias_to: None }
+                | Res::Def(DefKind::TyParam, param_did),
+            ) => self.find_bound_for_assoc_item(
+                param_did.expect_local(),
+                assoc_ident,
+                span,
+                emit_errors,
+            )?,
+            _ => return Ok(None),
+        };
+        Ok(Some(bound))
     }
 
     // Create a type from a path to an associated type.
@@ -1805,84 +1872,65 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
 
         // Find the type of the associated item, and the trait where the associated
         // item is declared.
-        let bound = match (&qself_ty.kind(), qself_res) {
-            (_, Res::SelfTy { trait_: Some(_), alias_to: Some((impl_def_id, _)) }) => {
-                // `Self` in an impl of a trait -- we have a concrete self type and a
-                // trait reference.
-                let Some(trait_ref) = tcx.impl_trait_ref(impl_def_id) else {
-                    // A cycle error occurred, most likely.
+        let bound =
+            match self.bound_for_associated_path(span, qself_ty, qself_res, assoc_ident, true)? {
+                Some(bound) => bound,
+                None => {
+                    if variant_resolution.is_some() {
+                        // Variant in type position
+                        let msg = format!("expected type, found variant `{}`", assoc_ident);
+                        tcx.sess.span_err(span, &msg);
+                    } else if qself_ty.is_enum() {
+                        let mut err = struct_span_err!(
+                            tcx.sess,
+                            assoc_ident.span,
+                            E0599,
+                            "no variant named `{}` found for enum `{}`",
+                            assoc_ident,
+                            qself_ty,
+                        );
+
+                        let adt_def = qself_ty.ty_adt_def().expect("enum is not an ADT");
+                        if let Some(suggested_name) = find_best_match_for_name(
+                            &adt_def
+                                .variants
+                                .iter()
+                                .map(|variant| variant.name)
+                                .collect::<Vec<Symbol>>(),
+                            assoc_ident.name,
+                            None,
+                        ) {
+                            err.span_suggestion(
+                                assoc_ident.span,
+                                "there is a variant with a similar name",
+                                suggested_name.to_string(),
+                                Applicability::MaybeIncorrect,
+                            );
+                        } else {
+                            err.span_label(
+                                assoc_ident.span,
+                                format!("variant not found in `{}`", qself_ty),
+                            );
+                        }
+
+                        if let Some(sp) = tcx.hir().span_if_local(adt_def.did) {
+                            let sp = tcx.sess.source_map().guess_head_span(sp);
+                            err.span_label(sp, format!("variant `{}` not found here", assoc_ident));
+                        }
+
+                        err.emit();
+                    } else if !qself_ty.references_error() {
+                        // Don't print `TyErr` to the user.
+                        self.report_ambiguous_associated_type(
+                            span,
+                            &qself_ty.to_string(),
+                            "Trait",
+                            assoc_ident.name,
+                        );
+                    }
                     return Err(ErrorGuaranteed);
-                };
-
-                self.one_bound_for_assoc_type(
-                    || traits::supertraits(tcx, ty::Binder::dummy(trait_ref)),
-                    || "Self".to_string(),
-                    assoc_ident,
-                    span,
-                    || None,
-                )?
-            }
-            (
-                &ty::Param(_),
-                Res::SelfTy { trait_: Some(param_did), alias_to: None }
-                | Res::Def(DefKind::TyParam, param_did),
-            ) => self.find_bound_for_assoc_item(param_did.expect_local(), assoc_ident, span)?,
-            _ => {
-                if variant_resolution.is_some() {
-                    // Variant in type position
-                    let msg = format!("expected type, found variant `{}`", assoc_ident);
-                    tcx.sess.span_err(span, &msg);
-                } else if qself_ty.is_enum() {
-                    let mut err = struct_span_err!(
-                        tcx.sess,
-                        assoc_ident.span,
-                        E0599,
-                        "no variant named `{}` found for enum `{}`",
-                        assoc_ident,
-                        qself_ty,
-                    );
-
-                    let adt_def = qself_ty.ty_adt_def().expect("enum is not an ADT");
-                    if let Some(suggested_name) = find_best_match_for_name(
-                        &adt_def
-                            .variants
-                            .iter()
-                            .map(|variant| variant.name)
-                            .collect::<Vec<Symbol>>(),
-                        assoc_ident.name,
-                        None,
-                    ) {
-                        err.span_suggestion(
-                            assoc_ident.span,
-                            "there is a variant with a similar name",
-                            suggested_name.to_string(),
-                            Applicability::MaybeIncorrect,
-                        );
-                    } else {
-                        err.span_label(
-                            assoc_ident.span,
-                            format!("variant not found in `{}`", qself_ty),
-                        );
-                    }
-
-                    if let Some(sp) = tcx.hir().span_if_local(adt_def.did) {
-                        let sp = tcx.sess.source_map().guess_head_span(sp);
-                        err.span_label(sp, format!("variant `{}` not found here", assoc_ident));
-                    }
-
-                    err.emit();
-                } else if !qself_ty.references_error() {
-                    // Don't print `TyErr` to the user.
-                    self.report_ambiguous_associated_type(
-                        span,
-                        &qself_ty.to_string(),
-                        "Trait",
-                        assoc_ident.name,
-                    );
                 }
-                return Err(ErrorGuaranteed);
-            }
-        };
+            };
 
         let trait_did = bound.def_id();
         let (assoc_ident, def_scope) =
@@ -2526,16 +2574,6 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         ty
     }
 
-    pub fn ty_of_arg(&self, ty: &hir::Ty<'_>, expected_ty: Option<Ty<'tcx>>) -> Ty<'tcx> {
-        match ty.kind {
-            hir::TyKind::Infer if expected_ty.is_some() => {
-                self.record_ty(ty.hir_id, expected_ty.unwrap(), ty.span);
-                expected_ty.unwrap()
-            }
-            _ => self.ast_ty_to_ty(ty),
-        }
-    }
-
     pub fn ty_of_fn(
         &self,
         hir_id: hir::HirId,
@@ -2559,7 +2597,7 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
         }
         walk_generics(&mut visitor, generics);
 
-        let input_tys = decl.inputs.iter().map(|a| self.ty_of_arg(a, None));
+        let input_tys = decl.inputs.iter().map(|ty| self.ast_ty_to_ty(ty));
         let output_ty = match decl.output {
             hir::FnRetTy::Return(output) => {
                 visitor.visit_ty(output);

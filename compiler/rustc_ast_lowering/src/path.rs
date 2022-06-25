@@ -16,6 +16,7 @@ use smallvec::smallvec;
 use tracing::debug;
 
 impl<'a, 'hir> LoweringContext<'a, 'hir> {
+    #[tracing::instrument(level = "debug", skip(self))]
     crate fn lower_qpath(
         &mut self,
         id: NodeId,
@@ -24,12 +25,13 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         param_mode: ParamMode,
         mut itctx: ImplTraitContext<'_, 'hir>,
     ) -> hir::QPath<'hir> {
-        debug!("lower_qpath(id: {:?}, qself: {:?}, p: {:?})", id, qself, p);
         let qself_position = qself.as_ref().map(|q| q.position);
         let qself = qself.as_ref().map(|q| self.lower_ty(&q.ty, itctx.reborrow()));
 
         let partial_res =
             self.resolver.get_partial_res(id).unwrap_or_else(|| PartialRes::new(Res::Err));
+
+        debug!(?partial_res);
 
         let path_span_lo = p.span.shrink_to_lo();
         let proj_start = p.segments.len() - partial_res.unresolved_segments();
