@@ -493,8 +493,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                     }
                 }
 
-                NllRegionVariableOrigin::RootEmptyRegion
-                | NllRegionVariableOrigin::Existential { .. } => {
+                NllRegionVariableOrigin::Existential { .. } => {
                     // For existential, regions, nothing to do.
                 }
             }
@@ -1408,8 +1407,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                     self.check_bound_universal_region(fr, placeholder, errors_buffer);
                 }
 
-                NllRegionVariableOrigin::RootEmptyRegion
-                | NllRegionVariableOrigin::Existential { .. } => {
+                NllRegionVariableOrigin::Existential { .. } => {
                     // nothing to check here
                 }
             }
@@ -1511,8 +1509,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                     self.check_bound_universal_region(fr, placeholder, errors_buffer);
                 }
 
-                NllRegionVariableOrigin::RootEmptyRegion
-                | NllRegionVariableOrigin::Existential { .. } => {
+                NllRegionVariableOrigin::Existential { .. } => {
                     // nothing to check here
                 }
             }
@@ -1786,9 +1783,9 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 universe1.cannot_name(placeholder.universe)
             }
 
-            NllRegionVariableOrigin::RootEmptyRegion
-            | NllRegionVariableOrigin::FreeRegion
-            | NllRegionVariableOrigin::Existential { .. } => false,
+            NllRegionVariableOrigin::FreeRegion | NllRegionVariableOrigin::Existential { .. } => {
+                false
+            }
         }
     }
 
@@ -2150,8 +2147,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         let blame_source = match from_region_origin {
             NllRegionVariableOrigin::FreeRegion
             | NllRegionVariableOrigin::Existential { from_forall: false } => true,
-            NllRegionVariableOrigin::RootEmptyRegion
-            | NllRegionVariableOrigin::Placeholder(_)
+            NllRegionVariableOrigin::Placeholder(_)
             | NllRegionVariableOrigin::Existential { from_forall: true } => false,
         };
 
