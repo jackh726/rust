@@ -306,7 +306,8 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
         infcx.set_tainted_by_errors();
     }
 
-    let remapped_opaque_tys = regioncx.infer_opaque_types(&infcx, opaque_type_values);
+    let remapped_opaque_tys =
+        regioncx.infer_opaque_types(infcx.tcx, opaque_type_values, infcx.is_tainted_by_errors());
 
     NllOutput {
         regioncx,
