@@ -586,6 +586,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             &mut errors_buffer,
         );
 
+        debug!(?outlives_requirements, ?self.universal_region_relations);
+
         // In Polonius mode, the errors about missing universal region relations are in the output
         // and need to be emitted or propagated. Otherwise, we need to check whether the
         // constraints were too strong, and if so, emit or propagate those errors.
@@ -1544,6 +1546,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         assert!(self.scc_universes[longer_fr_scc] == ty::UniverseIndex::ROOT);
         debug_assert!(self.scc_values.placeholders_contained_in(longer_fr_scc).next().is_none());
 
+        debug!(?self.scc_representatives, ?longer_fr_scc);
+
         // Only check all of the relations for the main representative of each
         // SCC, otherwise just check that we outlive said representative. This
         // reduces the number of redundant relations propagated out of
@@ -1572,6 +1576,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // (because `fr` includes `end(o)`).
         let mut error_reported = false;
         for shorter_fr in self.scc_values.universal_regions_outlived_by(longer_fr_scc) {
+            debug!(?shorter_fr);
             if let RegionRelationCheckResult::Error = self.check_universal_region_relation(
                 longer_fr,
                 shorter_fr,

@@ -72,7 +72,13 @@ pub fn obligations<'a, 'tcx>(
     wf.compute(arg);
     debug!("wf::obligations({:?}, body_id={:?}) = {:?}", arg, body_id, wf.out);
 
-    let result = wf.normalize(infcx);
+    let result = if std::env::var("RUSTC_NORM").is_ok() {
+        wf.normalize(infcx)
+    } else {
+        wf.out
+    };
+    //let result = wf.normalize(infcx);
+    //let result = wf.out;
     debug!("wf::obligations({:?}, body_id={:?}) ~~> {:?}", arg, body_id, result);
     Some(result)
 }

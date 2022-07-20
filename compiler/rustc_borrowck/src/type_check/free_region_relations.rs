@@ -290,6 +290,8 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
             })
             .collect();
 
+        debug!(?constraint_sets);
+
         // Insert the facts we know from the predicates. Why? Why not.
         let param_env = self.param_env;
         self.add_outlives_bounds(outlives::explicit_outlives_bounds(param_env));
@@ -336,13 +338,152 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
     /// from this local.
     #[instrument(level = "debug", skip(self))]
     fn add_implied_bounds(&mut self, ty: Ty<'tcx>) -> Option<Rc<QueryRegionConstraints<'tcx>>> {
-        let TypeOpOutput { output: bounds, constraints, .. } = self
+        use rustc_infer::traits::TraitEngine;
+        use rustc_infer::traits::TraitEngineExt;
+        use crate::rustc_middle::ty::TypeVisitable;
+
+        let mut checked_wf_args = rustc_data_structures::stable_set::FxHashSet::default();
+        let mut wf_args = vec![ty.into()];
+        
+        let mut fulfill_cx = rustc_trait_selection::traits::FulfillmentContext::new();
+    
+        while let Some(arg) = wf_args.pop() {
+            if !checked_wf_args.insert(arg) {
+                continue;
+            }
+    
+            // Compute the obligations for `arg` to be well-formed. If `arg` is
+            // an unresolved inference variable, just substituted an empty set
+            // -- because the return type here is going to be things we *add*
+            // to the environment, it's always ok for this set to be smaller
+            // than the ultimate set. (Note: normally there won't be
+            // unresolved inference variables here anyway, but there might be
+            // during typeck under some circumstances.)
+            let obligations = rustc_trait_selection::traits::wf::obligations(self.infcx, self.param_env, rustc_hir::CRATE_HIR_ID, 0, arg, DUMMY_SP)
+                .unwrap_or_default();
+    
+            // N.B., all of these predicates *ought* to be easily proven
+            // true. In fact, their correctness is (mostly) implied by
+            // other parts of the program. However, in #42552, we had
+            // an annoying scenario where:
+            //
+            // - Some `T::Foo` gets normalized, resulting in a
+            //   variable `_1` and a `T: Trait<Foo=_1>` constraint
+            //   (not sure why it couldn't immediately get
+            //   solved). This result of `_1` got cached.
+            // - These obligations were dropped on the floor here,
+            //   rather than being registered.
+            // - Then later we would get a request to normalize
+            //   `T::Foo` which would result in `_1` being used from
+            //   the cache, but hence without the `T: Trait<Foo=_1>`
+            //   constraint. As a result, `_1` never gets resolved,
+            //   and we get an ICE (in dropck).
+            //
+            // Therefore, we register any predicates involving
+            // inference variables. We restrict ourselves to those
+            // involving inference variables both for efficiency and
+            // to avoids duplicate errors that otherwise show up.
+            fulfill_cx.register_predicate_obligations(
+                self.infcx,
+                obligations.iter().filter(|o| o.predicate.has_infer_types_or_consts()).cloned(),
+            );
+    
+            // From the full set of obligations, just filter down to the
+            // region relationships.
+            for obligation in obligations {
+                assert!(!obligation.has_escaping_bound_vars());
+                match obligation.predicate.kind().no_bound_vars() {
+                    None => {},
+                    Some(pred) => match pred {
+                        ty::PredicateKind::Trait(..)
+                        | ty::PredicateKind::Subtype(..)
+                        | ty::PredicateKind::Coerce(..)
+                        | ty::PredicateKind::Projection(..)
+                        | ty::PredicateKind::ClosureKind(..)
+                        | ty::PredicateKind::ObjectSafe(..)
+                        | ty::PredicateKind::ConstEvaluatable(..)
+                        | ty::PredicateKind::ConstEquate(..)
+                        | ty::PredicateKind::TypeWellFormedFromEnv(..) => {},
+                        ty::PredicateKind::WellFormed(arg) => {
+                            wf_args.push(arg);
+                        }
+    
+                        ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r_a, r_b)) => {
+                            self.add_outlives_bound(OutlivesBound::RegionSubRegion(r_b, r_a));
+                        }
+    
+                        ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(ty_a, r_b)) => {
+                            let ty_a = self.infcx.resolve_vars_if_possible(ty_a);
+                            let mut components = smallvec::smallvec![];
+                            outlives::components::push_outlives_components(self.infcx.tcx, ty_a, &mut components);
+                            self.add_outlives_bounds(rustc_traits::implied_bounds_from_components(r_b, components));
+                        }
+                    },
+                }
+            }
+        }
+    
+        // Ensure that those obligations that we had to solve
+        // get solved *here*.
+        match fulfill_cx.select_all_or_error(self.infcx).as_slice() {
+            [] => None,
+            _ => bug!(),
+        }
+
+        /*
+        let TypeOpOutput { output: mut bounds, constraints, .. } = self
             .param_env
             .and(type_op::implied_outlives_bounds::ImpliedOutlivesBounds { ty })
             .fully_perform(self.infcx)
             .unwrap_or_else(|_| bug!("failed to compute implied bounds {:?}", ty));
-        self.add_outlives_bounds(bounds);
-        constraints
+
+        for bound in bounds.iter_mut() {
+            match bound {
+                OutlivesBound::RegionSubProjection(_, data) => {
+                    let mut orig_values = rustc_infer::infer::canonical::OriginalQueryValues::default();
+                    // HACK(matthewjasper) `'static` is special-cased in selection,
+                    // so we cannot canonicalize it.
+                    let c_data = self
+                        .infcx
+                        .canonicalize_query_keep_static(self.param_env.and(*data), &mut orig_values);
+                    debug!("QueryNormalizer: c_data = {:#?}", c_data);
+                    debug!("QueryNormalizer: orig_values = {:#?}", orig_values);
+                    let result = self.infcx.tcx.normalize_projection_ty(c_data).unwrap_or_else(|e| bug!("{:?}", e));
+                    if result.is_ambiguous() {
+                        bug!("Ambiguous not expected.");
+                    }
+                    let res = self.infcx.instantiate_query_response_and_region_obligations(
+                            &rustc_infer::traits::ObligationCause::dummy(),
+                            self.param_env,
+                            &orig_values,
+                            result,
+                        ).unwrap_or_else(|e| bug!("{:?}", e));
+                    if !res.obligations.is_empty() {
+                        panic!("{:?}", res);
+                    }
+                    //let value: () = res.value.normalized_ty;
+                }
+                _ => {}
+            }
+        }
+        let TypeOpOutput { output: bounds, constraints: constraints2, .. } = self
+            .param_env
+            .and(type_op::normalize::Normalize::new(bounds))
+            .fully_perform(self.infcx)
+            .unwrap_or_else(|_| {
+                self.infcx
+                    .tcx
+                    .sess
+                    .delay_span_bug(DUMMY_SP, &format!("failed to normalize {:?}", ty));
+                TypeOpOutput {
+                    output: vec![],
+                    constraints: None,
+                    error_info: None,
+                }
+            });
+        */
+        //self.add_outlives_bounds(bounds);
+        //constraints
     }
 
     /// Registers the `OutlivesBound` items from `outlives_bounds` in
@@ -353,30 +494,37 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
         I: IntoIterator<Item = OutlivesBound<'tcx>>,
     {
         for outlives_bound in outlives_bounds {
-            debug!("add_outlives_bounds(bound={:?})", outlives_bound);
+            self.add_outlives_bound(outlives_bound);
+        }
+    }
 
-            match outlives_bound {
-                OutlivesBound::RegionSubRegion(r1, r2) => {
-                    // `where Type:` is lowered to `where Type: 'empty` so that
-                    // we check `Type` is well formed, but there's no use for
-                    // this bound here.
-                    if r1.is_empty() {
-                        return;
-                    }
+    /// Registers the `OutlivesBound` in the outlives relation as well as the
+    /// region-bound pairs listing.
+    fn add_outlives_bound(&mut self, outlives_bound: OutlivesBound<'tcx>)
+    {
+        debug!("add_outlives_bounds(bound={:?})", outlives_bound);
 
-                    // The bound says that `r1 <= r2`; we store `r2: r1`.
-                    let r1 = self.universal_regions.to_region_vid(r1);
-                    let r2 = self.universal_regions.to_region_vid(r2);
-                    self.relations.relate_universal_regions(r2, r1);
+        match outlives_bound {
+            OutlivesBound::RegionSubRegion(r1, r2) => {
+                // `where Type:` is lowered to `where Type: 'empty` so that
+                // we check `Type` is well formed, but there's no use for
+                // this bound here.
+                if r1.is_empty() {
+                    return;
                 }
 
-                OutlivesBound::RegionSubParam(r_a, param_b) => {
-                    self.region_bound_pairs.push((r_a, GenericKind::Param(param_b)));
-                }
+                // The bound says that `r1 <= r2`; we store `r2: r1`.
+                let r1 = self.universal_regions.to_region_vid(r1);
+                let r2 = self.universal_regions.to_region_vid(r2);
+                self.relations.relate_universal_regions(r2, r1);
+            }
 
-                OutlivesBound::RegionSubProjection(r_a, projection_b) => {
-                    self.region_bound_pairs.push((r_a, GenericKind::Projection(projection_b)));
-                }
+            OutlivesBound::RegionSubParam(r_a, param_b) => {
+                self.region_bound_pairs.push((r_a, GenericKind::Param(param_b)));
+            }
+
+            OutlivesBound::RegionSubProjection(r_a, projection_b) => {
+                self.region_bound_pairs.push((r_a, GenericKind::Projection(projection_b)));
             }
         }
     }

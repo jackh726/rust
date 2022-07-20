@@ -192,6 +192,8 @@ pub(crate) fn compute_regions<'cx, 'tcx>(
             use_polonius,
         );
 
+    debug!(?universal_region_relations);
+
     if let Some(all_facts) = &mut all_facts {
         let _prof_timer = infcx.tcx.prof.generic_activity("polonius_fact_generation");
         all_facts.universal_region.extend(universal_regions.universal_regions());
