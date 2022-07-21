@@ -1,0 +1,20 @@
+error[E0478]: lifetime bound not satisfied
+  --> $DIR/unsatisfied_trait_where_clause.rs:15:4
+   |
+LL | fn make<'a, 'b>() -> <() as Foo>::Assoc::<'a, 'b> {}
+   |    ^^^^
+   |
+note: lifetime parameter instantiated with the lifetime `'a` as defined here
+  --> $DIR/unsatisfied_trait_where_clause.rs:15:9
+   |
+LL | fn make<'a, 'b>() -> <() as Foo>::Assoc::<'a, 'b> {}
+   |         ^^
+note: but lifetime parameter must outlive the lifetime `'b` as defined here
+  --> $DIR/unsatisfied_trait_where_clause.rs:15:13
+   |
+LL | fn make<'a, 'b>() -> <() as Foo>::Assoc::<'a, 'b> {}
+   |             ^^
+
+error: aborting due to previous error
+
+For more information about this error, try `rustc --explain E0478`.

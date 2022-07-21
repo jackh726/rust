@@ -77,6 +77,75 @@ pub fn obligations<'a, 'tcx>(
     Some(result)
 }
 
+/// Returns the set of obligations needed to make `arg` well-formed.
+/// If `arg` contains unresolved inference variables, this may include
+/// further WF obligations. However, if `arg` IS an unresolved
+/// inference variable, returns `None`, because we are not able to
+/// make any progress at all. This is to prevent "livelock" where we
+/// say "$0 is WF if $0 is WF".
+pub fn obligations_without_normalization<'a, 'tcx>(
+    infcx: &InferCtxt<'a, 'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    body_id: hir::HirId,
+    recursion_depth: usize,
+    arg: GenericArg<'tcx>,
+    span: Span,
+) -> Option<Vec<traits::PredicateObligation<'tcx>>> {
+    // Handle the "livelock" case (see comment above) by bailing out if necessary.
+    let arg = match arg.unpack() {
+        GenericArgKind::Type(ty) => {
+            match ty.kind() {
+                ty::Infer(ty::TyVar(_)) => {
+                    let resolved_ty = infcx.shallow_resolve(ty);
+                    if resolved_ty == ty {
+                        // No progress, bail out to prevent "livelock".
+                        return None;
+                    }
+
+                    resolved_ty
+                }
+                _ => ty,
+            }
+            .into()
+        }
+        GenericArgKind::Const(ct) => {
+            match ct.kind() {
+                ty::ConstKind::Infer(infer) => {
+                    let resolved = infcx.shallow_resolve(infer);
+                    if resolved == infer {
+                        // No progress.
+                        return None;
+                    }
+
+                    infcx
+                        .tcx
+                        .mk_const(ty::ConstS { kind: ty::ConstKind::Infer(resolved), ty: ct.ty() })
+                }
+                _ => ct,
+            }
+            .into()
+        }
+        // There is nothing we have to do for lifetimes.
+        GenericArgKind::Lifetime(..) => return Some(Vec::new()),
+    };
+
+    let mut wf = WfPredicates {
+        tcx: infcx.tcx,
+        param_env,
+        body_id,
+        span,
+        out: vec![],
+        recursion_depth,
+        item: None,
+    };
+    wf.compute(arg);
+    debug!("wf::obligations({:?}, body_id={:?}) = {:?}", arg, body_id, wf.out);
+
+    let result = wf.out;
+    debug!("wf::obligations({:?}, body_id={:?}) ~~> {:?}", arg, body_id, result);
+    Some(result)
+}
+
 /// Returns the obligations that make this trait reference
 /// well-formed.  For example, if there is a trait `Set` defined like
 /// `trait Set<K:Eq>`, then the trait reference `Foo: Set<Bar>` is WF

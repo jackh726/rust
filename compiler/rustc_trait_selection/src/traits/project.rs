@@ -32,7 +32,9 @@ use rustc_middle::traits::select::OverflowError;
 use rustc_middle::ty::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
 use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::visit::{MaxUniverse, TypeVisitable};
-use rustc_middle::ty::{self, EarlyBinder, Term, ToPredicate, Ty, TyCtxt};
+use rustc_middle::ty::{
+    self, EarlyBinder, InstantiatedPredicates, ParamEnv, Term, ToPredicate, Ty, TyCtxt,
+};
 use rustc_span::symbol::sym;
 
 use std::collections::BTreeMap;
@@ -1955,7 +1957,18 @@ fn confirm_param_env_candidate<'cx, 'tcx>(
     match infcx.at(cause, param_env).eq(cache_projection, obligation_projection) {
         Ok(InferOk { value: _, obligations }) => {
             nested_obligations.extend(obligations);
-            assoc_ty_own_obligations(selcx, obligation, &mut nested_obligations);
+            let predicates = selcx
+                .tcx()
+                .predicates_of(obligation.predicate.item_def_id)
+                .instantiate_own(selcx.tcx(), obligation.predicate.substs);
+            assoc_ty_own_obligations(
+                selcx,
+                predicates,
+                obligation.param_env,
+                &obligation.cause,
+                obligation.recursion_depth,
+                &mut nested_obligations,
+            );
             // FIXME(associated_const_equality): Handle consts here as well? Maybe this progress type should just take
             // a term instead.
             Progress { term: cache_entry.term, obligations: nested_obligations }
@@ -2026,7 +2039,30 @@ fn confirm_impl_candidate<'cx, 'tcx>(
         );
         Progress { term: err.into(), obligations: nested }
     } else {
-        assoc_ty_own_obligations(selcx, obligation, &mut nested);
+        // First, make sure we satisfy the trait predicates
+        let predicates = selcx
+            .tcx()
+            .predicates_of(obligation.predicate.item_def_id)
+            .instantiate_own(tcx, obligation.predicate.substs);
+        assoc_ty_own_obligations(
+            selcx,
+            predicates,
+            obligation.param_env,
+            &obligation.cause,
+            obligation.recursion_depth,
+            &mut nested,
+        );
+        // Then, the impl predicates
+        let predicates =
+            selcx.tcx().predicates_of(assoc_ty.item.def_id).instantiate_own(tcx, substs);
+        assoc_ty_own_obligations(
+            selcx,
+            predicates,
+            obligation.param_env,
+            &obligation.cause,
+            obligation.recursion_depth,
+            &mut nested,
+        );
         Progress { term: EarlyBinder(term).subst(tcx, substs), obligations: nested }
     }
 }
@@ -2037,27 +2073,32 @@ fn confirm_impl_candidate<'cx, 'tcx>(
 // predicates, even for non-generic associated types.
 fn assoc_ty_own_obligations<'cx, 'tcx>(
     selcx: &mut SelectionContext<'cx, 'tcx>,
-    obligation: &ProjectionTyObligation<'tcx>,
+    //obligation: &ProjectionTyObligation<'tcx>,
+    //item_def_id: DefId,
+    predicates: InstantiatedPredicates<'tcx>,
+    param_env: ParamEnv<'tcx>,
+    cause: &ObligationCause<'tcx>,
+    recursion_depth: usize,
     nested: &mut Vec<PredicateObligation<'tcx>>,
 ) {
-    let tcx = selcx.tcx();
-    for predicate in tcx
-        .predicates_of(obligation.predicate.item_def_id)
-        .instantiate_own(tcx, obligation.predicate.substs)
-        .predicates
+    for predicate in predicates.predicates
+    //    for predicate in tcx
+    //        .predicates_of(item_def_id)
+    //        .instantiate_own(tcx, obligation.predicate.substs)
+    //        .predicates
     {
         let normalized = normalize_with_depth_to(
             selcx,
-            obligation.param_env,
-            obligation.cause.clone(),
-            obligation.recursion_depth + 1,
+            param_env,
+            cause.clone(),
+            recursion_depth + 1,
             predicate,
             nested,
         );
         nested.push(Obligation::with_depth(
-            obligation.cause.clone(),
-            obligation.recursion_depth + 1,
-            obligation.param_env,
+            cause.clone(),
+            recursion_depth + 1,
+            param_env,
             normalized,
         ));
     }

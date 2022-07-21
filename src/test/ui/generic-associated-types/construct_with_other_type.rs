@@ -1,6 +1,7 @@
 #![feature(generic_associated_types)]
 
 // check-pass
+// compile-flags: -Zverbose -Ztreat-err-as-bug
 
 use std::ops::Deref;
 

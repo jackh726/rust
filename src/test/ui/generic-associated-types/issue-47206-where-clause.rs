@@ -1,4 +1,5 @@
 // Check that this program doesn't cause the compiler to error without output.
+// check-fail
 
 #![feature(generic_associated_types)]
 

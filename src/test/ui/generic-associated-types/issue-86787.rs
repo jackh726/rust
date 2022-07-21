@@ -1,5 +1,5 @@
 #![feature(generic_associated_types)]
-// check-fail
+// check-pass
 
 enum Either<L, R> {
     Left(L),
@@ -9,7 +9,6 @@ enum Either<L, R> {
 pub trait HasChildrenOf {
     type T;
     type TRef<'a>;
-    //~^ missing required
 
     fn ref_children<'a>(&'a self) -> Vec<Self::TRef<'a>>;
     fn take_children(self) -> Vec<Self::T>;

@@ -1,22 +1,21 @@
 use crate::check::regionck::OutlivesEnvironmentExt;
 use crate::constrained_generic_params::{identify_constrained_generic_params, Parameter};
 use rustc_ast as ast;
-use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_errors::{pluralize, struct_span_err, Applicability, DiagnosticBuilder, ErrorGuaranteed};
+use rustc_data_structures::fx::FxHashSet;
+use rustc_errors::{struct_span_err, Applicability, DiagnosticBuilder, ErrorGuaranteed};
 use rustc_hir as hir;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::ItemKind;
-use rustc_infer::infer::outlives::env::{OutlivesEnvironment, RegionBoundPairs};
-use rustc_infer::infer::outlives::obligations::TypeOutlives;
-use rustc_infer::infer::{self, InferCtxt, TyCtxtInferExt};
+use rustc_infer::infer::outlives::env::OutlivesEnvironment;
+use rustc_infer::infer::TyCtxtInferExt;
 use rustc_infer::traits::Normalized;
 use rustc_middle::ty::query::Providers;
-use rustc_middle::ty::subst::{GenericArgKind, InternalSubsts, Subst};
+use rustc_middle::ty::subst::{InternalSubsts, Subst};
 use rustc_middle::ty::trait_def::TraitSpecializationKind;
 use rustc_middle::ty::{
     self, AdtKind, DefIdTree, EarlyBinder, GenericParamDefKind, ToPredicate, Ty, TyCtxt,
-    TypeFoldable, TypeSuperVisitable, TypeVisitable, TypeVisitor,
+    TypeFoldable, TypeSuperVisitable, TypeVisitable,
 };
 use rustc_session::parse::feature_err;
 use rustc_span::symbol::{sym, Ident, Symbol};
@@ -319,6 +318,7 @@ fn check_trait_item(tcx: TyCtxt<'_>, trait_item: &hir::TraitItem<'_>) {
     }
 }
 
+/*
 /// Require that the user writes where clauses on GATs for the implicit
 /// outlives bounds involving trait parameters in trait functions and
 /// lifetimes passed as GAT substs. See `self-outlives-lint` test.
@@ -757,7 +757,7 @@ impl<'tcx> TypeVisitor<'tcx> for GATSubstCollector<'tcx> {
         t.super_visit_with(self)
     }
 }
-
+*/
 fn could_be_self(trait_def_id: LocalDefId, ty: &hir::Ty<'_>) -> bool {
     match ty.kind {
         hir::TyKind::TraitObject([trait_ref], ..) => match trait_ref.trait_ref.path.segments {
@@ -1147,9 +1147,11 @@ fn check_trait(tcx: TyCtxt<'_>, item: &hir::Item<'_>) {
     });
 
     // Only check traits, don't check trait aliases
+    /*
     if let hir::ItemKind::Trait(_, _, _, _, items) = item.kind {
         check_gat_where_clauses(tcx, items);
     }
+    */
 }
 
 /// Checks all associated type defaults of trait `trait_def_id`.

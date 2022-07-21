@@ -57,6 +57,7 @@ impl<'cx, 'tcx> InferCtxtExt<'tcx> for InferCtxt<'cx, 'tcx> {
                 return vec![];
             }
         };
+        debug!(?result.output, ?result.constraints);
 
         let TypeOpOutput { output, constraints, .. } = result;
 

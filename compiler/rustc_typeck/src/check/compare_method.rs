@@ -15,9 +15,9 @@ use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::subst::{InternalSubsts, Subst};
 use rustc_middle::ty::util::ExplicitSelf;
 use rustc_middle::ty::{self, DefIdTree};
-use rustc_middle::ty::{GenericParamDefKind, ToPredicate, TyCtxt};
+use rustc_middle::ty::{GenericParamDefKind, ToPredicate, TyCtxt, TypeVisitable};
 use rustc_span::Span;
-use rustc_trait_selection::traits::error_reporting::InferCtxtExt;
+use rustc_trait_selection::traits::error_reporting::InferCtxtExt as _;
 use rustc_trait_selection::traits::{
     self, ObligationCause, ObligationCauseCode, ObligationCtxt, Reveal,
 };
@@ -1200,6 +1200,7 @@ fn compare_type_predicate_entailment<'tcx>(
     let trait_ty_generics = tcx.generics_of(trait_ty.def_id);
     let impl_ty_predicates = tcx.predicates_of(impl_ty.def_id);
     let trait_ty_predicates = tcx.predicates_of(trait_ty.def_id);
+    let impl_type = tcx.type_of(impl_ty.def_id);
 
     check_region_bounds_on_impl_item(
         tcx,
@@ -1222,25 +1223,70 @@ fn compare_type_predicate_entailment<'tcx>(
     let impl_ty_hir_id = tcx.hir().local_def_id_to_hir_id(impl_ty.def_id.expect_local());
     debug!("compare_type_predicate_entailment: trait_to_impl_substs={:?}", trait_to_impl_substs);
 
-    // The predicates declared by the impl definition, the trait and the
-    // associated type in the trait are assumed.
-    let impl_predicates = tcx.predicates_of(impl_ty_predicates.parent.unwrap());
-    let mut hybrid_preds = impl_predicates.instantiate_identity(tcx);
-    hybrid_preds
-        .predicates
-        .extend(trait_ty_predicates.instantiate_own(tcx, trait_to_impl_substs).predicates);
-
-    debug!("compare_type_predicate_entailment: bounds={:?}", hybrid_preds);
-
-    let normalize_cause = traits::ObligationCause::misc(impl_ty_span, impl_ty_hir_id);
-    let param_env = ty::ParamEnv::new(
-        tcx.intern_predicates(&hybrid_preds.predicates),
-        Reveal::UserFacing,
-        hir::Constness::NotConst,
-    );
-    let param_env = traits::normalize_param_env_or_error(tcx, param_env, normalize_cause);
     tcx.infer_ctxt().enter(|infcx| {
         let ocx = ObligationCtxt::new(&infcx);
+
+        /*
+        use rustc_trait_selection::traits::query::type_op::TypeOp;
+        let implied_impl_type_bounds_result = ty::ParamEnv::empty()
+            .and(rustc_trait_selection::traits::query::type_op::implied_outlives_bounds::ImpliedOutlivesBounds { ty: impl_type })
+            .fully_perform(infcx);
+        let implied_impl_type_bounds_result = match implied_impl_type_bounds_result {
+            Ok(r) => r,
+            Err(_) => {
+                panic!();
+            }
+        };
+        debug!(?implied_impl_type_bounds_result.output, ?implied_impl_type_bounds_result.constraints);
+        */
+        let predicates = traits::wf::obligations_without_normalization(
+            &infcx,
+            ty::ParamEnv::empty(),
+            impl_ty_hir_id,
+            0,
+            impl_type.into(),
+            impl_ty_span,
+        )
+        .unwrap_or(vec![]);
+        /*
+        use crate::outlives::outlives_bounds::InferCtxtExt;
+        use rustc_infer::traits::query::OutlivesBound;
+        let implied_impl_type_bounds = infcx.implied_outlives_bounds(ty::ParamEnv::empty(), impl_ty_hir_id, impl_type, impl_ty_span);
+        let predicates = implied_impl_type_bounds.into_iter().filter_map(|bound| match bound {
+            OutlivesBound::RegionSubRegion(r1, r2) => {
+                Some(infcx.tcx.mk_predicate(ty::Binder::dummy(ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r2, r1)))))
+            }
+
+            OutlivesBound::RegionSubParam(r_a, param_b) => {
+                Some(infcx.tcx.mk_predicate(ty::Binder::dummy(ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(tcx.mk_ty(ty::Param(param_b)), r_a)))))
+            }
+
+            OutlivesBound::RegionSubProjection(_, _) => {
+                None
+            }
+        });
+         */
+
+        // The predicates declared by the impl definition, the trait and the
+        // associated type in the trait are assumed.
+        let impl_predicates = tcx.predicates_of(impl_ty_predicates.parent.unwrap());
+        let mut hybrid_preds = impl_predicates.instantiate_identity(tcx);
+        hybrid_preds
+            .predicates
+            .extend(trait_ty_predicates.instantiate_own(tcx, trait_to_impl_substs).predicates);
+        hybrid_preds
+            .predicates
+            .extend(predicates.into_iter().map(|o| o.predicate).filter(|p| !p.needs_infer()));
+
+        debug!("compare_type_predicate_entailment: bounds={:?}", hybrid_preds);
+
+        let normalize_cause = traits::ObligationCause::misc(impl_ty_span, impl_ty_hir_id);
+        let param_env = ty::ParamEnv::new(
+            tcx.intern_predicates(&hybrid_preds.predicates),
+            Reveal::UserFacing,
+            hir::Constness::NotConst,
+        );
+        let param_env = traits::normalize_param_env_or_error(tcx, param_env, normalize_cause);
 
         debug!("compare_type_predicate_entailment: caller_bounds={:?}", param_env.caller_bounds());
 

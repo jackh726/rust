@@ -1,13 +1,14 @@
 #![feature(generic_associated_types)]
 
-// check-fail
+// Hey, this doesn't matter now.
+// check-pass
 
 use std::fmt::Debug;
 
 // We have a `&'a self`, so we need a `Self: 'a`
 trait Iterable {
     type Item<'x>;
-    //~^ missing required
+    //^ missing required
     fn iter<'a>(&'a self) -> Self::Item<'a>;
 }
 
@@ -23,7 +24,7 @@ impl<T> Iterable for T {
 // We have a `&'a T`, so we need a `T: 'x`
 trait Deserializer<T> {
     type Out<'x>;
-    //~^ missing required
+    //^ missing required
     fn deserialize<'a>(&self, input: &'a T) -> Self::Out<'a>;
 }
 
@@ -37,14 +38,14 @@ impl<T> Deserializer<T> for () {
 // We have a `&'b T` and a `'b: 'a`, so it is implied that `T: 'a`. Therefore, we need a `T: 'x`
 trait Deserializer2<T> {
     type Out<'x>;
-    //~^ missing required
+    //^ missing required
     fn deserialize2<'a, 'b: 'a>(&self, input1: &'b T) -> Self::Out<'a>;
 }
 
 // We have a `&'a T` and a `&'b U`, so we need a `T: 'x` and a `U: 'y`
 trait Deserializer3<T, U> {
     type Out<'x, 'y>;
-    //~^ missing required
+    //^ missing required
     fn deserialize2<'a, 'b>(&self, input: &'a T, input2: &'b U) -> Self::Out<'a, 'b>;
 }
 
@@ -59,7 +60,7 @@ struct Wrap<T>(T);
 // We pass `Wrap<T>` and we see `&'z Wrap<T>`, so we require `D: 'x`
 trait Des {
     type Out<'x, D>;
-    //~^ missing required
+    //^ missing required
     fn des<'z, T>(&self, data: &'z Wrap<T>) -> Self::Out<'z, Wrap<T>>;
 }
 /*
@@ -75,7 +76,7 @@ impl Des for () {
 // implied bound that `T: 'z`, so we require `D: 'x`
 trait Des2 {
     type Out<'x, D>;
-    //~^ missing required
+    //^ missing required
     fn des<'z, T>(&self, data: &'z Wrap<T>) -> Self::Out<'z, T>;
 }
 /*
@@ -90,7 +91,7 @@ impl Des2 for () {
 // We see `&'z T`, so we require `D: 'x`
 trait Des3 {
     type Out<'x, D>;
-    //~^ missing required
+    //^ missing required
     fn des<'z, T>(&self, data: &'z T) -> Self::Out<'z, T>;
 }
 /*
@@ -112,7 +113,7 @@ trait NoGat<'a> {
 // FIXME: we require two bounds (`where Self: 'a, Self: 'b`) when we should only require one
 trait TraitLifetime<'a> {
     type Bar<'b>;
-    //~^ missing required
+    //^ missing required
     fn method(&'a self) -> Self::Bar<'a>;
 }
 
@@ -120,14 +121,14 @@ trait TraitLifetime<'a> {
 // FIXME: we require two bounds (`where Self: 'a, Self: 'b`) when we should only require one
 trait TraitLifetimeWhere<'a> where Self: 'a {
     type Bar<'b>;
-    //~^ missing required
+    //^ missing required
     fn method(&'a self) -> Self::Bar<'a>;
 }
 
 // Explicit bound instead of implicit; we want to still error
 trait ExplicitBound {
     type Bar<'b>;
-    //~^ missing required
+    //^ missing required
     fn method<'b>(&self, token: &'b ()) -> Self::Bar<'b> where Self: 'b;
 }
 
@@ -140,15 +141,15 @@ trait NotInReturn {
 // We obviously error for `Iterator`, but we should also error for `Item`
 trait IterableTwo {
     type Item<'a>;
-    //~^ missing required
+    //^ missing required
     type Iterator<'a>: Iterator<Item = Self::Item<'a>>;
-    //~^ missing required
+    //^ missing required
     fn iter<'a>(&'a self) -> Self::Iterator<'a>;
 }
 
 trait IterableTwoWhere {
     type Item<'a>;
-    //~^ missing required
+    //^ missing required
     type Iterator<'a>: Iterator<Item = Self::Item<'a>> where Self: 'a;
     fn iter<'a>(&'a self) -> Self::Iterator<'a>;
 }
@@ -157,7 +158,7 @@ trait IterableTwoWhere {
 // because of `&'x &'y`, so we require that `'b: 'a`.
 trait RegionOutlives {
     type Bar<'a, 'b>;
-    //~^ missing required
+    //^ missing required
     fn foo<'x, 'y>(&self, input: &'x &'y ()) -> Self::Bar<'x, 'y>;
 }
 
@@ -173,7 +174,7 @@ impl Foo for () {
 // Similar to the above, except with explicit bounds
 trait ExplicitRegionOutlives<'ctx> {
     type Fut<'out>;
-    //~^ missing required
+    //^ missing required
 
     fn test<'out>(ctx: &'ctx i32) -> Self::Fut<'out>
     where
