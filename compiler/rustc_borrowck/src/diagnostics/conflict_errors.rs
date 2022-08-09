@@ -121,7 +121,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                 let moved_place = &self.move_data.move_paths[move_out.path].place;
                 // `*(_1)` where `_1` is a `Box` is actually a move out.
                 let is_box_move = moved_place.as_ref().projection == [ProjectionElem::Deref]
-                    && self.body.local_decls[moved_place.local].ty.is_box();
+                    && self.body.local_decls[moved_place.local].ty.0.is_box();
 
                 !is_box_move
                     && used_place != moved_place.as_ref()
@@ -2149,7 +2149,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
     fn classify_drop_access_kind(&self, place: PlaceRef<'tcx>) -> StorageDeadOrDrop<'tcx> {
         let tcx = self.infcx.tcx;
         let (kind, _place_ty) = place.projection.iter().fold(
-            (LocalStorageDead, PlaceTy::from_ty(self.body.local_decls[place.local].ty)),
+            (LocalStorageDead, PlaceTy::from_early_bound_ty(self.body.local_decls[place.local].ty)),
             |(kind, place_ty), &elem| {
                 (
                     match elem {

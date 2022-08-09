@@ -135,9 +135,9 @@ impl<'tcx> BorrowExplanation<'tcx> {
                 should_note_order,
             } => {
                 let local_decl = &body.local_decls[dropped_local];
-                let mut ty = local_decl.ty;
+                let mut ty = local_decl.ty.0;
                 if local_decl.source_info.span.desugaring_kind() == Some(DesugaringKind::ForLoop) {
-                    if let ty::Adt(adt, substs) = local_decl.ty.kind() {
+                    if let ty::Adt(adt, substs) = local_decl.ty.0.kind() {
                         if tcx.is_diagnostic_item(sym::Option, adt.did()) {
                             // in for loop desugaring, only look at the `Some(..)` inner type
                             ty = substs.type_at(0);
@@ -156,7 +156,7 @@ impl<'tcx> BorrowExplanation<'tcx> {
                     ty::Closure(..) => ("destructor", "closure".to_owned()),
                     ty::Generator(..) => ("destructor", "generator".to_owned()),
 
-                    _ => ("destructor", format!("type `{}`", local_decl.ty)),
+                    _ => ("destructor", format!("type `{}`", local_decl.ty.0)),
                 };
 
                 match local_names[dropped_local] {

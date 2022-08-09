@@ -123,7 +123,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
                 {
                     item_msg = access_place_desc;
                     debug_assert!(
-                        self.body.local_decls[ty::CAPTURE_STRUCT_LOCAL].ty.is_region_ptr()
+                        self.body.local_decls[ty::CAPTURE_STRUCT_LOCAL].ty.0.is_region_ptr()
                     );
                     debug_assert!(is_closure_or_generator(
                         Place::ty_from(
@@ -426,7 +426,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
             {
                 let local_decl = &self.body.local_decls[local];
 
-                let (pointer_sigil, pointer_desc) = if local_decl.ty.is_region_ptr() {
+                let (pointer_sigil, pointer_desc) = if local_decl.ty.0.is_region_ptr() {
                     ("&", "reference")
                 } else {
                     ("*const", "pointer")
@@ -937,7 +937,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
 }
 
 fn mut_borrow_of_mutable_ref(local_decl: &LocalDecl<'_>, local_name: Option<Symbol>) -> bool {
-    debug!("local_info: {:?}, ty.kind(): {:?}", local_decl.local_info, local_decl.ty.kind());
+    debug!("local_info: {:?}, ty.kind(): {:?}", local_decl.local_info, local_decl.ty.0.kind());
 
     match local_decl.local_info.as_deref() {
         // Check if mutably borrowing a mutable reference.
@@ -945,7 +945,7 @@ fn mut_borrow_of_mutable_ref(local_decl: &LocalDecl<'_>, local_name: Option<Symb
             mir::VarBindingForm {
                 binding_mode: ty::BindingMode::BindByValue(Mutability::Not), ..
             },
-        )))) => matches!(local_decl.ty.kind(), ty::Ref(_, _, hir::Mutability::Mut)),
+        )))) => matches!(local_decl.ty.0.kind(), ty::Ref(_, _, hir::Mutability::Mut)),
         Some(LocalInfo::User(ClearCrossCrate::Set(mir::BindingForm::ImplicitSelf(kind)))) => {
             // Check if the user variable is a `&mut self` and we can therefore
             // suggest removing the `&mut`.
@@ -958,7 +958,7 @@ fn mut_borrow_of_mutable_ref(local_decl: &LocalDecl<'_>, local_name: Option<Symb
             // Otherwise, check if the name is the `self` keyword - in which case
             // we have an explicit self. Do the same thing in this case and check
             // for a `self: &mut Self` to suggest removing the `&mut`.
-            matches!(local_decl.ty.kind(), ty::Ref(_, _, hir::Mutability::Mut))
+            matches!(local_decl.ty.0.kind(), ty::Ref(_, _, hir::Mutability::Mut))
         }
         _ => false,
     }
@@ -1057,12 +1057,12 @@ fn suggest_ampmut<'tcx>(
         return (true, highlight_span, format!("&{} mut{}", lt_name, ty));
     }
 
-    let ty_mut = local_decl.ty.builtin_deref(true).unwrap();
+    let ty_mut = local_decl.ty.0.builtin_deref(true).unwrap();
     assert_eq!(ty_mut.mutbl, hir::Mutability::Not);
     (
         suggestability,
         highlight_span,
-        if local_decl.ty.is_region_ptr() {
+        if local_decl.ty.0.is_region_ptr() {
             format!("&mut {}", ty_mut.ty)
         } else {
             format!("*mut {}", ty_mut.ty)

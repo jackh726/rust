@@ -472,7 +472,7 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
 
     fn visit_local_decl(&mut self, local: Local, local_decl: &LocalDecl<'tcx>) {
         self.super_local_decl(local, local_decl);
-        self.sanitize_type(local_decl, local_decl.ty);
+        self.sanitize_type(local_decl, local_decl.ty.0);
 
         if let Some(user_ty) = &local_decl.user_ty {
             for (user_ty, span) in user_ty.projections_and_spans() {
@@ -480,13 +480,13 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
                     // If we have a binding of the form `let ref x: T = ..`
                     // then remove the outermost reference so we can check the
                     // type annotation for the remaining type.
-                    if let ty::Ref(_, rty, _) = local_decl.ty.kind() {
+                    if let ty::Ref(_, rty, _) = local_decl.ty.0.kind() {
                         *rty
                     } else {
-                        bug!("{:?} with ref binding has wrong type {}", local, local_decl.ty);
+                        bug!("{:?} with ref binding has wrong type {}", local, local_decl.ty.0);
                     }
                 } else {
-                    local_decl.ty
+                    local_decl.ty.0
                 };
 
                 if let Err(terr) = self.cx.relate_type_and_user_type(
@@ -513,7 +513,7 @@ impl<'a, 'b, 'tcx> Visitor<'tcx> for TypeVerifier<'a, 'b, 'tcx> {
     fn visit_body(&mut self, body: &Body<'tcx>) {
         self.sanitize_type(&"return type", body.return_ty());
         for local_decl in &body.local_decls {
-            self.sanitize_type(local_decl, local_decl.ty);
+            self.sanitize_type(local_decl, local_decl.ty.0);
         }
         if self.errors_reported {
             return;
@@ -556,7 +556,7 @@ impl<'a, 'b, 'tcx> TypeVerifier<'a, 'b, 'tcx> {
     ) -> PlaceTy<'tcx> {
         debug!("sanitize_place: {:?}", place);
 
-        let mut place_ty = PlaceTy::from_ty(self.body().local_decls[place.local].ty);
+        let mut place_ty = PlaceTy::from_early_bound_ty(self.body().local_decls[place.local].ty);
 
         for elem in place.projection.iter() {
             if place_ty.variant_index.is_none() {
@@ -1762,7 +1762,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         // and nullary ops are checked in `check_call_dest`.
         if !self.unsized_feature_enabled() {
             let span = local_decl.source_info.span;
-            let ty = local_decl.ty;
+            let ty = local_decl.ty.0;
             self.ensure_place_sized(ty, span);
         }
     }

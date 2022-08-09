@@ -297,7 +297,7 @@ fn do_mir_borrowck<'a, 'tcx>(
         // The first argument is the generator type passed by value
         if let Some(local) = body.local_decls.raw.get(1)
         // Get the interior types and substs which typeck computed
-        && let ty::Generator(_, _, hir::Movability::Static) = local.ty.kind()
+        && let ty::Generator(_, _, hir::Movability::Static) = local.ty.0.kind()
     {
         false
     } else {
@@ -1356,7 +1356,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
             Operand::Move(place) | Operand::Copy(place) => {
                 match place.as_local() {
                     Some(local) if !self.body.local_decls[local].is_user_variable() => {
-                        if self.body.local_decls[local].ty.is_mutable_ptr() {
+                        if self.body.local_decls[local].ty.0.is_mutable_ptr() {
                             // The variable will be marked as mutable by the borrow.
                             return;
                         }

@@ -20,7 +20,7 @@ pub fn non_ssa_locals<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
         .local_decls
         .iter()
         .map(|decl| {
-            let ty = fx.monomorphize(decl.ty);
+            let ty = fx.monomorphize_early_bound(decl.ty);
             let layout = fx.cx.spanned_layout_of(ty, decl.source_info.span);
             if layout.is_zst() {
                 LocalKind::ZST
@@ -232,7 +232,7 @@ impl<'mir, 'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> Visitor<'tcx>
             PlaceContext::MutatingUse(MutatingUseContext::Drop) => {
                 let kind = &mut self.locals[local];
                 if *kind != LocalKind::Memory {
-                    let ty = self.fx.mir.local_decls[local].ty;
+                    let ty = self.fx.mir.local_decls[local].ty.0;
                     let ty = self.fx.monomorphize(ty);
                     if self.fx.cx.type_needs_drop(ty) {
                         // Only need the place if we're actually dropping it.

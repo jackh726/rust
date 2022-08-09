@@ -2224,7 +2224,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         debug!("declare_binding: user_ty={:?}", user_ty);
         let local = LocalDecl::<'tcx> {
             mutability,
-            ty: var_ty,
+            ty: ty::EarlyBinder(var_ty),
             user_ty: if user_ty.is_empty() { None } else { Some(Box::new(user_ty)) },
             source_info,
             internal: false,
@@ -2253,7 +2253,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 // This variable isn't mutated but has a name, so has to be
                 // immutable to avoid the unused mut lint.
                 mutability: Mutability::Not,
-                ty: tcx.mk_imm_ref(tcx.lifetimes.re_erased, var_ty),
+                ty: ty::EarlyBinder(tcx.mk_imm_ref(tcx.lifetimes.re_erased, var_ty)),
                 user_ty: None,
                 source_info,
                 internal: false,

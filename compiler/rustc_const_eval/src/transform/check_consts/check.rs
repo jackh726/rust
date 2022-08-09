@@ -46,7 +46,7 @@ impl<'mir, 'tcx> Qualifs<'mir, 'tcx> {
         local: Local,
         location: Location,
     ) -> bool {
-        let ty = ccx.body.local_decls[local].ty;
+        let ty = ccx.body.local_decls[local].ty.0;
         // Peeking into opaque types causes cycles if the current function declares said opaque
         // type. Thus we avoid short circuiting on the type and instead run the more expensive
         // analysis that looks at the actual usage within this function
@@ -76,7 +76,7 @@ impl<'mir, 'tcx> Qualifs<'mir, 'tcx> {
         local: Local,
         location: Location,
     ) -> bool {
-        let ty = ccx.body.local_decls[local].ty;
+        let ty = ccx.body.local_decls[local].ty.0;
         if !NeedsNonConstDrop::in_any_value_of_ty(ccx, ty) {
             return false;
         }
@@ -103,7 +103,7 @@ impl<'mir, 'tcx> Qualifs<'mir, 'tcx> {
         local: Local,
         location: Location,
     ) -> bool {
-        let ty = ccx.body.local_decls[local].ty;
+        let ty = ccx.body.local_decls[local].ty.0;
         // Peeking into opaque types causes cycles if the current function declares said opaque
         // type. Thus we avoid short circuiting on the type and instead run the more expensive
         // analysis that looks at the actual usage within this function
@@ -236,7 +236,7 @@ impl<'mir, 'tcx> Checker<'mir, 'tcx> {
                 }
 
                 self.span = local.source_info.span;
-                self.check_local_or_return_ty(local.ty, idx);
+                self.check_local_or_return_ty(local.ty.0, idx);
             }
 
             // impl trait is gone in MIR, so check the return type of a const fn by its signature

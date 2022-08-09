@@ -194,7 +194,7 @@ impl<'tcx> Inliner<'tcx> {
             for (arg_ty, input) in
                 arg_tuple_tys.iter().zip(callee_body.args_iter().skip(skipped_args))
             {
-                let input_type = callee_body.local_decls[input].ty;
+                let input_type = callee_body.local_decls[input].ty.0;
                 if !equal_up_to_regions(self.tcx, self.param_env, arg_ty, input_type) {
                     trace!(?arg_ty, ?input_type);
                     return Err("failed to normalize tuple argument type");
@@ -202,7 +202,7 @@ impl<'tcx> Inliner<'tcx> {
             }
         } else {
             for (arg, input) in args.iter().zip(callee_body.args_iter()) {
-                let input_type = callee_body.local_decls[input].ty;
+                let input_type = callee_body.local_decls[input].ty.0;
                 let arg_ty = arg.ty(&caller_body.local_decls, self.tcx);
                 if !equal_up_to_regions(self.tcx, self.param_env, arg_ty, input_type) {
                     trace!(?arg_ty, ?input_type);
@@ -511,7 +511,7 @@ impl<'tcx> Inliner<'tcx> {
         let ptr_size = tcx.data_layout.pointer_size.bytes();
 
         for v in callee_body.vars_and_temps_iter() {
-            let ty = callsite.callee.subst_mir(self.tcx, &callee_body.local_decls[v].ty);
+            let ty = callsite.callee.subst_mir(self.tcx, &callee_body.local_decls[v].ty.0);
             // Cost of the var is the size in machine-words, if we know
             // it.
             if let Some(size) = type_size_of(tcx, self.param_env, ty) {

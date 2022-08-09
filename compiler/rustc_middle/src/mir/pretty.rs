@@ -575,7 +575,7 @@ fn write_scope_tree(
         let mut_str = if local_decl.mutability == Mutability::Mut { "mut " } else { "" };
 
         let mut indented_decl =
-            format!("{0:1$}let {2}{3:?}: {4:?}", INDENT, indent, mut_str, local, local_decl.ty);
+            format!("{0:1$}let {2}{3:?}: {4:?}", INDENT, indent, mut_str, local, local_decl.ty.0);
         if let Some(user_ty) = &local_decl.user_ty {
             for user_ty in user_ty.projections() {
                 write!(indented_decl, " as {:?}", user_ty).unwrap();
@@ -994,7 +994,7 @@ fn write_mir_sig(tcx: TyCtxt<'_>, body: &Body<'_>, w: &mut dyn Write) -> io::Res
             if i != 0 {
                 write!(w, ", ")?;
             }
-            write!(w, "{:?}: {}", Place::from(arg), body.local_decls[arg].ty)?;
+            write!(w, "{:?}: {}", Place::from(arg), body.local_decls[arg].ty.0)?;
         }
 
         write!(w, ") -> {}", body.return_ty())?;

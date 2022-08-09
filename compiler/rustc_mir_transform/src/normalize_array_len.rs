@@ -39,7 +39,7 @@ pub fn normalize_array_len_calls<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>)
     // do a preliminary analysis to see if we ever have locals of type `[T;N]` or `&[T;N]`
     let mut interesting_locals = BitSet::new_empty(local_decls.len());
     for (local, decl) in local_decls.iter_enumerated() {
-        match decl.ty.kind() {
+        match decl.ty.0.kind() {
             ty::Array(..) => {
                 interesting_locals.insert(local);
             }
@@ -219,7 +219,7 @@ fn normalize_array_len_call<'tcx>(
                                 if !interesting_locals.contains(operand_local) {
                                     return;
                                 }
-                                let operand_ty = local_decls[operand_local].ty;
+                                let operand_ty = local_decls[operand_local].ty.0;
                                 match (operand_ty.kind(), cast_ty.kind()) {
                                     (ty::Array(of_ty_src, ..), ty::Slice(of_ty_dst)) => {
                                         if of_ty_src == of_ty_dst {

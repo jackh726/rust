@@ -110,7 +110,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                     };
 
                     debug!("add_moved_or_invoked_closure_note: closure={:?}", closure);
-                    if let ty::Closure(did, _) = self.body.local_decls[closure].ty.kind() {
+                    if let ty::Closure(did, _) = self.body.local_decls[closure].ty.0.kind() {
                         let did = did.expect_local();
                         let hir_id = self.infcx.tcx.hir().local_def_id_to_hir_id(did);
 
@@ -134,7 +134,7 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
 
         // Check if we are just moving a closure after it has been invoked.
         if let Some(target) = target {
-            if let ty::Closure(did, _) = self.body.local_decls[target].ty.kind() {
+            if let ty::Closure(did, _) = self.body.local_decls[target].ty.0.kind() {
                 let did = did.expect_local();
                 let hir_id = self.infcx.tcx.hir().local_def_id_to_hir_id(did);
 
@@ -308,7 +308,9 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
         including_tuple_field: IncludingTupleField,
     ) -> Option<String> {
         let place_ty = match place {
-            PlaceRef { local, projection: [] } => PlaceTy::from_ty(self.body.local_decls[local].ty),
+            PlaceRef { local, projection: [] } => {
+                PlaceTy::from_early_bound_ty(self.body.local_decls[local].ty)
+            }
             PlaceRef { local, projection: [proj_base @ .., elem] } => match elem {
                 ProjectionElem::Deref
                 | ProjectionElem::Index(..)

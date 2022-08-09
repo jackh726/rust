@@ -72,7 +72,7 @@ fn involves_a_union<'tcx>(
     local_decls: &LocalDecls<'tcx>,
     tcx: TyCtxt<'tcx>,
 ) -> bool {
-    let mut place_ty = PlaceTy::from_ty(local_decls[place.local].ty);
+    let mut place_ty = PlaceTy::from_early_bound_ty(local_decls[place.local].ty);
     if place_ty.ty.is_union() {
         return true;
     }

@@ -850,7 +850,7 @@ impl CanConstProp {
             ),
         };
         for (local, val) in cpv.can_const_prop.iter_enumerated_mut() {
-            let ty = body.local_decls[local].ty;
+            let ty = body.local_decls[local].ty.0;
             match tcx.layout_of(param_env.and(ty)) {
                 Ok(layout) if layout.size < Size::from_bytes(MAX_ALLOC_LIMIT) => {}
                 // Either the layout fails to compute, then we can't use this local anyway
@@ -1133,7 +1133,7 @@ impl<'tcx> MutVisitor<'tcx> for ConstPropagator<'_, 'tcx> {
                 assert!(
                     self.get_const(local.into()).is_none()
                         || self
-                            .layout_of(self.local_decls[local].ty)
+                            .layout_of(self.local_decls[local].ty.0)
                             .map_or(true, |layout| layout.is_zst())
                 )
             }

@@ -725,7 +725,7 @@ impl<'tcx> Visitor<'tcx> for ConstPropagator<'_, 'tcx> {
                 assert!(
                     self.get_const(local.into()).is_none()
                         || self
-                            .layout_of(self.local_decls[local].ty)
+                            .layout_of(self.local_decls[local].ty.0)
                             .map_or(true, |layout| layout.is_zst())
                 )
             }

@@ -549,7 +549,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         match frame.locals.get(local).and_then(|state| state.layout.get()) {
             None => {
                 let layout = from_known_layout(self.tcx, self.param_env, layout, || {
-                    let local_ty = frame.body.local_decls[local].ty;
+                    let local_ty = frame.body.local_decls[local].ty.0;
                     let local_ty =
                         self.subst_from_frame_and_normalize_erasing_regions(frame, local_ty)?;
                     self.layout_of(local_ty)

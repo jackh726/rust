@@ -428,13 +428,13 @@ impl<'tcx> Body<'tcx> {
     /// Returns the return type; it always return first element from `local_decls` array.
     #[inline]
     pub fn return_ty(&self) -> Ty<'tcx> {
-        self.local_decls[RETURN_PLACE].ty
+        self.local_decls[RETURN_PLACE].ty.0
     }
 
     /// Returns the return type; it always return first element from `local_decls` array.
     #[inline]
     pub fn bound_return_ty(&self) -> ty::EarlyBinder<Ty<'tcx>> {
-        ty::EarlyBinder(self.local_decls[RETURN_PLACE].ty)
+        self.local_decls[RETURN_PLACE].ty
     }
 
     /// Gets the location of the terminator for the given block.
@@ -741,7 +741,7 @@ pub struct LocalDecl<'tcx> {
     pub is_block_tail: Option<BlockTailInfo>,
 
     /// The type of this local.
-    pub ty: Ty<'tcx>,
+    pub ty: ty::EarlyBinder<Ty<'tcx>>,
 
     /// If the user manually ascribed a type to this variable,
     /// e.g., via `let x: T`, then we carry that type here. The MIR
@@ -961,7 +961,7 @@ impl<'tcx> LocalDecl<'tcx> {
             local_info: None,
             internal: false,
             is_block_tail: None,
-            ty,
+            ty: ty::EarlyBinder(ty),
             user_ty: None,
             source_info,
         }

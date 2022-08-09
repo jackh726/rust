@@ -927,7 +927,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         // debuginfo and to fill `self.upvar_mutbls`.
         if hir_typeck_results.closure_min_captures.get(&fn_def_id).is_some() {
             let mut closure_env_projs = vec![];
-            let mut closure_ty = self.local_decls[ty::CAPTURE_STRUCT_LOCAL].ty;
+            let mut closure_ty = self.local_decls[ty::CAPTURE_STRUCT_LOCAL].ty.0;
             if let ty::Ref(_, ty, _) = closure_ty.kind() {
                 closure_env_projs.push(ProjectionElem::Deref);
                 closure_ty = *ty;

@@ -143,7 +143,7 @@ impl<'me, 'typeck, 'flow, 'tcx> LivenessResults<'me, 'typeck, 'flow, 'tcx> {
             self.compute_use_live_points_for(local);
             self.compute_drop_live_points_for(local);
 
-            let local_ty = self.cx.body.local_decls[local].ty;
+            let local_ty = self.cx.body.local_decls[local].ty.0;
 
             if !self.use_live_at.is_empty() {
                 self.cx.add_use_live_facts_for(local_ty, &self.use_live_at);
@@ -164,7 +164,7 @@ impl<'me, 'typeck, 'flow, 'tcx> LivenessResults<'me, 'typeck, 'flow, 'tcx> {
     // necessary to eagerly detect unbound recursion during drop glue computation.
     fn dropck_boring_locals(&mut self, boring_locals: Vec<Local>) {
         for local in boring_locals {
-            let local_ty = self.cx.body.local_decls[local].ty;
+            let local_ty = self.cx.body.local_decls[local].ty.0;
             let drop_data = self.cx.drop_data.entry(local_ty).or_insert_with({
                 let typeck = &mut self.cx.typeck;
                 move || LivenessContext::compute_drop_data(typeck, local_ty)
@@ -191,7 +191,7 @@ impl<'me, 'typeck, 'flow, 'tcx> LivenessResults<'me, 'typeck, 'flow, 'tcx> {
 
         for (local, location) in drop_used {
             if !relevant_live_locals.contains(&local) {
-                let local_ty = self.cx.body.local_decls[local].ty;
+                let local_ty = self.cx.body.local_decls[local].ty.0;
                 if local_ty.has_free_regions() {
                     self.cx.add_drop_live_facts_for(local, local_ty, &[location], &locations);
                 }

@@ -386,8 +386,9 @@ impl<'tcx> MutVisitor<'tcx> for TransformVisitor<'tcx> {
 fn make_generator_state_argument_indirect<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
     let gen_ty = body.local_decls.raw[1].ty;
 
-    let ref_gen_ty =
-        tcx.mk_ref(tcx.lifetimes.re_erased, ty::TypeAndMut { ty: gen_ty, mutbl: Mutability::Mut });
+    let ref_gen_ty = gen_ty.map_bound(|gen_ty| {
+        tcx.mk_ref(tcx.lifetimes.re_erased, ty::TypeAndMut { ty: gen_ty, mutbl: Mutability::Mut })
+    });
 
     // Replace the by value generator argument
     body.local_decls.raw[1].ty = ref_gen_ty;
@@ -399,16 +400,18 @@ fn make_generator_state_argument_indirect<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Bo
 fn make_generator_state_argument_pinned<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
     let ref_gen_ty = body.local_decls.raw[1].ty;
 
-    let pin_did = tcx.require_lang_item(LangItem::Pin, Some(body.span));
-    let pin_adt_ref = tcx.adt_def(pin_did);
-    let substs = tcx.intern_substs(&[ref_gen_ty.into()]);
-    let pin_ref_gen_ty = tcx.mk_adt(pin_adt_ref, substs);
+    let pin_ref_gen_ty = ref_gen_ty.map_bound(|ref_gen_ty| {
+        let pin_did = tcx.require_lang_item(LangItem::Pin, Some(body.span));
+        let pin_adt_ref = tcx.adt_def(pin_did);
+        let substs = tcx.intern_substs(&[ref_gen_ty.into()]);
+        tcx.mk_adt(pin_adt_ref, substs)
+    });
 
     // Replace the by ref generator argument
     body.local_decls.raw[1].ty = pin_ref_gen_ty;
 
     // Add the Pin field access to accesses of the generator state
-    PinArgVisitor { ref_gen_ty, tcx }.visit_body(body);
+    PinArgVisitor { ref_gen_ty: ref_gen_ty.0, tcx }.visit_body(body);
 }
 
 /// Allocates a new local and replaces all references of `local` with it. Returns the new local.
@@ -752,7 +755,7 @@ fn sanitize_witness<'tcx>(
         if !saved_locals.contains(local) || decl.internal {
             continue;
         }
-        let decl_ty = tcx.normalize_erasing_regions(param_env, decl.ty);
+        let decl_ty = tcx.normalize_erasing_regions(param_env, decl.ty.0);
 
         // Sanity check that typeck knows about the type of locals which are
         // live across a suspension point
@@ -790,7 +793,7 @@ fn compute_layout<'tcx>(
     let mut tys = IndexVec::<GeneratorSavedLocal, _>::new();
     for (saved_local, local) in saved_locals.iter_enumerated() {
         locals.push(local);
-        tys.push(body.local_decls[local].ty);
+        tys.push(body.local_decls[local].ty.0);
         debug!("generator saved local {:?} => {:?}", saved_local, local);
     }
 
@@ -1327,7 +1330,7 @@ impl<'tcx> MirPass<'tcx> for StateTransform {
         assert!(body.generator_drop().is_none());
 
         // The first argument is the generator type passed by value
-        let gen_ty = body.local_decls.raw[1].ty;
+        let gen_ty = body.local_decls.raw[1].ty.0;
 
         // Get the interior types and substs which typeck computed
         let (upvars, interior, discr_ty, movable) = match *gen_ty.kind() {
@@ -1363,7 +1366,7 @@ impl<'tcx> MirPass<'tcx> for StateTransform {
         // state. After the yield the slot in the generator state would then be uninitialized.
         let resume_local = Local::new(2);
         let new_resume_local =
-            replace_local(resume_local, body.local_decls[resume_local].ty, body, tcx);
+            replace_local(resume_local, body.local_decls[resume_local].ty.0, body, tcx);
 
         // When first entering the generator, move the resume argument into its new local.
         let source_info = SourceInfo::outermost(body.span);

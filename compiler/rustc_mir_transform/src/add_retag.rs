@@ -79,7 +79,7 @@ impl<'tcx> MirPass<'tcx> for AddRetag {
         let place_base_raw = |place: &Place<'tcx>| {
             // If this is a `Deref`, get the type of what we are deref'ing.
             if place.has_deref() {
-                let ty = &local_decls[place.local].ty;
+                let ty = &local_decls[place.local].ty.0;
                 ty.is_unsafe_ptr()
             } else {
                 // Not a deref, and thus not raw.

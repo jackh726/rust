@@ -174,7 +174,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                             // FIXME(eddyb) is this `+ 1` needed at all?
                             let kind = VariableKind::ArgumentVariable(arg_index + 1);
 
-                            let arg_ty = self.monomorphize(decl.ty);
+                            let arg_ty = self.monomorphize(decl.ty.0);
 
                             self.cx.create_dbg_var(name, arg_ty, dbg_scope, kind, span)
                         },

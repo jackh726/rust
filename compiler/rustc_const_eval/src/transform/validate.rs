@@ -249,7 +249,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
     ) {
         match elem {
             ProjectionElem::Index(index) => {
-                let index_ty = self.body.local_decls[index].ty;
+                let index_ty = self.body.local_decls[index].ty.0;
                 if index_ty != self.tcx.types.usize {
                     self.fail(location, format!("bad index ({:?} != usize)", index_ty))
                 }

@@ -512,7 +512,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
                 self.note_type_does_not_implement_copy(
                     err,
                     &format!("`{}`", self.local_names[*local].unwrap()),
-                    bind_to.ty,
+                    bind_to.ty.0,
                     Some(binding_span),
                     "",
                 );

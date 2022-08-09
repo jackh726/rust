@@ -83,7 +83,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             // In MIR, argument N is stored in local N+1.
             let local = Local::new(argument_index + 1);
 
-            let mir_input_ty = body.local_decls[local].ty;
+            let mir_input_ty = body.local_decls[local].ty.0;
 
             let mir_input_span = body.local_decls[local].source_info.span;
             self.equate_normalized_input_or_output(
@@ -100,7 +100,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 // In MIR, closures begin an implicit `self`, so
                 // argument N is stored in local N+2.
                 let local = Local::new(argument_index + 2);
-                let mir_input_ty = body.local_decls[local].ty;
+                let mir_input_ty = body.local_decls[local].ty.0;
                 let mir_input_span = body.local_decls[local].source_info.span;
 
                 // If the user explicitly annotated the input types, enforce those.
@@ -143,7 +143,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
         }
 
         // Return types are a bit more complex. They may contain opaque `impl Trait` types.
-        let mir_output_ty = body.local_decls[RETURN_PLACE].ty;
+        let mir_output_ty = body.local_decls[RETURN_PLACE].ty.0;
         let output_span = body.local_decls[RETURN_PLACE].source_info.span;
         if let Err(terr) = self.eq_types(
             normalized_output_ty,

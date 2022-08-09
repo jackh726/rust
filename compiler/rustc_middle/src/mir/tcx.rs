@@ -26,6 +26,11 @@ impl<'tcx> PlaceTy<'tcx> {
         PlaceTy { ty, variant_index: None }
     }
 
+    #[inline]
+    pub fn from_early_bound_ty(ty: ty::EarlyBinder<Ty<'tcx>>) -> PlaceTy<'tcx> {
+        PlaceTy { ty: ty.0, variant_index: None }
+    }
+
     /// `place_ty.field_ty(tcx, f)` computes the type at a given field
     /// of a record or enum-variant. (Most clients of `PlaceTy` can
     /// instead just extract the relevant type directly from their
@@ -125,11 +130,10 @@ impl<'tcx> Place<'tcx> {
     where
         D: HasLocalDecls<'tcx>,
     {
-        projection
-            .iter()
-            .fold(PlaceTy::from_ty(local_decls.local_decls()[local].ty), |place_ty, &elem| {
-                place_ty.projection_ty(tcx, elem)
-            })
+        projection.iter().fold(
+            PlaceTy::from_early_bound_ty(local_decls.local_decls()[local].ty),
+            |place_ty, &elem| place_ty.projection_ty(tcx, elem),
+        )
     }
 
     pub fn ty<D>(&self, local_decls: &D, tcx: TyCtxt<'tcx>) -> PlaceTy<'tcx>

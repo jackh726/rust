@@ -41,7 +41,7 @@ where
         self.state.borrow.clear();
 
         for arg in self.ccx.body.args_iter() {
-            let arg_ty = self.ccx.body.local_decls[arg].ty;
+            let arg_ty = self.ccx.body.local_decls[arg].ty.0;
             if Q::in_any_value_of_ty(self.ccx, arg_ty) {
                 self.state.qualif.insert(arg);
             }

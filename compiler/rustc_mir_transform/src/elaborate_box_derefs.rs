@@ -60,7 +60,7 @@ impl<'tcx, 'a> MutVisitor<'tcx> for ElaborateBoxDerefVisitor<'tcx, 'a> {
     ) {
         let tcx = self.tcx;
 
-        let base_ty = self.local_decls[place.local].ty;
+        let base_ty = self.local_decls[place.local].ty.0;
 
         // Derefer ensures that derefs are always the first projection
         if place.projection.first() == Some(&PlaceElem::Deref) && base_ty.is_box() {

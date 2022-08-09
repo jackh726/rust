@@ -257,7 +257,7 @@ impl<'tcx> Validator<'_, 'tcx> {
                 let terminator = self.body[loc.block].terminator();
                 match &terminator.kind {
                     TerminatorKind::Call { .. } => {
-                        let return_ty = self.body.local_decls[local].ty;
+                        let return_ty = self.body.local_decls[local].ty.0;
                         Q::in_any_value_of_ty(&self.ccx, return_ty)
                     }
                     kind => {
@@ -743,7 +743,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
 
         let num_stmts = self.source[loc.block].statements.len();
         let new_temp = self.promoted.local_decls.push(LocalDecl::new(
-            self.source.local_decls[temp].ty,
+            self.source.local_decls[temp].ty.0,
             self.source.local_decls[temp].source_info.span,
         ));
 
@@ -870,7 +870,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                     Rvalue::Ref(ref mut region, borrow_kind, ref mut place),
                 )) => {
                     // Use the underlying local for this (necessarily interior) borrow.
-                    let ty = local_decls[place.local].ty;
+                    let ty = local_decls[place.local].ty.0;
                     let span = statement.source_info.span;
 
                     let ref_ty = tcx.mk_ref(
