@@ -1,12 +1,16 @@
 use crate::infer::{InferCtxt, TyCtxtInferExt};
+use crate::traits::query::type_op::QueryTypeOp;
 use crate::traits::ObligationCause;
-use crate::traits::{TraitEngine, TraitEngineExt};
 
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir as hir;
 use rustc_hir::lang_items::LangItem;
+use rustc_infer::infer::canonical::QueryRegionConstraints;
+use rustc_infer::traits::query::type_op::ProvePredicate;
 use rustc_middle::ty::query::Providers;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable, TypeVisitor};
+use rustc_middle::ty::{
+    self, ToPredicate, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable, TypeVisitor,
+};
 use rustc_span::Span;
 use std::ops::ControlFlow;
 
@@ -72,29 +76,6 @@ fn type_marked_structural<'tcx>(
     adt_ty: Ty<'tcx>,
     cause: ObligationCause<'tcx>,
 ) -> bool {
-    let mut fulfillment_cx = <dyn TraitEngine<'tcx>>::new(infcx.tcx);
-    // require `#[derive(PartialEq)]`
-    let structural_peq_def_id =
-        infcx.tcx.require_lang_item(LangItem::StructuralPeq, Some(cause.span));
-    fulfillment_cx.register_bound(
-        infcx,
-        ty::ParamEnv::empty(),
-        adt_ty,
-        structural_peq_def_id,
-        cause.clone(),
-    );
-    // for now, require `#[derive(Eq)]`. (Doing so is a hack to work around
-    // the type `for<'a> fn(&'a ())` failing to implement `Eq` itself.)
-    let structural_teq_def_id =
-        infcx.tcx.require_lang_item(LangItem::StructuralTeq, Some(cause.span));
-    fulfillment_cx.register_bound(
-        infcx,
-        ty::ParamEnv::empty(),
-        adt_ty,
-        structural_teq_def_id,
-        cause,
-    );
-
     // We deliberately skip *reporting* fulfillment errors (via
     // `report_fulfillment_errors`), for two reasons:
     //
@@ -104,7 +85,44 @@ fn type_marked_structural<'tcx>(
     //
     // 2. We are sometimes doing future-incompatibility lints for
     //    now, so we do not want unconditional errors here.
-    fulfillment_cx.select_all_or_error(infcx).is_empty()
+
+    // require `#[derive(PartialEq)]`
+    let structural_peq_def_id =
+        infcx.tcx.require_lang_item(LangItem::StructuralPeq, Some(cause.span));
+    let trait_ref = ty::TraitRef {
+        def_id: structural_peq_def_id,
+        substs: infcx.tcx.mk_substs_trait(adt_ty, &[]),
+    };
+    let predicate = ty::Binder::dummy(trait_ref).without_const().to_predicate(infcx.tcx);
+    let mut region_constraints = QueryRegionConstraints::default();
+    match ProvePredicate::fully_perform_into(
+        ty::ParamEnv::empty().and(ProvePredicate::new(predicate)),
+        infcx,
+        &mut region_constraints,
+    ) {
+        Ok(_) => {}
+        Err(_) => return false,
+    }
+    // for now, require `#[derive(Eq)]`. (Doing so is a hack to work around
+    // the type `for<'a> fn(&'a ())` failing to implement `Eq` itself.)
+    let structural_teq_def_id =
+        infcx.tcx.require_lang_item(LangItem::StructuralTeq, Some(cause.span));
+    let trait_ref = ty::TraitRef {
+        def_id: structural_teq_def_id,
+        substs: infcx.tcx.mk_substs_trait(adt_ty, &[]),
+    };
+    let predicate = ty::Binder::dummy(trait_ref).without_const().to_predicate(infcx.tcx);
+    let mut region_constraints = QueryRegionConstraints::default();
+    match ProvePredicate::fully_perform_into(
+        ty::ParamEnv::empty().and(ProvePredicate::new(predicate)),
+        infcx,
+        &mut region_constraints,
+    ) {
+        Ok(_) => {}
+        Err(_) => return false,
+    }
+
+    true
 }
 
 /// This implements the traversal over the structure of a given type to try to
