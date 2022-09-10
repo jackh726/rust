@@ -219,6 +219,24 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
     }
 
     pub(crate) fn create(mut self) -> CreateResult<'tcx> {
+        // Insert the facts we know from the predicates. Why? Why not.
+        let param_env = self.param_env;
+        self.add_outlives_bounds(outlives::explicit_outlives_bounds(param_env));
+
+        // Finally:
+        // - outlives is reflexive, so `'r: 'r` for every region `'r`
+        // - `'static: 'r` for every region `'r`
+        // - `'r: 'fn_body` for every (other) universally quantified
+        //   region `'r`, all of which are provided by our caller
+        let fr_static = self.universal_regions.fr_static;
+        let fr_fn_body = self.universal_regions.fr_fn_body;
+        for fr in self.universal_regions.universal_regions() {
+            debug!("build: relating free region {:?} to itself and to 'static", fr);
+            self.relate_universal_regions(fr, fr);
+            self.relate_universal_regions(fr_static, fr);
+            self.relate_universal_regions(fr, fr_fn_body);
+        }
+
         let unnormalized_input_output_tys = self
             .universal_regions
             .unnormalized_input_tys
@@ -275,24 +293,6 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
                 constraints1.into_iter().chain(constraints_implied1).chain(constraints_implied2)
             })
             .collect();
-
-        // Insert the facts we know from the predicates. Why? Why not.
-        let param_env = self.param_env;
-        self.add_outlives_bounds(outlives::explicit_outlives_bounds(param_env));
-
-        // Finally:
-        // - outlives is reflexive, so `'r: 'r` for every region `'r`
-        // - `'static: 'r` for every region `'r`
-        // - `'r: 'fn_body` for every (other) universally quantified
-        //   region `'r`, all of which are provided by our caller
-        let fr_static = self.universal_regions.fr_static;
-        let fr_fn_body = self.universal_regions.fr_fn_body;
-        for fr in self.universal_regions.universal_regions() {
-            debug!("build: relating free region {:?} to itself and to 'static", fr);
-            self.relate_universal_regions(fr, fr);
-            self.relate_universal_regions(fr_static, fr);
-            self.relate_universal_regions(fr, fr_fn_body);
-        }
 
         for data in &constraint_sets {
             constraint_conversion::ConstraintConversion::new(
