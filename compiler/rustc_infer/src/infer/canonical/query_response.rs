@@ -70,6 +70,24 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
         Ok(self.tcx.arena.alloc(canonical_result))
     }
 
+    #[instrument(skip(self, inference_vars, answer), level = "trace")]
+    pub fn make_canonicalized_query_response_no_fulfill<T>(
+        &self,
+        inference_vars: CanonicalVarValues<'tcx>,
+        answer: T,
+    ) -> CanonicalizedQueryResponse<'tcx, T>
+    where
+        T: Debug + TypeFoldable<'tcx>,
+        Canonical<'tcx, QueryResponse<'tcx, T>>: ArenaAllocatable<'tcx>,
+    {
+        let query_response = self.make_query_response_no_fulfill(inference_vars, answer);
+        debug!("query_response = {:#?}", query_response);
+        let canonical_result = self.canonicalize_response(query_response);
+        debug!("canonical_result = {:#?}", canonical_result);
+
+        self.tcx.arena.alloc(canonical_result)
+    }
+
     /// A version of `make_canonicalized_query_response` that does
     /// not pack in obligations, for contexts that want to drop
     /// pending obligations instead of treating them as an ambiguity (e.g.
@@ -147,6 +165,41 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
             value: answer,
             opaque_types,
         })
+    }
+
+    /// Helper for `make_canonicalized_query_response` that does
+    /// everything up until the final canonicalization.
+    #[instrument(skip(self), level = "debug")]
+    fn make_query_response_no_fulfill<T>(
+        &self,
+        inference_vars: CanonicalVarValues<'tcx>,
+        answer: T,
+    ) -> QueryResponse<'tcx, T>
+    where
+        T: Debug + TypeFoldable<'tcx>,
+    {
+        let tcx = self.tcx;
+
+        let region_obligations = self.take_registered_region_obligations();
+        debug!(?region_obligations);
+        let region_constraints = self.with_region_constraints(|region_constraints| {
+            make_query_region_constraints(
+                tcx,
+                region_obligations.iter().map(|r_o| (r_o.sup_type, r_o.sub_region)),
+                region_constraints,
+            )
+        });
+        debug!(?region_constraints);
+
+        let opaque_types = self.take_opaque_types_for_query_response();
+
+        QueryResponse {
+            var_values: inference_vars,
+            region_constraints,
+            certainty: Certainty::Proven,
+            value: answer,
+            opaque_types,
+        }
     }
 
     fn take_opaque_types_for_query_response(&self) -> Vec<(Ty<'tcx>, Ty<'tcx>)> {

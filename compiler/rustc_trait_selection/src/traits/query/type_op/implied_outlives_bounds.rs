@@ -37,6 +37,6 @@ impl<'tcx> super::QueryTypeOp<'tcx> for ImpliedOutlivesBounds<'tcx> {
             param_env.and(ty)
         });
 
-        tcx.implied_outlives_bounds(canonicalized)
+        Ok(tcx.implied_outlives_bounds(canonicalized))
     }
 }

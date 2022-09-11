@@ -7,12 +7,11 @@ use rustc_infer::infer::canonical::{self, Canonical};
 use rustc_infer::infer::outlives::components::{push_outlives_components, Component};
 use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
 use rustc_infer::traits::query::OutlivesBound;
-use rustc_infer::traits::TraitEngineExt as _;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitable};
 use rustc_span::source_map::DUMMY_SP;
 use rustc_trait_selection::infer::InferCtxtBuilderExt;
-use rustc_trait_selection::traits::query::{CanonicalTyGoal, Fallible, NoSolution};
+use rustc_trait_selection::traits::query::CanonicalTyGoal;
 use rustc_trait_selection::traits::wf;
 use rustc_trait_selection::traits::{TraitEngine, TraitEngineExt};
 use smallvec::{smallvec, SmallVec};
@@ -24,11 +23,8 @@ pub(crate) fn provide(p: &mut Providers) {
 fn implied_outlives_bounds<'tcx>(
     tcx: TyCtxt<'tcx>,
     goal: CanonicalTyGoal<'tcx>,
-) -> Result<
-    &'tcx Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>>,
-    NoSolution,
-> {
-    tcx.infer_ctxt().enter_canonical_trait_query(&goal, |infcx, _fulfill_cx, key| {
+) -> &'tcx Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>> {
+    tcx.infer_ctxt().enter_canonical_query(&goal, |infcx, key| {
         let (param_env, ty) = key.into_parts();
         compute_implied_outlives_bounds(&infcx, param_env, ty)
     })
@@ -38,7 +34,7 @@ fn compute_implied_outlives_bounds<'tcx>(
     infcx: &InferCtxt<'_, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     ty: Ty<'tcx>,
-) -> Fallible<Vec<OutlivesBound<'tcx>>> {
+) -> Vec<OutlivesBound<'tcx>> {
     let tcx = infcx.tcx;
 
     // Sometimes when we ask what it takes for T: WF, we get back that
@@ -67,32 +63,6 @@ fn compute_implied_outlives_bounds<'tcx>(
         // during typeck under some circumstances.)
         let obligations = wf::obligations(infcx, param_env, hir::CRATE_HIR_ID, 0, arg, DUMMY_SP)
             .unwrap_or_default();
-
-        // N.B., all of these predicates *ought* to be easily proven
-        // true. In fact, their correctness is (mostly) implied by
-        // other parts of the program. However, in #42552, we had
-        // an annoying scenario where:
-        //
-        // - Some `T::Foo` gets normalized, resulting in a
-        //   variable `_1` and a `T: Trait<Foo=_1>` constraint
-        //   (not sure why it couldn't immediately get
-        //   solved). This result of `_1` got cached.
-        // - These obligations were dropped on the floor here,
-        //   rather than being registered.
-        // - Then later we would get a request to normalize
-        //   `T::Foo` which would result in `_1` being used from
-        //   the cache, but hence without the `T: Trait<Foo=_1>`
-        //   constraint. As a result, `_1` never gets resolved,
-        //   and we get an ICE (in dropck).
-        //
-        // Therefore, we register any predicates involving
-        // inference variables. We restrict ourselves to those
-        // involving inference variables both for efficiency and
-        // to avoids duplicate errors that otherwise show up.
-        fulfill_cx.register_predicate_obligations(
-            infcx,
-            obligations.iter().filter(|o| o.predicate.has_infer_types_or_consts()).cloned(),
-        );
 
         // From the full set of obligations, just filter down to the
         // region relationships.
@@ -133,9 +103,11 @@ fn compute_implied_outlives_bounds<'tcx>(
     // Ensure that those obligations that we had to solve
     // get solved *here*.
     match fulfill_cx.select_all_or_error(infcx).as_slice() {
-        [] => Ok(implied_bounds),
-        _ => Err(NoSolution),
+        [] => {}
+        _ => bug!("Failed to fulfill all obligations."),
     }
+
+    implied_bounds
 }
 
 /// When we have an implied bound that `T: 'a`, we can further break

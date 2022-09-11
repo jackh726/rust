@@ -148,6 +148,16 @@ pub trait InferCtxtBuilderExt<'tcx> {
         K: TypeFoldable<'tcx>,
         R: Debug + TypeFoldable<'tcx>,
         Canonical<'tcx, QueryResponse<'tcx, R>>: ArenaAllocatable<'tcx>;
+
+    fn enter_canonical_query<K, R>(
+        &mut self,
+        canonical_key: &Canonical<'tcx, K>,
+        operation: impl FnOnce(&InferCtxt<'_, 'tcx>, K) -> R,
+    ) -> CanonicalizedQueryResponse<'tcx, R>
+    where
+        K: TypeFoldable<'tcx>,
+        R: Debug + TypeFoldable<'tcx>,
+        Canonical<'tcx, QueryResponse<'tcx, R>>: ArenaAllocatable<'tcx>;
 }
 
 impl<'tcx> InferCtxtBuilderExt<'tcx> for InferCtxtBuilder<'tcx> {
@@ -188,6 +198,28 @@ impl<'tcx> InferCtxtBuilderExt<'tcx> for InferCtxtBuilder<'tcx> {
                     value,
                     &mut *fulfill_cx,
                 )
+            },
+        )
+    }
+
+    fn enter_canonical_query<K, R>(
+        &mut self,
+        canonical_key: &Canonical<'tcx, K>,
+        operation: impl FnOnce(&InferCtxt<'_, 'tcx>, K) -> R,
+    ) -> CanonicalizedQueryResponse<'tcx, R>
+    where
+        K: TypeFoldable<'tcx>,
+        R: Debug + TypeFoldable<'tcx>,
+        Canonical<'tcx, QueryResponse<'tcx, R>>: ArenaAllocatable<'tcx>,
+    {
+        self.enter_with_canonical(
+            DUMMY_SP,
+            canonical_key,
+            |ref infcx, key, canonical_inference_vars| {
+                let value = operation(infcx, key);
+                let canonical_query_response = infcx
+                    .make_canonicalized_query_response_no_fulfill(canonical_inference_vars, value);
+                canonical_query_response
             },
         )
     }

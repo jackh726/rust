@@ -1840,10 +1840,7 @@ rustc_queries! {
 
     query implied_outlives_bounds(
         goal: CanonicalTyGoal<'tcx>
-    ) -> Result<
-        &'tcx Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>>,
-        NoSolution,
-    > {
+    ) -> &'tcx Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>> {
         desc { "computing implied outlives bounds for `{:?}`", goal }
         remap_env_constness
     }
