@@ -94,7 +94,6 @@ impl<'tcx> RegionErrors<'tcx> {
         }
         self.0.push(error);
     }
-
 }
 
 impl<'tcx> Deref for RegionErrors<'tcx> {

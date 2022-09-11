@@ -68,35 +68,8 @@ fn compute_implied_outlives_bounds<'tcx>(
         let obligations = wf::obligations(infcx, param_env, hir::CRATE_HIR_ID, 0, arg, DUMMY_SP)
             .unwrap_or_default();
 
-        // N.B., all of these predicates *ought* to be easily proven
-        // true. In fact, their correctness is (mostly) implied by
-        // other parts of the program. However, in #42552, we had
-        // an annoying scenario where:
-        //
-        // - Some `T::Foo` gets normalized, resulting in a
-        //   variable `_1` and a `T: Trait<Foo=_1>` constraint
-        //   (not sure why it couldn't immediately get
-        //   solved). This result of `_1` got cached.
-        // - These obligations were dropped on the floor here,
-        //   rather than being registered.
-        // - Then later we would get a request to normalize
-        //   `T::Foo` which would result in `_1` being used from
-        //   the cache, but hence without the `T: Trait<Foo=_1>`
-        //   constraint. As a result, `_1` never gets resolved,
-        //   and we get an ICE (in dropck).
-        //
-        // Therefore, we register any predicates involving
-        // inference variables. We restrict ourselves to those
-        // involving inference variables both for efficiency and
-        // to avoids duplicate errors that otherwise show up.
-        fulfill_cx.register_predicate_obligations(
-            infcx,
-            obligations.iter().filter(|o| o.predicate.has_infer_types_or_consts()).cloned(),
-        );
-
-        // From the full set of obligations, just filter down to the
-        // region relationships.
-        implied_bounds.extend(obligations.into_iter().flat_map(|obligation| {
+        for obligation in obligations {
+            debug!(?obligation);
             assert!(!obligation.has_escaping_bound_vars());
             match obligation.predicate.kind().no_bound_vars() {
                 None => vec![],
