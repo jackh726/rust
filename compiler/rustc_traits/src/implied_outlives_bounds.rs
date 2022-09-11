@@ -7,7 +7,6 @@ use rustc_infer::infer::canonical::{self, Canonical};
 use rustc_infer::infer::outlives::components::{push_outlives_components, Component};
 use rustc_infer::infer::{InferCtxt, TyCtxtInferExt};
 use rustc_infer::traits::query::OutlivesBound;
-use rustc_infer::traits::TraitEngineExt as _;
 use rustc_middle::ty::query::Providers;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitable};
 use rustc_span::source_map::DUMMY_SP;
@@ -65,42 +64,75 @@ fn compute_implied_outlives_bounds<'tcx>(
         // than the ultimate set. (Note: normally there won't be
         // unresolved inference variables here anyway, but there might be
         // during typeck under some circumstances.)
-        let obligations = wf::obligations(infcx, param_env, hir::CRATE_HIR_ID, 0, arg, DUMMY_SP)
-            .unwrap_or_default();
+        let obligations =
+            wf::obligations(infcx, param_env, hir::CRATE_HIR_ID, 0, arg, DUMMY_SP)
+                .unwrap_or_default();
 
         for obligation in obligations {
             debug!(?obligation);
             assert!(!obligation.has_escaping_bound_vars());
-            match obligation.predicate.kind().no_bound_vars() {
-                None => vec![],
-                Some(pred) => match pred {
-                    ty::PredicateKind::Trait(..)
-                    | ty::PredicateKind::Subtype(..)
-                    | ty::PredicateKind::Coerce(..)
-                    | ty::PredicateKind::Projection(..)
-                    | ty::PredicateKind::ClosureKind(..)
-                    | ty::PredicateKind::ObjectSafe(..)
-                    | ty::PredicateKind::ConstEvaluatable(..)
-                    | ty::PredicateKind::ConstEquate(..)
-                    | ty::PredicateKind::TypeWellFormedFromEnv(..) => vec![],
-                    ty::PredicateKind::WellFormed(arg) => {
-                        wf_args.push(arg);
-                        vec![]
-                    }
 
-                    ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r_a, r_b)) => {
-                        vec![OutlivesBound::RegionSubRegion(r_b, r_a)]
+            // N.B., all of these predicates *ought* to be easily proven
+            // true. In fact, their correctness is (mostly) implied by
+            // other parts of the program. However, in #42552, we had
+            // an annoying scenario where:
+            //
+            // - Some `T::Foo` gets normalized, resulting in a
+            //   variable `_1` and a `T: Trait<Foo=_1>` constraint
+            //   (not sure why it couldn't immediately get
+            //   solved). This result of `_1` got cached.
+            // - These obligations were dropped on the floor here,
+            //   rather than being registered.
+            // - Then later we would get a request to normalize
+            //   `T::Foo` which would result in `_1` being used from
+            //   the cache, but hence without the `T: Trait<Foo=_1>`
+            //   constraint. As a result, `_1` never gets resolved,
+            //   and we get an ICE (in dropck).
+            //
+            // Therefore, we register any predicates involving
+            // inference variables. We restrict ourselves to those
+            // involving inference variables both for efficiency and
+            // to avoids duplicate errors that otherwise show up.
+            if obligation.predicate.has_infer_types_or_consts() {
+                match obligation.predicate.kind().skip_binder() {
+                    ty::PredicateKind::Projection(..) => {
+                        fulfill_cx.register_predicate_obligation(infcx, obligation.clone());
                     }
-
-                    ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(ty_a, r_b)) => {
-                        let ty_a = infcx.resolve_vars_if_possible(ty_a);
-                        let mut components = smallvec![];
-                        push_outlives_components(tcx, ty_a, &mut components);
-                        implied_bounds_from_components(r_b, components)
-                    }
-                },
+                    _ => {}
+                }
             }
-        }));
+
+            let pred = match obligation.predicate.kind().no_bound_vars() {
+                None => continue,
+                Some(pred) => pred,
+            };
+            match pred {
+                ty::PredicateKind::Trait(..)
+                | ty::PredicateKind::Subtype(..)
+                | ty::PredicateKind::Coerce(..)
+                | ty::PredicateKind::Projection(..)
+                | ty::PredicateKind::ClosureKind(..)
+                | ty::PredicateKind::ObjectSafe(..)
+                | ty::PredicateKind::ConstEvaluatable(..)
+                | ty::PredicateKind::ConstEquate(..)
+                | ty::PredicateKind::TypeWellFormedFromEnv(..) => {}
+                ty::PredicateKind::WellFormed(arg) => {
+                    wf_args.push(arg);
+                }
+
+                ty::PredicateKind::RegionOutlives(ty::OutlivesPredicate(r_a, r_b)) => {
+                    implied_bounds.push(OutlivesBound::RegionSubRegion(r_b, r_a));
+                }
+
+                ty::PredicateKind::TypeOutlives(ty::OutlivesPredicate(ty_a, r_b)) => {
+                    let ty_a = infcx.resolve_vars_if_possible(ty_a);
+                    let mut components = smallvec![];
+                    push_outlives_components(tcx, ty_a, &mut components);
+                    let bounds = implied_bounds_from_components(r_b, components);
+                    implied_bounds.extend(bounds);
+                }
+            }
+        }
     }
 
     // Ensure that those obligations that we had to solve
