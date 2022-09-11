@@ -3,6 +3,7 @@
 
 #![deny(rustc::untranslatable_diagnostic)]
 #![deny(rustc::diagnostic_outside_of_impl)]
+#![feature(drain_filter)]
 #![feature(let_else)]
 #![recursion_limit = "256"]
 
