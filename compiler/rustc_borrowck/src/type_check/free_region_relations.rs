@@ -260,6 +260,7 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
             // We add implied bounds from both the unnormalized and normalized ty.
             // See issue #87748
             let constraints_unnorm = self.add_implied_bounds(ty);
+            constraints_unnorm.map(|c| self.push_region_constraints(c));
             let TypeOpOutput { output: norm_ty, constraints: constraints_normalize, .. } = self
                 .param_env
                 .and(type_op::normalize::Normalize::new(ty))
@@ -275,6 +276,7 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
                         error_info: None,
                     }
                 });
+            constraints_normalize.map(|c| self.push_region_constraints(c));
 
             // Note: we need this in examples like
             // ```
@@ -289,55 +291,6 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
             // ```
             // Both &Self::Bar and &() are WF
             let constraints_norm = self.add_implied_bounds(norm_ty);
-
-            // Okay, I should explain why these are all the way down here. Turns
-            // out, it's actually a bit subtle. I'll use the test `issue-52057`
-            // as an example (well, because it's the only test that failed
-            // putting these calls immediately after the `add_implied_bounds`
-            // calls.)
-            //
-            // So, the key bit is this impl:
-            // ```rust,ignore (example)
-            // impl<'a, I, P: ?Sized> Parser for &'a mut P
-            //    where P: Parser<Input = I>,
-            // {
-            //    type Input = I;
-            //    fn parse_first<'x>(_: &'x mut Self::Input) {}
-            // }
-            //
-            // As part of querying the implied bounds for `&mut Self::Input`
-            // (note the unnormalized form), we query the obligations to prove
-            // that it is WF. This turns out to be
-            // [
-            //    <&'_#0r mut P as Parser>::Input: '_#1r,
-            //    Self: Parser,
-            //    P: '_#0r,
-            // ]
-            //
-            // The wf code normalizes these obligations, so we actually end up with
-            // [
-            //    _#0t: '_#1r,
-            //    &'_#0r mut P as Parser>::Input == _#0t,
-            //    Self: Parser,
-            //    P: '_#0r,
-            // ]
-            //
-            // The implied bounds code then registers both the first two
-            // predicates to be solved, since they contain type variables. Then
-            // the implied bounds code goes through each of these obligations to
-            // check if they should be registered as implied bounds. For
-            // `_#0t: '_#1r`, there is an unresolved type variable, so it gets
-            // skipped. The next two predicates never would registered. The last
-            // predicate gets registered.
-            //
-            // At the end of this, for the unnormalized type
-            // `&'x mut Self::Input`, `P: '_#0r' ends up as a implied bound and
-            // `I: '_#1r` ends up as a constraint.
-            //
-            // Later, for the normalized type (`&'x mut I`), we don't do any
-            // normalization, so we only end up with the implied bound `I: 'x`.
-            constraints_unnorm.map(|c| self.push_region_constraints(c));
-            constraints_normalize.map(|c| self.push_region_constraints(c));
             constraints_norm.map(|c| self.push_region_constraints(c));
 
             normalized_inputs_and_output.push(norm_ty);
