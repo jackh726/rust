@@ -218,64 +218,8 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
         self.inverse_outlives.add(fr_b, fr_a);
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub(crate) fn create(mut self) -> CreateResult<'tcx> {
-        let unnormalized_input_output_tys = self
-            .universal_regions
-            .unnormalized_input_tys
-            .iter()
-            .cloned()
-            .chain(Some(self.universal_regions.unnormalized_output_ty));
-
-        // For each of the input/output types:
-        // - Normalize the type. This will create some region
-        //   constraints, which we buffer up because we are
-        //   not ready to process them yet.
-        // - Then compute the implied bounds. This will adjust
-        //   the `region_bound_pairs` and so forth.
-        // - After this is done, we'll process the constraints, once
-        //   the `relations` is built.
-        let mut normalized_inputs_and_output =
-            Vec::with_capacity(self.universal_regions.unnormalized_input_tys.len() + 1);
-        let constraint_sets: Vec<_> = unnormalized_input_output_tys
-            .flat_map(|ty| {
-                debug!("build: input_or_output={:?}", ty);
-                // We add implied bounds from both the unnormalized and normalized ty.
-                // See issue #87748
-                let constraints_implied1 = self.add_implied_bounds(ty);
-                let TypeOpOutput { output: norm_ty, constraints: constraints1, .. } = self
-                    .param_env
-                    .and(type_op::normalize::Normalize::new(ty))
-                    .fully_perform(self.infcx)
-                    .unwrap_or_else(|_| {
-                        self.infcx
-                            .tcx
-                            .sess
-                            .delay_span_bug(DUMMY_SP, &format!("failed to normalize {:?}", ty));
-                        TypeOpOutput {
-                            output: self.infcx.tcx.ty_error(),
-                            constraints: None,
-                            error_info: None,
-                        }
-                    });
-                // Note: we need this in examples like
-                // ```
-                // trait Foo {
-                //   type Bar;
-                //   fn foo(&self) -> &Self::Bar;
-                // }
-                // impl Foo for () {
-                //   type Bar = ();
-                //   fn foo(&self) -> &() {}
-                // }
-                // ```
-                // Both &Self::Bar and &() are WF
-                let constraints_implied2 =
-                    if ty != norm_ty { self.add_implied_bounds(norm_ty) } else { None };
-                normalized_inputs_and_output.push(norm_ty);
-                constraints1.into_iter().chain(constraints_implied1).chain(constraints_implied2)
-            })
-            .collect();
-
         // Insert the facts we know from the predicates. Why? Why not.
         let param_env = self.param_env;
         self.add_outlives_bounds(outlives::explicit_outlives_bounds(param_env));
@@ -294,19 +238,109 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
             self.relate_universal_regions(fr, fr_fn_body);
         }
 
-        for data in &constraint_sets {
-            constraint_conversion::ConstraintConversion::new(
-                self.infcx,
-                &self.universal_regions,
-                &self.region_bound_pairs,
-                self.implicit_region_bound,
-                self.param_env,
-                Locations::All(DUMMY_SP),
-                DUMMY_SP,
-                ConstraintCategory::Internal,
-                &mut self.constraints,
-            )
-            .convert_all(data);
+        let unnormalized_input_output_tys = self
+            .universal_regions
+            .unnormalized_input_tys
+            .iter()
+            .cloned()
+            .chain(Some(self.universal_regions.unnormalized_output_ty));
+
+        // For each of the input/output types:
+        // - Normalize the type. This will create some region
+        //   constraints, which we buffer up because we are
+        //   not ready to process them yet.
+        // - Then compute the implied bounds. This will adjust
+        //   the `region_bound_pairs` and so forth.
+        // - After this is done, we'll process the constraints, once
+        //   the `relations` is built.
+        let mut normalized_inputs_and_output =
+            Vec::with_capacity(self.universal_regions.unnormalized_input_tys.len() + 1);
+        for ty in unnormalized_input_output_tys {
+            debug!("build: input_or_output={:?}", ty);
+            // We add implied bounds from both the unnormalized and normalized ty.
+            // See issue #87748
+            let constraints_unnorm = self.add_implied_bounds(ty);
+            let TypeOpOutput { output: norm_ty, constraints: constraints_normalize, .. } = self
+                .param_env
+                .and(type_op::normalize::Normalize::new(ty))
+                .fully_perform(self.infcx)
+                .unwrap_or_else(|_| {
+                    self.infcx
+                        .tcx
+                        .sess
+                        .delay_span_bug(DUMMY_SP, &format!("failed to normalize {:?}", ty));
+                    TypeOpOutput {
+                        output: self.infcx.tcx.ty_error(),
+                        constraints: None,
+                        error_info: None,
+                    }
+                });
+
+            // Note: we need this in examples like
+            // ```
+            // trait Foo {
+            //   type Bar;
+            //   fn foo(&self) -> &Self::Bar;
+            // }
+            // impl Foo for () {
+            //   type Bar = ();
+            //   fn foo(&self) ->&() {}
+            // }
+            // ```
+            // Both &Self::Bar and &() are WF
+            let constraints_norm = self.add_implied_bounds(norm_ty);
+
+            // Okay, I should explain why these are all the way down here. Turns
+            // out, it's actually a bit subtle. I'll use the test `issue-52057`
+            // as an example (well, because it's the only test that failed
+            // putting these calls immediately after the `add_implied_bounds`
+            // calls.)
+            //
+            // So, the key bit is this impl:
+            // ```rust,ignore (example)
+            // impl<'a, I, P: ?Sized> Parser for &'a mut P
+            //    where P: Parser<Input = I>,
+            // {
+            //    type Input = I;
+            //    fn parse_first<'x>(_: &'x mut Self::Input) {}
+            // }
+            //
+            // As part of querying the implied bounds for `&mut Self::Input`
+            // (note the unnormalized form), we query the obligations to prove
+            // that it is WF. This turns out to be
+            // [
+            //    <&'_#0r mut P as Parser>::Input: '_#1r,
+            //    Self: Parser,
+            //    P: '_#0r,
+            // ]
+            //
+            // The wf code normalizes these obligations, so we actually end up with
+            // [
+            //    _#0t: '_#1r,
+            //    &'_#0r mut P as Parser>::Input == _#0t,
+            //    Self: Parser,
+            //    P: '_#0r,
+            // ]
+            //
+            // The implied bounds code then registers both the first two
+            // predicates to be solved, since they contain type variables. Then
+            // the implied bounds code goes through each of these obligations to
+            // check if they should be registered as implied bounds. For
+            // `_#0t: '_#1r`, there is an unresolved type variable, so it gets
+            // skipped. The next two predicates never would registered. The last
+            // predicate gets registered.
+            //
+            // At the end of this, for the unnormalized type
+            // `&'x mut Self::Input`, `P: '_#0r' ends up as a implied bound and
+            // `I: '_#1r` ends up as a constraint.
+            //
+            // Later, for the normalized type (`&'x mut I`), we don't do any
+            // normalization, so we only end up with the implied bound `I: 'x`.
+            constraints_unnorm.map(|c| self.push_region_constraints(c));
+            constraints_normalize.map(|c| self.push_region_constraints(c));
+            constraints_norm.map(|c| self.push_region_constraints(c));
+
+            normalized_inputs_and_output.push(norm_ty);
         }
 
         CreateResult {
@@ -318,6 +352,24 @@ impl<'tcx> UniversalRegionRelationsBuilder<'_, 'tcx> {
             region_bound_pairs: self.region_bound_pairs,
             normalized_inputs_and_output,
         }
+    }
+
+    #[instrument(skip(self, data), level = "debug")]
+    fn push_region_constraints(&mut self, data: &QueryRegionConstraints<'tcx>) {
+        debug!("constraints generated: {:#?}", data);
+
+        constraint_conversion::ConstraintConversion::new(
+            self.infcx,
+            &self.universal_regions,
+            &self.region_bound_pairs,
+            self.implicit_region_bound,
+            self.param_env,
+            Locations::All(DUMMY_SP),
+            DUMMY_SP,
+            ConstraintCategory::Internal,
+            &mut self.constraints,
+        )
+        .convert_all(data);
     }
 
     /// Update the type of a single local, which should represent
