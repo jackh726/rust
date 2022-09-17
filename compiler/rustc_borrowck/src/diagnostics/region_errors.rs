@@ -2,6 +2,8 @@
 #![deny(rustc::diagnostic_outside_of_impl)]
 //! Error reporting machinery for lifetime errors.
 
+use std::ops::{Deref, DerefMut};
+
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::{Applicability, Diagnostic, DiagnosticBuilder, ErrorGuaranteed, MultiSpan};
 use rustc_hir::def_id::DefId;
@@ -70,7 +72,44 @@ impl<'tcx> ConstraintDescription for ConstraintCategory<'tcx> {
 ///
 /// Usually we expect this to either be empty or contain a small number of items, so we can avoid
 /// allocation most of the time.
-pub(crate) type RegionErrors<'tcx> = Vec<RegionErrorKind<'tcx>>;
+///
+/// This is just a wrapper around `Vec<RegionErrorKind<'tcx>>`,
+/// which eagerly calls `bug` on an error, if `-Ztreat-err-as-bug` is enabled.
+pub(crate) struct RegionErrors<'tcx>(Vec<RegionErrorKind<'tcx>>, bool);
+
+impl<'tcx> RegionErrors<'tcx> {
+    pub fn new(treat_err_as_bug: bool) -> Self {
+        // FIXME: Ideally, we would track the number of errors, like the main
+        // diagnostic code does. Instead, we emit eagerly after *any* error.
+        Self(vec![], treat_err_as_bug)
+    }
+
+    pub fn into_inner(self) -> Vec<RegionErrorKind<'tcx>> {
+        self.0
+    }
+
+    pub fn push(&mut self, error: RegionErrorKind<'tcx>) {
+        if self.1 {
+            bug!("RegionError treated as bug: {:?}", error);
+        }
+        self.0.push(error);
+    }
+
+}
+
+impl<'tcx> Deref for RegionErrors<'tcx> {
+    type Target = Vec<RegionErrorKind<'tcx>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'tcx> DerefMut for RegionErrors<'tcx> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum RegionErrorKind<'tcx> {
@@ -175,7 +214,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, 'tcx> {
 
         let mut outlives_suggestion = OutlivesSuggestionBuilder::default();
 
-        for nll_error in nll_errors.into_iter() {
+        for nll_error in nll_errors.into_inner().into_iter() {
             match nll_error {
                 RegionErrorKind::TypeTestError { type_test } => {
                     // Try to convert the lower-bound region into something named we can print for the user.
