@@ -62,6 +62,8 @@ fn sized_constraint_for_ty<'tcx>(
         Placeholder(..) | Bound(..) | Infer(..) => {
             bug!("unexpected type `{:?}` in sized_constraint_for_ty", ty)
         }
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     };
     debug!("sized_constraint_for_ty({:?}) = {:?}", ty, result);
     result

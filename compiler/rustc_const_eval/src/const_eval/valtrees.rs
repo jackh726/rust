@@ -153,6 +153,8 @@ pub(crate) fn const_to_valtree_inner<'tcx>(
         | ty::Closure(..)
         | ty::Generator(..)
         | ty::GeneratorWitness(..) => Err(ValTreeCreationError::NonSupportedType),
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }
 
@@ -321,6 +323,8 @@ pub fn valtree_to_const_value<'tcx>(
         | ty::Str
         | ty::Slice(_)
         | ty::Dynamic(..) => bug!("no ValTree should have been created for type {:?}", ty.kind()),
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }
 

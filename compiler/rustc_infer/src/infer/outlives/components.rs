@@ -200,6 +200,8 @@ fn compute_components<'tcx>(
                 // themselves can be readily identified.
                 compute_components_recursive(tcx, ty.into(), out, visited);
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 }
 

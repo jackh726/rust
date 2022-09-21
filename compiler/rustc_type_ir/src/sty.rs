@@ -46,6 +46,115 @@ pub enum DynKind {
     DynStar,
 }
 
+pub enum PredicateTyKind<I: Interner> {
+    Void(std::marker::PhantomData<I>, !),
+}
+
+impl<I: Interner> Clone for PredicateTyKind<I> {
+    fn clone(&self) -> PredicateTyKind<I> {
+        match self {
+            //PredicateTyKind::Void(__self_0.clone(), __self_1.clone()),
+            PredicateTyKind::Void(__self_0, __self_1) => unreachable!(),
+        }
+    }
+}
+
+impl<I: Interner> PartialEq for PredicateTyKind<I> {
+    fn eq(&self, other: &PredicateTyKind<I>) -> bool {
+        match (self, other) {
+            //*__self_0 == *__arg1_0 && *__self_1 == *__arg1_1
+            (
+                PredicateTyKind::Void(__self_0, __self_1),
+                PredicateTyKind::Void(__arg1_0, __arg1_1),
+            ) => unreachable!(),
+        }
+    }
+}
+impl<I: Interner> Eq for PredicateTyKind<I> {}
+impl<I: Interner> PartialOrd for PredicateTyKind<I> {
+    fn partial_cmp(&self, other: &PredicateTyKind<I>) -> Option<Ordering> {
+        Some(Ord::cmp(self, other))
+    }
+}
+impl<I: Interner> ::core::cmp::Ord for PredicateTyKind<I> {
+    #[inline]
+    fn cmp(&self, other: &PredicateTyKind<I>) -> ::core::cmp::Ordering {
+        match (self, other) {
+            (
+                PredicateTyKind::Void(__self_0, __self_1),
+                PredicateTyKind::Void(__arg1_0, __arg1_1),
+            ) => match __self_0.cmp(__arg1_0) {
+                Ordering::Equal => Ord::cmp(__self_1, __arg1_1),
+                cmp => cmp,
+            },
+        }
+    }
+}
+
+impl<I: Interner> hash::Hash for PredicateTyKind<I> {
+    fn hash<__H: hash::Hasher>(&self, state: &mut __H) -> () {
+        match self {
+            PredicateTyKind::Void(__self_0, __self_1) => {
+                __self_0.hash(state);
+                __self_1.hash(state)
+            }
+        }
+    }
+}
+
+impl<I: Interner> fmt::Debug for PredicateTyKind<I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PredicateTyKind::Void(__self_0, __self_1) => {
+                f.debug_tuple_field2_finish("Void", &__self_0, &__self_1)
+            }
+        }
+    }
+}
+
+impl<I: Interner, E: TyEncoder> Encodable<E> for PredicateTyKind<I> {
+    fn encode(&self, e: &mut E) {
+        match self {
+            PredicateTyKind::Void(__self_0, __self_1) => e.emit_enum_variant(0, |e| {
+                __self_0.encode(e);
+                __self_1.encode(e);
+            }),
+        }
+    }
+}
+
+impl<I: Interner, D: TyDecoder> Decodable<D> for PredicateTyKind<I> {
+    fn decode(d: &mut D) -> PredicateTyKind<I> {
+        match Decoder::read_usize(d) {
+            0 => PredicateTyKind::Void(Decodable::decode(d), Decodable::decode(d)),
+            _ => panic!(
+                "{}",
+                format!(
+                    "invalid enum variant tag while decoding `{}`, expected 0..{}",
+                    "PredicateTyKind", 1,
+                )
+            ),
+        }
+    }
+}
+
+impl<CTX: HashStableContext, I: Interner> HashStable<CTX> for PredicateTyKind<I> {
+    #[inline]
+    fn hash_stable(
+        &self,
+        __hcx: &mut CTX,
+        __hasher: &mut rustc_data_structures::stable_hasher::StableHasher,
+    ) {
+        std::mem::discriminant(self).hash_stable(__hcx, __hasher);
+        match self {
+            PredicateTyKind::Void(__self_0, __self_1) => {
+                __self_0.hash_stable(__hcx, __hasher);
+                __self_1.hash_stable(__hcx, __hasher);
+            }
+        }
+    }
+}
+
 /// Defines the kinds of types used by the type system.
 ///
 /// Types written by the user start out as `hir::TyKind` and get
@@ -218,6 +327,8 @@ pub enum TyKind<I: Interner> {
     /// A placeholder for a type which could not be computed; this is
     /// propagated to avoid useless error messages.
     Error(I::DelaySpanBugEmitted),
+
+    PredicateTy(PredicateTyKind<I>),
 }
 
 impl<I: Interner> TyKind<I> {
@@ -259,6 +370,7 @@ const fn tykind_discriminant<I: Interner>(value: &TyKind<I>) -> usize {
         Placeholder(_) => 24,
         Infer(_) => 25,
         Error(_) => 26,
+        PredicateTy(_) => 27,
     }
 }
 
@@ -293,6 +405,7 @@ impl<I: Interner> Clone for TyKind<I> {
             Placeholder(p) => Placeholder(p.clone()),
             Infer(t) => Infer(t.clone()),
             Error(e) => Error(e.clone()),
+            PredicateTy(p) => PredicateTy(p.clone()),
         }
     }
 }
@@ -351,6 +464,7 @@ impl<I: Interner> PartialEq for TyKind<I> {
                 (&Placeholder(ref __self_0), &Placeholder(ref __arg_1_0)) => __self_0 == __arg_1_0,
                 (&Infer(ref __self_0), &Infer(ref __arg_1_0)) => __self_0 == __arg_1_0,
                 (&Error(ref __self_0), &Error(ref __arg_1_0)) => __self_0 == __arg_1_0,
+                (&PredicateTy(ref __self_0), &PredicateTy(ref __arg_1_0)) => __self_0 == __arg_1_0,
                 _ => true,
             }
         } else {
@@ -464,6 +578,9 @@ impl<I: Interner> Ord for TyKind<I> {
                 }
                 (&Infer(ref __self_0), &Infer(ref __arg_1_0)) => Ord::cmp(__self_0, __arg_1_0),
                 (&Error(ref __self_0), &Error(ref __arg_1_0)) => Ord::cmp(__self_0, __arg_1_0),
+                (&PredicateTy(ref __self_0), &PredicateTy(ref __arg_1_0)) => {
+                    Ord::cmp(__self_0, __arg_1_0)
+                }
                 _ => Ordering::Equal,
             }
         } else {
@@ -580,6 +697,10 @@ impl<I: Interner> hash::Hash for TyKind<I> {
                 hash::Hash::hash(&tykind_discriminant(self), state);
                 hash::Hash::hash(__self_0, state)
             }
+            (&PredicateTy(ref __self_0),) => {
+                hash::Hash::hash(&tykind_discriminant(self), state);
+                hash::Hash::hash(__self_0, state)
+            }
             _ => hash::Hash::hash(&tykind_discriminant(self), state),
         }
     }
@@ -619,6 +740,7 @@ impl<I: Interner> fmt::Debug for TyKind<I> {
             Placeholder(f0) => Formatter::debug_tuple_field1_finish(f, "Placeholder", f0),
             Infer(f0) => Formatter::debug_tuple_field1_finish(f, "Infer", f0),
             TyKind::Error(f0) => Formatter::debug_tuple_field1_finish(f, "Error", f0),
+            PredicateTy(f0) => Formatter::debug_tuple_field1_finish(f, "PredicateTy", f0),
         }
     }
 }
@@ -648,6 +770,7 @@ where
     I::DelaySpanBugEmitted: Encodable<E>,
     I::PredicateKind: Encodable<E>,
     I::AllocId: Encodable<E>,
+    PredicateTyKind<I>: Encodable<E>,
 {
     fn encode(&self, e: &mut E) {
         let disc = tykind_discriminant(self);
@@ -737,6 +860,9 @@ where
             Error(d) => e.emit_enum_variant(disc, |e| {
                 d.encode(e);
             }),
+            PredicateTy(d) => e.emit_enum_variant(disc, |e| {
+                d.encode(e);
+            }),
         }
     }
 }
@@ -766,6 +892,7 @@ where
     I::DelaySpanBugEmitted: Decodable<D>,
     I::PredicateKind: Decodable<D>,
     I::AllocId: Decodable<D>,
+    PredicateTyKind<I>: Decodable<D>,
 {
     fn decode(d: &mut D) -> Self {
         match Decoder::read_usize(d) {
@@ -796,11 +923,12 @@ where
             24 => Placeholder(Decodable::decode(d)),
             25 => Infer(Decodable::decode(d)),
             26 => Error(Decodable::decode(d)),
+            27 => Error(Decodable::decode(d)),
             _ => panic!(
                 "{}",
                 format!(
                     "invalid enum variant tag while decoding `{}`, expected 0..{}",
-                    "TyKind", 27,
+                    "TyKind", 28,
                 )
             ),
         }
@@ -830,6 +958,7 @@ where
     I::PlaceholderType: HashStable<CTX>,
     I::InferTy: HashStable<CTX>,
     I::DelaySpanBugEmitted: HashStable<CTX>,
+    PredicateTyKind<I>: HashStable<CTX>,
 {
     #[inline]
     fn hash_stable(
@@ -922,6 +1051,9 @@ where
                 i.hash_stable(__hcx, __hasher);
             }
             Error(d) => {
+                d.hash_stable(__hcx, __hasher);
+            }
+            PredicateTy(d) => {
                 d.hash_stable(__hcx, __hasher);
             }
         }

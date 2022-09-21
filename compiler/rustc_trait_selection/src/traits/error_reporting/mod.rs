@@ -1747,6 +1747,8 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 ty::Foreign(..) => Some(17),
                 ty::GeneratorWitness(..) => Some(18),
                 ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) | ty::Error(_) => None,
+
+                ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
             }
         }
 

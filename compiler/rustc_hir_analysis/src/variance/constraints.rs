@@ -302,6 +302,8 @@ impl<'a, 'tcx> ConstraintContext<'a, 'tcx> {
                     ty
                 );
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 

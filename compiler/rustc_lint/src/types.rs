@@ -1156,6 +1156,8 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
             | ty::GeneratorWitness(..)
             | ty::Placeholder(..)
             | ty::FnDef(..) => bug!("unexpected type in foreign function: {:?}", ty),
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 

@@ -1,5 +1,6 @@
 #![feature(fmt_helpers_for_derive)]
 #![feature(min_specialization)]
+#![feature(never_type)]
 #![feature(rustc_attrs)]
 #![deny(rustc::untranslatable_diagnostic)]
 #![deny(rustc::diagnostic_outside_of_impl)]

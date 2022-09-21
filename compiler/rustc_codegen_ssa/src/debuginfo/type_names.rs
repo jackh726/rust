@@ -421,6 +421,8 @@ fn push_debuginfo_type_name<'tcx>(
                 t
             );
         }
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 
     /// MSVC names enums differently than other platforms so that the debugging visualization

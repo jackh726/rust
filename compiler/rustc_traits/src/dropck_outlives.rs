@@ -290,6 +290,8 @@ fn dtorck_constraint_for_ty<'tcx>(
             // be fully resolved.
             return Err(NoSolution);
         }
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 
     Ok(())

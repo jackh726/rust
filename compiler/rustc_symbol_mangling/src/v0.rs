@@ -490,6 +490,7 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
             }
 
             ty::GeneratorWitness(_) => bug!("symbol_names: unexpected `GeneratorWitness`"),
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 
         // Only cache types that do not refer to an enclosing

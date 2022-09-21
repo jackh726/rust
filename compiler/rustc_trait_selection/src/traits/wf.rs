@@ -717,6 +717,8 @@ impl<'tcx> WfPredicates<'tcx> {
                             .to_predicate(self.tcx()),
                     ));
                 }
+
+                ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
             }
 
             debug!(?self.out);

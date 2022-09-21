@@ -246,6 +246,8 @@ impl<'tcx> InherentCollect<'tcx> {
                 bug!("unexpected impl self type of impl: {:?} {:?}", item.def_id, self_ty);
             }
             ty::Error(_) => {}
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 }

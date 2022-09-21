@@ -230,6 +230,8 @@ impl<'tcx> TypeVisitor<'tcx> for Search<'tcx> {
                 // as this may still emit relevant errors.
                 return ControlFlow::CONTINUE;
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         };
 
         if !self.seen.insert(adt_def.did()) {

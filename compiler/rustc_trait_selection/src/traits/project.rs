@@ -1628,6 +1628,8 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     | ty::Placeholder(..)
                     | ty::Infer(..)
                     | ty::Error(_) => false,
+
+                    ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
                 }
             }
             super::ImplSource::Pointee(..) => {
@@ -1712,6 +1714,8 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                         }
                         false
                     }
+
+                    ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
                 }
             }
             super::ImplSource::Param(..) => {

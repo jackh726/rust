@@ -652,6 +652,8 @@ fn encode_ty<'tcx>(
         | ty::Projection(..) => {
             bug!("encode_ty: unexpected `{:?}`", ty.kind());
         }
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     };
 
     typeid
@@ -805,6 +807,8 @@ fn transform_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, options: TransformTyOptio
         | ty::Projection(..) => {
             bug!("transform_ty: unexpected `{:?}`", ty.kind());
         }
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 
     ty

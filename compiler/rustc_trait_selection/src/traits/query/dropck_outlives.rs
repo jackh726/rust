@@ -69,5 +69,7 @@ pub fn trivial_dropck_outlives<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
         | ty::Infer(_)
         | ty::Bound(..)
         | ty::Generator(..) => false,
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }

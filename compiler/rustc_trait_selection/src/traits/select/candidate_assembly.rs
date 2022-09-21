@@ -1010,6 +1010,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             ty::Infer(_) => {
                 candidates.ambiguous = true;
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 
@@ -1052,6 +1054,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             | ty::Error(_)
             | ty::Infer(_)
             | ty::Placeholder(_) => {}
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 }

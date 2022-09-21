@@ -284,6 +284,8 @@ where
             ty::Bound(..) | ty::Placeholder(..) | ty::Infer(..) => {
                 bug!("unexpected type: {:?}", ty)
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 
         if self.def_id_visitor.shallow() {

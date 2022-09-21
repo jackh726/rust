@@ -150,6 +150,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     .delay_span_bug(span, &format!("`{:?}` should be sized but is not?", t));
                 return Err(reported);
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         })
     }
 }
