@@ -47,14 +47,15 @@ pub enum DynKind {
 }
 
 pub enum PredicateTyKind<I: Interner> {
-    Void(I::ListPredicate, I::Ty),
+    ImplicationTy(I::ListPredicate, I::Ty),
 }
 
 impl<I: Interner> Clone for PredicateTyKind<I> {
     fn clone(&self) -> PredicateTyKind<I> {
         match self {
-            //PredicateTyKind::Void(__self_0.clone(), __self_1.clone()),
-            PredicateTyKind::Void(__self_0, __self_1) => unreachable!(),
+            PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
+                PredicateTyKind::ImplicationTy(__self_0.clone(), __self_1.clone())
+            }
         }
     }
 }
@@ -62,11 +63,10 @@ impl<I: Interner> Clone for PredicateTyKind<I> {
 impl<I: Interner> PartialEq for PredicateTyKind<I> {
     fn eq(&self, other: &PredicateTyKind<I>) -> bool {
         match (self, other) {
-            //*__self_0 == *__arg1_0 && *__self_1 == *__arg1_1
             (
-                PredicateTyKind::Void(__self_0, __self_1),
-                PredicateTyKind::Void(__arg1_0, __arg1_1),
-            ) => unreachable!(),
+                PredicateTyKind::ImplicationTy(__self_0, __self_1),
+                PredicateTyKind::ImplicationTy(__arg1_0, __arg1_1),
+            ) => *__self_0 == *__arg1_0 && *__self_1 == *__arg1_1,
         }
     }
 }
@@ -81,8 +81,8 @@ impl<I: Interner> ::core::cmp::Ord for PredicateTyKind<I> {
     fn cmp(&self, other: &PredicateTyKind<I>) -> ::core::cmp::Ordering {
         match (self, other) {
             (
-                PredicateTyKind::Void(__self_0, __self_1),
-                PredicateTyKind::Void(__arg1_0, __arg1_1),
+                PredicateTyKind::ImplicationTy(__self_0, __self_1),
+                PredicateTyKind::ImplicationTy(__arg1_0, __arg1_1),
             ) => panic!("PredicateTyKind unimplemented Ord"),
         }
     }
@@ -91,7 +91,7 @@ impl<I: Interner> ::core::cmp::Ord for PredicateTyKind<I> {
 impl<I: Interner> hash::Hash for PredicateTyKind<I> {
     fn hash<__H: hash::Hasher>(&self, state: &mut __H) -> () {
         match self {
-            PredicateTyKind::Void(__self_0, __self_1) => {
+            PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
                 __self_0.hash(state);
                 __self_1.hash(state)
             }
@@ -102,7 +102,7 @@ impl<I: Interner> hash::Hash for PredicateTyKind<I> {
 impl<I: Interner> fmt::Debug for PredicateTyKind<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PredicateTyKind::Void(__self_0, __self_1) => {
+            PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
                 f.debug_tuple_field2_finish("Void", &__self_0, &__self_1)
             }
         }
@@ -116,7 +116,7 @@ where
 {
     fn encode(&self, e: &mut E) {
         match self {
-            PredicateTyKind::Void(__self_0, __self_1) => e.emit_enum_variant(0, |e| {
+            PredicateTyKind::ImplicationTy(__self_0, __self_1) => e.emit_enum_variant(0, |e| {
                 __self_0.encode(e);
                 __self_1.encode(e);
             }),
@@ -131,7 +131,7 @@ where
 {
     fn decode(d: &mut D) -> PredicateTyKind<I> {
         match Decoder::read_usize(d) {
-            0 => PredicateTyKind::Void(Decodable::decode(d), Decodable::decode(d)),
+            0 => PredicateTyKind::ImplicationTy(Decodable::decode(d), Decodable::decode(d)),
             _ => panic!(
                 "{}",
                 format!(
@@ -156,7 +156,7 @@ where
     ) {
         std::mem::discriminant(self).hash_stable(__hcx, __hasher);
         match self {
-            PredicateTyKind::Void(__self_0, __self_1) => {
+            PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
                 __self_0.hash_stable(__hcx, __hasher);
                 __self_1.hash_stable(__hcx, __hasher);
             }
