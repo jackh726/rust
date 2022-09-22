@@ -55,6 +55,8 @@ pub trait Interner {
     type FreeRegion: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type RegionVid: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type PlaceholderRegion: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
+
+    type ListPredicate: Clone + Debug + Hash + PartialEq + Eq;
 }
 
 pub trait InternAs<T: ?Sized, R> {

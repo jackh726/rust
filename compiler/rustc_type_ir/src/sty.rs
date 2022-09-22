@@ -47,7 +47,7 @@ pub enum DynKind {
 }
 
 pub enum PredicateTyKind<I: Interner> {
-    Void(std::marker::PhantomData<I>, !),
+    Void(I::ListPredicate, !),
 }
 
 impl<I: Interner> Clone for PredicateTyKind<I> {
@@ -83,10 +83,7 @@ impl<I: Interner> ::core::cmp::Ord for PredicateTyKind<I> {
             (
                 PredicateTyKind::Void(__self_0, __self_1),
                 PredicateTyKind::Void(__arg1_0, __arg1_1),
-            ) => match __self_0.cmp(__arg1_0) {
-                Ordering::Equal => Ord::cmp(__self_1, __arg1_1),
-                cmp => cmp,
-            },
+            ) => panic!("PredicateTyKind unimplemented Ord"),
         }
     }
 }
@@ -112,7 +109,10 @@ impl<I: Interner> fmt::Debug for PredicateTyKind<I> {
     }
 }
 
-impl<I: Interner, E: TyEncoder> Encodable<E> for PredicateTyKind<I> {
+impl<I: Interner, E: TyEncoder> Encodable<E> for PredicateTyKind<I>
+where
+    I::ListPredicate: Encodable<E>,
+{
     fn encode(&self, e: &mut E) {
         match self {
             PredicateTyKind::Void(__self_0, __self_1) => e.emit_enum_variant(0, |e| {
@@ -123,7 +123,10 @@ impl<I: Interner, E: TyEncoder> Encodable<E> for PredicateTyKind<I> {
     }
 }
 
-impl<I: Interner, D: TyDecoder> Decodable<D> for PredicateTyKind<I> {
+impl<I: Interner, D: TyDecoder> Decodable<D> for PredicateTyKind<I>
+where
+    I::ListPredicate: Decodable<D>,
+{
     fn decode(d: &mut D) -> PredicateTyKind<I> {
         match Decoder::read_usize(d) {
             0 => PredicateTyKind::Void(Decodable::decode(d), Decodable::decode(d)),
@@ -138,7 +141,10 @@ impl<I: Interner, D: TyDecoder> Decodable<D> for PredicateTyKind<I> {
     }
 }
 
-impl<CTX: HashStableContext, I: Interner> HashStable<CTX> for PredicateTyKind<I> {
+impl<CTX: HashStableContext, I: Interner> HashStable<CTX> for PredicateTyKind<I>
+where
+    I::ListPredicate: HashStable<CTX>,
+{
     #[inline]
     fn hash_stable(
         &self,

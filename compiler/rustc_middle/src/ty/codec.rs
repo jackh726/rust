@@ -297,6 +297,15 @@ impl<'tcx, D: TyDecoder<I = TyCtxt<'tcx>>> RefDecodable<'tcx, D> for ty::List<Ty
     }
 }
 
+impl<'tcx, D: TyDecoder<I = TyCtxt<'tcx>>> RefDecodable<'tcx, D> for ty::List<ty::Predicate<'tcx>> {
+    fn decode(decoder: &mut D) -> &'tcx Self {
+        let len = decoder.read_usize();
+        decoder
+            .interner()
+            .mk_predicates((0..len).map::<ty::Predicate<'tcx>, _>(|_| Decodable::decode(decoder)))
+    }
+}
+
 impl<'tcx, D: TyDecoder<I = TyCtxt<'tcx>>> RefDecodable<'tcx, D>
     for ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>>
 {
@@ -379,6 +388,7 @@ impl_decodable_via_ref! {
     &'tcx ty::TypeckResults<'tcx>,
     &'tcx ty::List<Ty<'tcx>>,
     &'tcx ty::List<ty::Binder<'tcx, ty::ExistentialPredicate<'tcx>>>,
+    &'tcx ty::List<ty::Predicate<'tcx>>,
     &'tcx traits::ImplSource<'tcx, ()>,
     &'tcx mir::Body<'tcx>,
     &'tcx mir::UnsafetyCheckResult,

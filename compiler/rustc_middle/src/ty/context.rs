@@ -126,6 +126,8 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     type FreeRegion = ty::FreeRegion;
     type RegionVid = ty::RegionVid;
     type PlaceholderRegion = ty::PlaceholderRegion;
+
+    type ListPredicate = &'tcx List<Predicate<'tcx>>;
 }
 
 /// A type that is not publicly constructable. This prevents people from making [`TyKind::Error`]s
