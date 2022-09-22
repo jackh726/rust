@@ -534,4 +534,5 @@ impl_binder_encode_decode! {
     ty::TraitRef<'tcx>,
     Vec<ty::GeneratorInteriorTypeCause<'tcx>>,
     ty::ExistentialTraitRef<'tcx>,
+    Ty<'tcx>,
 }

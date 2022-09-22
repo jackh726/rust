@@ -48,6 +48,7 @@ pub enum DynKind {
 
 pub enum PredicateTyKind<I: Interner> {
     ImplicationTy(I::ListPredicate, I::Ty),
+    ForAllTy(I::BinderTy),
 }
 
 impl<I: Interner> Clone for PredicateTyKind<I> {
@@ -56,6 +57,7 @@ impl<I: Interner> Clone for PredicateTyKind<I> {
             PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
                 PredicateTyKind::ImplicationTy(__self_0.clone(), __self_1.clone())
             }
+            PredicateTyKind::ForAllTy(__self_0) => PredicateTyKind::ForAllTy(__self_0.clone()),
         }
     }
 }
@@ -67,6 +69,10 @@ impl<I: Interner> PartialEq for PredicateTyKind<I> {
                 PredicateTyKind::ImplicationTy(__self_0, __self_1),
                 PredicateTyKind::ImplicationTy(__arg1_0, __arg1_1),
             ) => *__self_0 == *__arg1_0 && *__self_1 == *__arg1_1,
+            (PredicateTyKind::ForAllTy(__self_0), PredicateTyKind::ForAllTy(__arg1_0)) => {
+                *__self_0 == *__arg1_0
+            }
+            _ => false,
         }
     }
 }
@@ -78,13 +84,8 @@ impl<I: Interner> PartialOrd for PredicateTyKind<I> {
 }
 impl<I: Interner> ::core::cmp::Ord for PredicateTyKind<I> {
     #[inline]
-    fn cmp(&self, other: &PredicateTyKind<I>) -> ::core::cmp::Ordering {
-        match (self, other) {
-            (
-                PredicateTyKind::ImplicationTy(__self_0, __self_1),
-                PredicateTyKind::ImplicationTy(__arg1_0, __arg1_1),
-            ) => panic!("PredicateTyKind unimplemented Ord"),
-        }
+    fn cmp(&self, _other: &PredicateTyKind<I>) -> ::core::cmp::Ordering {
+        panic!("PredicateTyKind unimplemented Ord");
     }
 }
 
@@ -95,6 +96,7 @@ impl<I: Interner> hash::Hash for PredicateTyKind<I> {
                 __self_0.hash(state);
                 __self_1.hash(state)
             }
+            PredicateTyKind::ForAllTy(__self_0) => __self_0.hash(state),
         }
     }
 }
@@ -103,7 +105,10 @@ impl<I: Interner> fmt::Debug for PredicateTyKind<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
-                f.debug_tuple_field2_finish("Void", &__self_0, &__self_1)
+                f.debug_tuple_field2_finish("ImplicationTy", &__self_0, &__self_1)
+            }
+            PredicateTyKind::ForAllTy(__self_0) => {
+                f.debug_tuple_field1_finish("ForAllTy", &__self_0)
             }
         }
     }
@@ -113,12 +118,16 @@ impl<I: Interner, E: TyEncoder> Encodable<E> for PredicateTyKind<I>
 where
     I::Ty: Encodable<E>,
     I::ListPredicate: Encodable<E>,
+    I::BinderTy: Encodable<E>,
 {
     fn encode(&self, e: &mut E) {
         match self {
             PredicateTyKind::ImplicationTy(__self_0, __self_1) => e.emit_enum_variant(0, |e| {
                 __self_0.encode(e);
                 __self_1.encode(e);
+            }),
+            PredicateTyKind::ForAllTy(__self_0) => e.emit_enum_variant(1, |e| {
+                __self_0.encode(e);
             }),
         }
     }
@@ -128,10 +137,12 @@ impl<I: Interner, D: TyDecoder> Decodable<D> for PredicateTyKind<I>
 where
     I::Ty: Decodable<D>,
     I::ListPredicate: Decodable<D>,
+    I::BinderTy: Decodable<D>,
 {
     fn decode(d: &mut D) -> PredicateTyKind<I> {
         match Decoder::read_usize(d) {
             0 => PredicateTyKind::ImplicationTy(Decodable::decode(d), Decodable::decode(d)),
+            1 => PredicateTyKind::ForAllTy(Decodable::decode(d)),
             _ => panic!(
                 "{}",
                 format!(
@@ -147,6 +158,7 @@ impl<CTX: HashStableContext, I: Interner> HashStable<CTX> for PredicateTyKind<I>
 where
     I::Ty: HashStable<CTX>,
     I::ListPredicate: HashStable<CTX>,
+    I::BinderTy: HashStable<CTX>,
 {
     #[inline]
     fn hash_stable(
@@ -159,6 +171,9 @@ where
             PredicateTyKind::ImplicationTy(__self_0, __self_1) => {
                 __self_0.hash_stable(__hcx, __hasher);
                 __self_1.hash_stable(__hcx, __hasher);
+            }
+            PredicateTyKind::ForAllTy(__self_0) => {
+                __self_0.hash_stable(__hcx, __hasher);
             }
         }
     }

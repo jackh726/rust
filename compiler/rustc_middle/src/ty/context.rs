@@ -128,6 +128,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     type PlaceholderRegion = ty::PlaceholderRegion;
 
     type ListPredicate = &'tcx List<Predicate<'tcx>>;
+    type BinderTy = ty::Binder<'tcx, Ty<'tcx>>;
 }
 
 /// A type that is not publicly constructable. This prevents people from making [`TyKind::Error`]s
