@@ -882,6 +882,8 @@ impl<'tcx> Ty<'tcx> {
             | ty::Param(_)
             | ty::Placeholder(_)
             | ty::Projection(_) => false,
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 
@@ -922,6 +924,8 @@ impl<'tcx> Ty<'tcx> {
             | ty::Param(_)
             | ty::Placeholder(_)
             | ty::Projection(_) => false,
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 
@@ -1049,6 +1053,8 @@ impl<'tcx> Ty<'tcx> {
             | ty::Infer(_) => false,
 
             ty::Foreign(_) | ty::GeneratorWitness(..) | ty::Error(_) => false,
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 
@@ -1185,6 +1191,8 @@ pub fn needs_drop_components<'tcx>(
         | ty::Infer(_)
         | ty::Closure(..)
         | ty::Generator(..) => Ok(smallvec![ty]),
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }
 
@@ -1221,6 +1229,8 @@ pub fn is_trivially_const_drop<'tcx>(ty: Ty<'tcx>) -> bool {
         ty::Array(ty, _) | ty::Slice(ty) => is_trivially_const_drop(ty),
 
         ty::Tuple(tys) => tys.iter().all(|ty| is_trivially_const_drop(ty)),
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }
 

@@ -752,6 +752,8 @@ where
                 | ty::Param(_)
                 | ty::Infer(_)
                 | ty::Error(_) => bug!("TyAndLayout::field: unexpected type `{}`", this.ty),
+
+                ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
             }
         }
 

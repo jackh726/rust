@@ -653,6 +653,8 @@ impl<'tcx> TypeSuperFoldable<'tcx> for Ty<'tcx> {
             | ty::Placeholder(..)
             | ty::Never
             | ty::Foreign(..) => return Ok(self),
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         };
 
         Ok(if *self.kind() == kind { self } else { folder.tcx().mk_ty(kind) })
@@ -699,6 +701,8 @@ impl<'tcx> TypeSuperVisitable<'tcx> for Ty<'tcx> {
             | ty::Param(..)
             | ty::Never
             | ty::Foreign(..) => ControlFlow::CONTINUE,
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 }

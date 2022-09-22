@@ -47,7 +47,7 @@ pub enum DynKind {
 }
 
 pub enum PredicateTyKind<I: Interner> {
-    Void(I::ListPredicate, !),
+    Void(I::ListPredicate, I::Ty),
 }
 
 impl<I: Interner> Clone for PredicateTyKind<I> {
@@ -111,6 +111,7 @@ impl<I: Interner> fmt::Debug for PredicateTyKind<I> {
 
 impl<I: Interner, E: TyEncoder> Encodable<E> for PredicateTyKind<I>
 where
+    I::Ty: Encodable<E>,
     I::ListPredicate: Encodable<E>,
 {
     fn encode(&self, e: &mut E) {
@@ -125,6 +126,7 @@ where
 
 impl<I: Interner, D: TyDecoder> Decodable<D> for PredicateTyKind<I>
 where
+    I::Ty: Decodable<D>,
     I::ListPredicate: Decodable<D>,
 {
     fn decode(d: &mut D) -> PredicateTyKind<I> {
@@ -143,6 +145,7 @@ where
 
 impl<CTX: HashStableContext, I: Interner> HashStable<CTX> for PredicateTyKind<I>
 where
+    I::Ty: HashStable<CTX>,
     I::ListPredicate: HashStable<CTX>,
 {
     #[inline]

@@ -1348,6 +1348,8 @@ fn layout_of_uncached<'tcx>(
         ty::Bound(..) | ty::Param(_) | ty::Error(_) => {
             return Err(LayoutError::Unknown(ty));
         }
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     })
 }
 

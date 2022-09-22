@@ -141,6 +141,8 @@ pub fn simplify_type<'tcx>(
         ty::Opaque(def_id, _) => Some(OpaqueSimplifiedType(def_id)),
         ty::Foreign(def_id) => Some(ForeignSimplifiedType(def_id)),
         ty::Bound(..) | ty::Infer(_) | ty::Error(_) => None,
+
+        ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }
 
@@ -256,6 +258,8 @@ impl DeepRejectCtxt {
             | ty::Placeholder(..)
             | ty::Bound(..)
             | ty::Infer(_) => bug!("unexpected impl_ty: {impl_ty}"),
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 
         let k = impl_ty.kind();
@@ -359,6 +363,8 @@ impl DeepRejectCtxt {
             ty::GeneratorWitness(..) | ty::Bound(..) => {
                 bug!("unexpected obligation type: {:?}", obligation_ty)
             }
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 

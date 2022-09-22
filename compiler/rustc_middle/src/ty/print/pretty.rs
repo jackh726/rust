@@ -773,6 +773,8 @@ pub trait PrettyPrinter<'tcx>:
                 p!("]")
             }
             ty::Slice(ty) => p!("[", print(ty), "]"),
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 
         Ok(self)

@@ -329,6 +329,8 @@ impl<'tcx> Ty<'tcx> {
             ty::Param(p) => format!("type parameter `{}`", p).into(),
             ty::Opaque(..) => "opaque type".into(),
             ty::Error(_) => "type error".into(),
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 
@@ -366,6 +368,8 @@ impl<'tcx> Ty<'tcx> {
             ty::Projection(_) => "associated type".into(),
             ty::Param(_) => "type parameter".into(),
             ty::Opaque(..) => "opaque type".into(),
+
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
 }
