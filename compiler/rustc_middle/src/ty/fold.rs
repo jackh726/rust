@@ -826,3 +826,86 @@ where
 
     value.fold_with(&mut Shifter::new(tcx, amount))
 }
+
+struct OutShifter<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    current_index: ty::DebruijnIndex,
+    amount: u32,
+}
+
+impl<'tcx> OutShifter<'tcx> {
+    pub fn new(tcx: TyCtxt<'tcx>, amount: u32) -> Self {
+        OutShifter { tcx, current_index: ty::INNERMOST, amount }
+    }
+}
+
+impl<'tcx> TypeFolder<'tcx> for OutShifter<'tcx> {
+    fn tcx<'b>(&'b self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn fold_binder<T: TypeFoldable<'tcx>>(
+        &mut self,
+        t: ty::Binder<'tcx, T>,
+    ) -> ty::Binder<'tcx, T> {
+        self.current_index.shift_in(1);
+        let t = t.super_fold_with(self);
+        self.current_index.shift_out(1);
+        t
+    }
+
+    fn fold_region(&mut self, r: ty::Region<'tcx>) -> ty::Region<'tcx> {
+        match *r {
+            ty::ReLateBound(debruijn, br) => {
+                if self.amount == 0 || debruijn < self.current_index {
+                    r
+                } else {
+                    let debruijn = debruijn.shifted_out(self.amount);
+                    let shifted = ty::ReLateBound(debruijn, br);
+                    self.tcx.mk_region(shifted)
+                }
+            }
+            _ => r,
+        }
+    }
+
+    fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
+        match *ty.kind() {
+            ty::Bound(debruijn, bound_ty) => {
+                if self.amount == 0 || debruijn < self.current_index {
+                    ty
+                } else {
+                    let debruijn = debruijn.shifted_out(self.amount);
+                    self.tcx.mk_ty(ty::Bound(debruijn, bound_ty))
+                }
+            }
+
+            _ => ty.super_fold_with(self),
+        }
+    }
+
+    fn fold_const(&mut self, ct: ty::Const<'tcx>) -> ty::Const<'tcx> {
+        if let ty::ConstKind::Bound(debruijn, bound_ct) = ct.kind() {
+            if self.amount == 0 || debruijn < self.current_index {
+                ct
+            } else {
+                let debruijn = debruijn.shifted_out(self.amount);
+                self.tcx.mk_const(ty::ConstS {
+                    kind: ty::ConstKind::Bound(debruijn, bound_ct),
+                    ty: ct.ty(),
+                })
+            }
+        } else {
+            ct.super_fold_with(self)
+        }
+    }
+}
+
+pub fn shift_vars_out<'tcx, T>(tcx: TyCtxt<'tcx>, value: T, amount: u32) -> T
+where
+    T: TypeFoldable<'tcx>,
+{
+    debug!("shift_vars_out(value={:?}, amount={})", value, amount);
+
+    value.fold_with(&mut OutShifter::new(tcx, amount))
+}

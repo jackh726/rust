@@ -2276,6 +2276,29 @@ impl<'tcx> Ty<'tcx> {
             _ => None,
         }
     }
+
+    pub fn clean(self, tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
+        match self.kind() {
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                match bound_ty.skip_binder().kind() {
+                    ty::FnPtr(fn_sig) => tcx.mk_fn_ptr(bound_ty.rebind(ty::fold::shift_vars_out(
+                        tcx,
+                        fn_sig.skip_binder(),
+                        1,
+                    ))),
+                    _ => bug!("Unexpected use of unimplemented PredicateTy"),
+                }
+            }
+            ty::PredicateTy(ty::PredicateTyKind::ImplicationTy(predicates, ty)) => {
+                if predicates.is_empty() {
+                    *ty
+                } else {
+                    bug!("Unexpected use of unimplemented PredicateTy");
+                }
+            }
+            _ => self,
+        }
+    }
 }
 
 /// Extra information about why we ended up with a particular variance.
