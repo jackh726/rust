@@ -1257,6 +1257,12 @@ impl<'tcx> PolyFnSig<'tcx> {
     pub fn abi(&self) -> abi::Abi {
         self.skip_binder().abi
     }
+
+    pub fn to_forall_ty(&self, tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
+        let fn_sig = ty::fold::shift_vars(tcx, self.skip_binder(), 1);
+        let fn_sig = tcx.mk_fn_ptr(Binder::bind_with_vars(fn_sig, ty::List::empty()));
+        tcx.mk_ty(ty::PredicateTy(ty::PredicateTyKind::ForAllTy(self.rebind(fn_sig))))
+    }
 }
 
 pub type CanonicalPolyFnSig<'tcx> = Canonical<'tcx, Binder<'tcx, FnSig<'tcx>>>;

@@ -2608,14 +2608,8 @@ impl<'o, 'tcx> dyn AstConv<'tcx> + 'o {
             hir::TyKind::BareFn(bf) => {
                 require_c_abi_if_c_variadic(tcx, bf.decl, bf.abi, ast_ty.span);
 
-                tcx.mk_fn_ptr(self.ty_of_fn(
-                    ast_ty.hir_id,
-                    bf.unsafety,
-                    bf.abi,
-                    bf.decl,
-                    None,
-                    Some(ast_ty),
-                ))
+                self.ty_of_fn(ast_ty.hir_id, bf.unsafety, bf.abi, bf.decl, None, Some(ast_ty))
+                    .to_forall_ty(tcx)
             }
             hir::TyKind::TraitObject(bounds, ref lifetime, repr) => {
                 self.maybe_lint_bare_trait(ast_ty, in_path);

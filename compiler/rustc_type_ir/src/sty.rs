@@ -947,7 +947,7 @@ where
             24 => Placeholder(Decodable::decode(d)),
             25 => Infer(Decodable::decode(d)),
             26 => Error(Decodable::decode(d)),
-            27 => Error(Decodable::decode(d)),
+            27 => PredicateTy(Decodable::decode(d)),
             _ => panic!(
                 "{}",
                 format!(
