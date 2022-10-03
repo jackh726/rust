@@ -654,6 +654,9 @@ impl<'tcx> TypeSuperFoldable<'tcx> for Ty<'tcx> {
             | ty::Never
             | ty::Foreign(..) => return Ok(self),
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty.try_fold_with(folder)?))
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         };
 
@@ -702,6 +705,9 @@ impl<'tcx> TypeSuperVisitable<'tcx> for Ty<'tcx> {
             | ty::Never
             | ty::Foreign(..) => ControlFlow::CONTINUE,
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.visit_with(visitor)
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }

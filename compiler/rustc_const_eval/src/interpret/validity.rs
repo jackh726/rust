@@ -491,6 +491,7 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
     ) -> InterpResult<'tcx, bool> {
         // Go over all the primitive types
         let ty = value.layout.ty;
+        let ty = ty.clean(*self.ecx.tcx);
         match ty.kind() {
             ty::Bool => {
                 let value = self.read_scalar(value, "a boolean")?;

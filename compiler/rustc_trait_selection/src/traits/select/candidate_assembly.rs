@@ -486,7 +486,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
         // Okay to skip binder because what we are inspecting doesn't involve bound regions.
         let self_ty = obligation.self_ty().skip_binder();
-        match *self_ty.kind() {
+        match *self_ty.clean(self.tcx()).kind() {
             ty::Infer(ty::TyVar(_)) => {
                 debug!("assemble_fn_pointer_candidates: ambiguous self-type");
                 candidates.ambiguous = true; // Could wind up being a fn() type.
@@ -952,7 +952,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         }
 
         let self_ty = self.infcx().shallow_resolve(obligation.self_ty());
-        match self_ty.skip_binder().kind() {
+        match self_ty.skip_binder().clean(self.tcx()).kind() {
             ty::Opaque(..)
             | ty::Dynamic(..)
             | ty::Error(_)

@@ -78,6 +78,9 @@ This API is completely unstable and subject to change.
 extern crate tracing;
 
 #[macro_use]
+extern crate rustc_macros;
+
+#[macro_use]
 extern crate rustc_middle;
 
 // These are used by Clippy.

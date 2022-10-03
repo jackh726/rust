@@ -84,8 +84,13 @@ impl<I: Interner> PartialOrd for PredicateTyKind<I> {
 }
 impl<I: Interner> ::core::cmp::Ord for PredicateTyKind<I> {
     #[inline]
-    fn cmp(&self, _other: &PredicateTyKind<I>) -> ::core::cmp::Ordering {
-        panic!("PredicateTyKind unimplemented Ord");
+    fn cmp(&self, other: &PredicateTyKind<I>) -> ::core::cmp::Ordering {
+        match (self, other) {
+            (PredicateTyKind::ForAllTy(bound_ty_a), PredicateTyKind::ForAllTy(bound_ty_b)) => {
+                bound_ty_a.cmp(bound_ty_b)
+            }
+            _ => panic!("PredicateTyKind unimplemented Ord"),
+        }
     }
 }
 

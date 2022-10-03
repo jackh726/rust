@@ -520,7 +520,7 @@ impl<'tcx> WfPredicates<'tcx> {
 
             debug!("wf bounds for ty={:?} ty.kind={:#?}", ty, ty.kind());
 
-            match *ty.kind() {
+            match *ty.clean(self.tcx).kind() {
                 ty::Bool
                 | ty::Char
                 | ty::Int(..)

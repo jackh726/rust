@@ -56,7 +56,7 @@ fn push_debuginfo_type_name<'tcx>(
     // .natvis visualizers (and perhaps other existing native debuggers?)
     let cpp_like_debuginfo = cpp_like_debuginfo(tcx);
 
-    match *t.kind() {
+    match *t.clean(tcx).kind() {
         ty::Bool => output.push_str("bool"),
         ty::Char => output.push_str("char"),
         ty::Str => output.push_str("str"),

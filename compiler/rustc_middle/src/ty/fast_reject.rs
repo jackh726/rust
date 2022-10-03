@@ -98,7 +98,7 @@ pub fn simplify_type<'tcx>(
     ty: Ty<'tcx>,
     treat_params: TreatParams,
 ) -> Option<SimplifiedType> {
-    match *ty.kind() {
+    match *ty.clean(tcx).kind() {
         ty::Bool => Some(BoolSimplifiedType),
         ty::Char => Some(CharSimplifiedType),
         ty::Int(int_type) => Some(IntSimplifiedType(int_type)),
@@ -259,6 +259,8 @@ impl DeepRejectCtxt {
             | ty::Bound(..)
             | ty::Infer(_) => bug!("unexpected impl_ty: {impl_ty}"),
 
+            // FIXME(a-mir-formality)
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(..)) => return true,
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 
@@ -364,6 +366,8 @@ impl DeepRejectCtxt {
                 bug!("unexpected obligation type: {:?}", obligation_ty)
             }
 
+            // FIXME(a-mir-formality)
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(..)) => return true,
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }

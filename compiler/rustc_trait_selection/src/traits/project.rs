@@ -1597,7 +1597,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                 // Any type with multiple potential discriminant types is therefore not eligible.
                 let self_ty = selcx.infcx().shallow_resolve(obligation.predicate.self_ty());
 
-                match self_ty.kind() {
+                match self_ty.clean(selcx.tcx()).kind() {
                     ty::Bool
                     | ty::Char
                     | ty::Int(_)
@@ -1656,7 +1656,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     || {},
                 );
 
-                match tail.kind() {
+                match tail.clean(selcx.tcx()).kind() {
                     ty::Bool
                     | ty::Char
                     | ty::Int(_)

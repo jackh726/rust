@@ -73,6 +73,7 @@ fn has_ffi_unwind_calls(tcx: TyCtxt<'_>, local_def_id: LocalDefId) -> bool {
         let TerminatorKind::Call { func, .. } = &terminator.kind else { continue };
 
         let ty = func.ty(body, tcx);
+        let ty = ty.clean(tcx);
         let sig = ty.fn_sig(tcx);
 
         // Rust calls cannot themselves create foreign unwinds.

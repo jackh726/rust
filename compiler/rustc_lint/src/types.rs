@@ -917,6 +917,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         use FfiResult::*;
 
         let tcx = self.cx.tcx;
+        let ty = ty.clean(tcx);
 
         // Protect against infinite recursion, for example
         // `struct S(*mut S);`.

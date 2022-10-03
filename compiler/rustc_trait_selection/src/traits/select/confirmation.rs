@@ -1208,7 +1208,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         };
 
         while let Some(nested_ty) = stack.pop() {
-            match *nested_ty.kind() {
+            match *nested_ty.clean(self.tcx()).kind() {
                 // We know these types are trivially drop
                 ty::Bool
                 | ty::Char

@@ -137,6 +137,7 @@ impl<'tcx> TypeVisitor<'tcx> for Search<'tcx> {
     fn visit_ty(&mut self, ty: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
         debug!("Search visiting ty: {:?}", ty);
 
+        let ty = ty.clean(self.tcx);
         let (adt_def, substs) = match *ty.kind() {
             ty::Adt(adt_def, substs) => (adt_def, substs),
             ty::Param(_) => {

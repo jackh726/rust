@@ -194,7 +194,7 @@ where
         let tcx = self.def_id_visitor.tcx();
         // InternalSubsts are not visited here because they are visited below
         // in `super_visit_with`.
-        match *ty.kind() {
+        match *ty.clean(tcx).kind() {
             ty::Adt(ty::AdtDef(Interned(&ty::AdtDefData { did: def_id, .. }, _)), ..)
             | ty::Foreign(def_id)
             | ty::FnDef(def_id, ..)

@@ -11,7 +11,7 @@ fn sized_constraint_for_ty<'tcx>(
 ) -> Vec<Ty<'tcx>> {
     use rustc_type_ir::sty::TyKind::*;
 
-    let result = match ty.kind() {
+    let result = match ty.clean(tcx).kind() {
         Bool | Char | Int(..) | Uint(..) | Float(..) | RawPtr(..) | Ref(..) | FnDef(..)
         | FnPtr(_) | Array(..) | Closure(..) | Generator(..) | Never => vec![],
 

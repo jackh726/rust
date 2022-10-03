@@ -909,3 +909,25 @@ where
 
     value.fold_with(&mut OutShifter::new(tcx, amount))
 }
+
+struct Cleaner<'tcx> {
+    tcx: TyCtxt<'tcx>,
+}
+
+impl<'tcx> TypeFolder<'tcx> for Cleaner<'tcx> {
+    fn tcx<'b>(&'b self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
+        ty.clean(self.tcx)
+    }
+}
+
+pub fn clean<'tcx, T>(tcx: TyCtxt<'tcx>, t: T) -> T
+where
+    T: TypeFoldable<'tcx>,
+{
+    let mut cleaner = Cleaner { tcx };
+    t.fold_with(&mut cleaner)
+}

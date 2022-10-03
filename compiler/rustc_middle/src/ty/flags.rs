@@ -214,6 +214,11 @@ impl FlagComputation {
                 computation.add_ty(fn_sig.output());
             }),
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                self.bound_computation(*bound_ty, |computation, ty| {
+                    computation.add_ty(ty);
+                })
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }

@@ -883,6 +883,9 @@ impl<'tcx> Ty<'tcx> {
             | ty::Placeholder(_)
             | ty::Projection(_) => false,
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.skip_binder().is_trivially_freeze()
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
@@ -925,6 +928,9 @@ impl<'tcx> Ty<'tcx> {
             | ty::Placeholder(_)
             | ty::Projection(_) => false,
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.skip_binder().is_trivially_unpin()
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
@@ -1054,6 +1060,9 @@ impl<'tcx> Ty<'tcx> {
 
             ty::Foreign(_) | ty::GeneratorWitness(..) | ty::Error(_) => false,
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.skip_binder().is_structural_eq_shallow(tcx)
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
@@ -1192,6 +1201,9 @@ pub fn needs_drop_components<'tcx>(
         | ty::Closure(..)
         | ty::Generator(..) => Ok(smallvec![ty]),
 
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+            needs_drop_components(bound_ty.skip_binder(), target_layout)
+        }
         ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }
@@ -1230,6 +1242,9 @@ pub fn is_trivially_const_drop<'tcx>(ty: Ty<'tcx>) -> bool {
 
         ty::Tuple(tys) => tys.iter().all(|ty| is_trivially_const_drop(ty)),
 
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+            is_trivially_const_drop(bound_ty.skip_binder())
+        }
         ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
     }
 }

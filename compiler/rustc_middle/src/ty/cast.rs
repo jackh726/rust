@@ -72,6 +72,10 @@ impl<'tcx> CastTy<'tcx> {
             ty::RawPtr(mt) => Some(CastTy::Ptr(mt)),
             ty::FnPtr(..) => Some(CastTy::FnPtr),
             ty::Dynamic(_, _, ty::DynStar) => Some(CastTy::DynStar),
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                Self::from_ty(bound_ty.skip_binder())
+            }
+            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
             _ => None,
         }
     }

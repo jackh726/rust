@@ -330,7 +330,7 @@ impl<'tcx> Ty<'tcx> {
             ty::Opaque(..) => "opaque type".into(),
             ty::Error(_) => "type error".into(),
 
-            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
+            ty::PredicateTy(..) => "PredicateTy".into(),
         }
     }
 
@@ -369,7 +369,7 @@ impl<'tcx> Ty<'tcx> {
             ty::Param(_) => "type parameter".into(),
             ty::Opaque(..) => "opaque type".into(),
 
-            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
+            ty::PredicateTy(..) => "PredicateTy".into(),
         }
     }
 }

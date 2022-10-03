@@ -66,6 +66,7 @@ impl<'tcx> MirPass<'tcx> for AbortUnwindingCalls {
             let call_can_unwind = match &terminator.kind {
                 TerminatorKind::Call { func, .. } => {
                     let ty = func.ty(body, tcx);
+                    let ty = ty.clean(tcx);
                     let sig = ty.fn_sig(tcx);
                     let fn_def_id = match ty.kind() {
                         ty::FnPtr(_) => None,

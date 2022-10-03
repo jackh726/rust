@@ -1820,8 +1820,12 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
 
                 let imp = self.tcx.impl_trait_ref(def_id).unwrap();
 
-                self.fuzzy_match_tys(trait_pred.skip_binder().self_ty(), imp.self_ty(), false)
-                    .map(|similarity| ImplCandidate { trait_ref: imp, similarity })
+                self.fuzzy_match_tys(
+                    trait_pred.skip_binder().self_ty().clean(self.tcx),
+                    imp.self_ty().clean(self.tcx),
+                    false,
+                )
+                .map(|similarity| ImplCandidate { trait_ref: imp, similarity })
             })
             .collect()
     }

@@ -30,8 +30,8 @@ use std::ops::{ControlFlow, Deref, Range};
 use ty::util::IntTypeExt;
 
 use rustc_type_ir::sty::TyKind::*;
-use rustc_type_ir::RegionKind as IrRegionKind;
 use rustc_type_ir::TyKind as IrTyKind;
+use rustc_type_ir::{PredicateTyKind, RegionKind as IrRegionKind};
 
 // Re-export the `TyKind` from `rustc_type_ir` here for convenience
 #[rustc_diagnostic_item = "TyKind"]
@@ -1933,7 +1933,7 @@ impl<'tcx> Ty<'tcx> {
     }
 
     pub fn fn_sig(self, tcx: TyCtxt<'tcx>) -> PolyFnSig<'tcx> {
-        match self.kind() {
+        match self.clean(tcx).kind() {
             FnDef(def_id, substs) => tcx.bound_fn_sig(*def_id).subst(tcx, substs),
             FnPtr(f) => *f,
             Error(_) => {
@@ -1954,7 +1954,11 @@ impl<'tcx> Ty<'tcx> {
 
     #[inline]
     pub fn is_fn_ptr(self) -> bool {
-        matches!(self.kind(), FnPtr(_))
+        match self.kind() {
+            FnPtr(_) => true,
+            PredicateTy(PredicateTyKind::ForAllTy(bound_ty)) => bound_ty.skip_binder().is_fn_ptr(),
+            _ => false,
+        }
     }
 
     #[inline]
@@ -2073,6 +2077,7 @@ impl<'tcx> Ty<'tcx> {
         normalize: impl FnMut(Ty<'tcx>) -> Ty<'tcx>,
     ) -> (Ty<'tcx>, bool) {
         let tail = tcx.struct_tail_with_normalize(self, normalize, || {});
+        let tail = tail.clean(tcx);
         match tail.kind() {
             // Sized types
             ty::Infer(ty::IntVar(_) | ty::FloatVar(_))
@@ -2197,6 +2202,9 @@ impl<'tcx> Ty<'tcx> {
                 bug!("`is_trivially_sized` applied to unexpected type: {:?}", self)
             }
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.skip_binder().is_trivially_sized(tcx)
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }
@@ -2250,6 +2258,9 @@ impl<'tcx> Ty<'tcx> {
                 bug!("`is_trivially_pure_clone_copy` applied to unexpected type: {:?}", self);
             }
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.skip_binder().is_trivially_pure_clone_copy()
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
     }

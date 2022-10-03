@@ -169,6 +169,8 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         // First, remove any resolved type variables (at the top level, at least):
         let a = self.shallow_resolve(a);
         let b = self.shallow_resolve(b);
+        let a = a.clean(self.tcx);
+        let b = b.clean(self.tcx);
         debug!("Coerce.tys({:?} => {:?})", a, b);
 
         // Just ignore error types.
@@ -811,7 +813,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             self.normalize_associated_types_in_as_infer_ok(self.cause.span, b);
         debug!("coerce_from_fn_item(a={:?}, b={:?})", a, b);
 
-        match b.kind() {
+        match b.clean(self.tcx).kind() {
             ty::FnPtr(b_sig) => {
                 let a_sig = a.fn_sig(self.tcx);
                 if let ty::FnDef(def_id, _) = *a.kind() {
@@ -872,6 +874,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         //!
 
         let b = self.shallow_resolve(b);
+        let b = b.clean(self.tcx);
 
         match b.kind() {
             // At this point we haven't done capture analysis, which means

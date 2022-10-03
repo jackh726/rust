@@ -190,7 +190,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         src: &ImmTy<'tcx, M::Provenance>,
         cast_ty: Ty<'tcx>,
     ) -> InterpResult<'tcx, Immediate<M::Provenance>> {
-        assert_matches!(src.layout.ty.kind(), ty::RawPtr(_) | ty::FnPtr(_));
+        assert_matches!(src.layout.ty.clean(*self.tcx).kind(), ty::RawPtr(_) | ty::FnPtr(_));
         assert!(cast_ty.is_integral());
 
         let scalar = src.to_scalar();

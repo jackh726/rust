@@ -464,7 +464,7 @@ impl<'cx, 'tcx> TypeFolder<'tcx> for Canonicalizer<'cx, 'tcx> {
                 }
             }
 
-            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
+            ty::PredicateTy(..) => t.super_fold_with(self),
         }
     }
 

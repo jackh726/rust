@@ -214,7 +214,7 @@ impl<'a, 'tcx> TypeFolder<'tcx> for TypeFreshener<'a, 'tcx> {
 
             ty::Placeholder(..) | ty::Bound(..) => bug!("unexpected type {:?}", t),
 
-            ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
+            ty::PredicateTy(..) => t.super_fold_with(self),
         }
     }
 

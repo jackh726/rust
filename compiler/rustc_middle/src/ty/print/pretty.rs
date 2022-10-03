@@ -774,6 +774,11 @@ pub trait PrettyPrinter<'tcx>:
             }
             ty::Slice(ty) => p!("[", print(ty), "]"),
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                p!("ForAll(");
+                p!(in_binder(&bound_ty));
+                p!(")");
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }
 

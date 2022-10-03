@@ -185,6 +185,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected: Expectation<'tcx>,
         args: &'tcx [hir::Expr<'tcx>],
     ) -> Ty<'tcx> {
+        let expected = ty::fold::clean(self.tcx(), expected);
         if self.tcx().sess.verbose() {
             // make this code only run with -Zverbose because it is probably slow
             if let Ok(lint_str) = self.tcx.sess.source_map().span_to_snippet(expr.span) {

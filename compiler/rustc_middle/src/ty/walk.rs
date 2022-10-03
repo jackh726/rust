@@ -187,6 +187,9 @@ fn push_inner<'tcx>(stack: &mut TypeWalkerStack<'tcx>, parent: GenericArg<'tcx>)
                 stack.extend(sig.skip_binder().inputs().iter().copied().rev().map(|ty| ty.into()));
             }
 
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                stack.push(bound_ty.skip_binder().into());
+            }
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         },
         GenericArgKind::Lifetime(_) => {}

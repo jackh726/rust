@@ -1424,6 +1424,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 }
 
                 let func_ty = func.ty(body, tcx);
+                let func_ty = func_ty.clean(tcx);
                 debug!("func_ty.kind: {:?}", func_ty.kind());
 
                 let sig = match func_ty.kind() {

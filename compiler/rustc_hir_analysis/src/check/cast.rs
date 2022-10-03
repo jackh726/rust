@@ -283,6 +283,9 @@ impl<'a, 'tcx> CastCheck<'tcx> {
         cast_span: Span,
         span: Span,
     ) -> Result<CastCheck<'tcx>, ErrorGuaranteed> {
+        let expr_ty = expr_ty.clean(fcx.tcx);
+        let cast_ty = cast_ty.clean(fcx.tcx);
+
         let expr_span = expr.span.find_ancestor_inside(span).unwrap_or(expr.span);
         let check = CastCheck { expr, expr_ty, expr_span, cast_ty, cast_span, span };
 
