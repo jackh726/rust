@@ -701,6 +701,7 @@ impl<'tcx> Visitor<'tcx> for Checker<'_, 'tcx> {
                 let caller = self.def_id();
 
                 let fn_ty = func.ty(body, tcx);
+                let fn_ty = fn_ty.clean(tcx);
 
                 let (mut callee, mut substs) = match *fn_ty.kind() {
                     ty::FnDef(def_id, substs) => (def_id, substs),

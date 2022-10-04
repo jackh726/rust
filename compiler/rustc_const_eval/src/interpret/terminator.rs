@@ -77,27 +77,28 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
                 let extra_args = &args[fn_sig.inputs().len()..];
                 let extra_args = self.tcx.mk_type_list(extra_args.iter().map(|arg| arg.layout.ty));
 
-                let (fn_val, fn_abi, with_caller_location) = match *func.layout.ty.kind() {
-                    ty::FnPtr(_sig) => {
-                        let fn_ptr = self.read_pointer(&func)?;
-                        let fn_val = self.get_ptr_fn(fn_ptr)?;
-                        (fn_val, self.fn_abi_of_fn_ptr(fn_sig_binder, extra_args)?, false)
-                    }
-                    ty::FnDef(def_id, substs) => {
-                        let instance =
-                            self.resolve(ty::WithOptConstParam::unknown(def_id), substs)?;
-                        (
-                            FnVal::Instance(instance),
-                            self.fn_abi_of_instance(instance, extra_args)?,
-                            instance.def.requires_caller_location(*self.tcx),
-                        )
-                    }
-                    _ => span_bug!(
-                        terminator.source_info.span,
-                        "invalid callee of type {:?}",
-                        func.layout.ty
-                    ),
-                };
+                let (fn_val, fn_abi, with_caller_location) =
+                    match *func.layout.ty.clean(*self.tcx).kind() {
+                        ty::FnPtr(_sig) => {
+                            let fn_ptr = self.read_pointer(&func)?;
+                            let fn_val = self.get_ptr_fn(fn_ptr)?;
+                            (fn_val, self.fn_abi_of_fn_ptr(fn_sig_binder, extra_args)?, false)
+                        }
+                        ty::FnDef(def_id, substs) => {
+                            let instance =
+                                self.resolve(ty::WithOptConstParam::unknown(def_id), substs)?;
+                            (
+                                FnVal::Instance(instance),
+                                self.fn_abi_of_instance(instance, extra_args)?,
+                                instance.def.requires_caller_location(*self.tcx),
+                            )
+                        }
+                        _ => span_bug!(
+                            terminator.source_info.span,
+                            "invalid callee of type {:?}",
+                            func.layout.ty
+                        ),
+                    };
 
                 let destination = self.eval_place(destination)?;
                 self.eval_fn_call(

@@ -268,7 +268,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
         let uint = |i| chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Uint(i));
         let float = |f| chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Float(f));
 
-        match *self.kind() {
+        match *self.clean(interner.tcx).kind() {
             ty::Bool => chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Bool),
             ty::Char => chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Char),
             ty::Int(ty) => match ty {

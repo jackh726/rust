@@ -350,6 +350,8 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
     }
 
     fn print_type(mut self, ty: Ty<'tcx>) -> Result<Self::Type, Self::Error> {
+        let ty = ty.clean(self.tcx);
+
         // Basic types, never cached (single-character).
         let basic_type = match ty.kind() {
             ty::Bool => "b",
