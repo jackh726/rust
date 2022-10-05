@@ -370,7 +370,9 @@ impl<'tcx> Ty<'tcx> {
             ty::Param(_) => "type parameter".into(),
             ty::Opaque(..) => "opaque type".into(),
 
-            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => bound_ty.skip_binder().prefix_string(tcx),
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                bound_ty.skip_binder().prefix_string(tcx)
+            }
             ty::PredicateTy(..) => "PredicateTy".into(),
         }
     }

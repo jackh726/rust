@@ -159,6 +159,7 @@ impl<'a, 'tcx> InlineAsmCtxt<'a, 'tcx> {
         target_features: &FxHashSet<Symbol>,
     ) -> Option<InlineAsmType> {
         let ty = (self.get_operand_ty)(expr);
+        let ty = ty.clean(self.tcx);
         if ty.has_non_region_infer() {
             bug!("inference variable in asm operand ty: {:?} {:?}", expr, ty);
         }

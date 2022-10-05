@@ -935,7 +935,7 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &hir::GenericParam<'_>) {
                 let err_ty_str;
                 let mut is_ptr = true;
 
-                let err = match ty.kind() {
+                let err = match ty.clean(tcx).kind() {
                     ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Error(_) => None,
                     ty::FnPtr(_) => Some("function pointers"),
                     ty::RawPtr(_) => Some("raw pointers"),
