@@ -1232,6 +1232,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     fn check_type_for_ffi_and_report_errors(
         &mut self,
         sp: Span,
@@ -1240,6 +1241,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         is_return_type: bool,
     ) {
         let ty = ty::fold::clean(self.cx.tcx, ty);
+        debug!(?ty);
 
         // We have to check for opaque types before `normalize_erasing_regions`,
         // which will replace opaque types with their underlying concrete type.

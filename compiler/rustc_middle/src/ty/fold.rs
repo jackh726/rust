@@ -920,7 +920,7 @@ impl<'tcx> TypeFolder<'tcx> for Cleaner<'tcx> {
     }
 
     fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
-        ty.clean(self.tcx)
+        ty.super_fold_with(self).clean(self.tcx)
     }
 }
 
