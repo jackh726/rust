@@ -435,7 +435,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     Eq | Lt | Le | Ne | Ge | Gt => {
                         for x in [a, b] {
                             check_kinds!(
-                                x,
+                                x.clean(self.tcx),
                                 "Cannot compare type {:?}",
                                 ty::Bool
                                     | ty::Char

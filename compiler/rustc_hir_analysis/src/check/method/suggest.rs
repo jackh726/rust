@@ -37,6 +37,7 @@ use super::{CandidateSource, MethodError, NoMatchData};
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     fn is_fn_ty(&self, ty: Ty<'tcx>, span: Span) -> bool {
         let tcx = self.tcx;
+        let ty = ty.clean(tcx);
         match ty.kind() {
             // Not all of these (e.g., unsafe fns) implement `FnOnce`,
             // so we look for these beforehand.

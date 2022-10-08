@@ -1802,17 +1802,20 @@ impl<'tcx> Ty<'tcx> {
     /// contents are abstract to rustc.)
     #[inline]
     pub fn is_scalar(self) -> bool {
-        matches!(
-            self.kind(),
-            Bool | Char
-                | Int(_)
-                | Float(_)
-                | Uint(_)
-                | FnDef(..)
-                | FnPtr(_)
-                | RawPtr(_)
-                | Infer(IntVar(_) | FloatVar(_))
-        )
+        match self.kind() {
+            Bool
+            | Char
+            | Int(_)
+            | Float(_)
+            | Uint(_)
+            | FnDef(..)
+            | FnPtr(_)
+            | RawPtr(_)
+            | Infer(IntVar(_) | FloatVar(_)) => true,
+            PredicateTy(PredicateTyKind::ForAllTy(bound_ty)) => bound_ty.skip_binder().is_scalar(),
+            PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
+            _ => false,
+        }
     }
 
     /// Returns `true` if this type is a floating point type.

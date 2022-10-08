@@ -1845,7 +1845,7 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 return false;
             }
             if candidates.len() == 1 {
-                let ty_desc = match candidates[0].self_ty().kind() {
+                let ty_desc = match candidates[0].self_ty().clean(self.tcx).kind() {
                     ty::FnPtr(_) => Some("fn pointer"),
                     _ => None,
                 };

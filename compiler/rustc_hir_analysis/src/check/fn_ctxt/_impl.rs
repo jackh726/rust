@@ -1028,6 +1028,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected: Ty<'tcx>,
         found: Ty<'tcx>,
     ) {
+        let found = found.clean(self.tcx);
         let (sig, did, substs) = match (&expected.kind(), &found.kind()) {
             (ty::FnDef(did1, substs1), ty::FnDef(did2, substs2)) => {
                 let sig1 = self.tcx.bound_fn_sig(*did1).subst(self.tcx, substs1);

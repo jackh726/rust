@@ -917,7 +917,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         use FfiResult::*;
 
         let tcx = self.cx.tcx;
-        let ty = ty.clean(tcx);
+        let ty = ty::fold::clean(tcx, ty);
 
         // Protect against infinite recursion, for example
         // `struct S(*mut S);`.
@@ -1239,6 +1239,8 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
         is_static: bool,
         is_return_type: bool,
     ) {
+        let ty = ty::fold::clean(self.cx.tcx, ty);
+
         // We have to check for opaque types before `normalize_erasing_regions`,
         // which will replace opaque types with their underlying concrete type.
         if self.check_for_opaque_ty(sp, ty) {

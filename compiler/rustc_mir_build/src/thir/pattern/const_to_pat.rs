@@ -276,7 +276,8 @@ impl<'tcx> ConstToPat<'tcx> {
         let tcx = self.tcx();
         let param_env = self.param_env;
 
-        let kind = match cv.ty().kind() {
+        let cv_ty = cv.ty().clean(tcx);
+        let kind = match cv_ty.kind() {
             ty::Float(_) => {
                 if self.include_lint_checks {
                     tcx.struct_span_lint_hir(

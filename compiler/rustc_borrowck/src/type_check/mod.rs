@@ -2324,6 +2324,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 self.check_operand(right, location);
 
                 let ty_left = left.ty(body, tcx);
+                let ty_left = ty_left.clean(tcx);
                 match ty_left.kind() {
                     // Types with regions are comparable if they have a common super-type.
                     ty::RawPtr(_) | ty::FnPtr(_) => {
