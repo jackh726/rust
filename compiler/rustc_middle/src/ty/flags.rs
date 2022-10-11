@@ -215,6 +215,7 @@ impl FlagComputation {
             }),
 
             ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                self.add_flags(TypeFlags::HAS_PREDICATE_TY);
                 self.bound_computation(*bound_ty, |computation, ty| {
                     computation.add_ty(ty);
                 })

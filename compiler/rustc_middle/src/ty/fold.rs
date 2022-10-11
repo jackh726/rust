@@ -920,14 +920,23 @@ impl<'tcx> TypeFolder<'tcx> for Cleaner<'tcx> {
     }
 
     fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
-        ty.super_fold_with(self).clean(self.tcx)
+        if ty.has_type_flags(rustc_type_ir::TypeFlags::HAS_PREDICATE_TY) {
+            ty.super_fold_with(self).clean(self.tcx)
+        } else {
+            ty
+        }
     }
 }
 
+#[instrument(level = "debug", skip(tcx))]
 pub fn clean<'tcx, T>(tcx: TyCtxt<'tcx>, t: T) -> T
 where
     T: TypeFoldable<'tcx>,
 {
-    let mut cleaner = Cleaner { tcx };
-    t.fold_with(&mut cleaner)
+    if t.has_type_flags(rustc_type_ir::TypeFlags::HAS_PREDICATE_TY) {
+        let mut cleaner = Cleaner { tcx };
+        t.fold_with(&mut cleaner)
+    } else {
+        t
+    }
 }

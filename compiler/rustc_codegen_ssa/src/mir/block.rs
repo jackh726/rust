@@ -683,7 +683,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         // Create the callee. This is a fn ptr or zero-sized and hence a kind of scalar.
         let callee = self.codegen_operand(&mut bx, func);
 
-        let (instance, mut llfn) = match *callee.layout.ty.clean(self.cx.tcx()).kind() {
+        let callee_ty = callee.layout.ty;
+        let callee_ty = ty::fold::clean(self.cx.tcx(), callee_ty);
+        let (instance, mut llfn) = match *callee_ty.kind() {
             ty::FnDef(def_id, substs) => (
                 Some(
                     ty::Instance::resolve(bx.tcx(), ty::ParamEnv::reveal_all(), def_id, substs)
