@@ -653,7 +653,7 @@ impl<'tcx> TypeVisitor<'tcx> for OrphanChecker<'tcx> {
     }
 
     fn visit_ty(&mut self, ty: Ty<'tcx>) -> ControlFlow<Self::BreakTy> {
-        let result = match *ty.kind() {
+        let result = match *ty.clean(self.tcx).kind() {
             ty::Bool
             | ty::Char
             | ty::Int(..)

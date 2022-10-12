@@ -1133,6 +1133,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
     ) -> (DiagnosticStyledString, DiagnosticStyledString) {
         debug!("cmp(t1={}, t1.kind={:?}, t2={}, t2.kind={:?})", t1, t1.kind(), t2, t2.kind());
 
+        let t1 = t1.clean(self.tcx);
+        let t2 = t2.clean(self.tcx);
+
         // helper functions
         fn equals<'tcx>(a: Ty<'tcx>, b: Ty<'tcx>) -> bool {
             match (a.kind(), b.kind()) {
