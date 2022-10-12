@@ -534,6 +534,7 @@ impl<'tcx> Validator<'_, 'tcx> {
             Rvalue::BinaryOp(op, box (lhs, rhs)) | Rvalue::CheckedBinaryOp(op, box (lhs, rhs)) => {
                 let op = *op;
                 let lhs_ty = lhs.ty(self.body, self.tcx);
+                let lhs_ty = lhs_ty.clean(self.tcx);
 
                 if let ty::RawPtr(_) | ty::FnPtr(..) = lhs_ty.kind() {
                     // Raw and fn pointer operations are not allowed inside consts and thus not promotable.
