@@ -1,7 +1,7 @@
 // build-fail
-// revisions: legacy verbose-legacy
+// revisions: legacy verbose_legacy
 // compile-flags: --crate-name=a -C symbol-mangling-version=legacy -Z unstable-options
-//[verbose-legacy]compile-flags: -Zverbose
+//[verbose_legacy]compile-flags: -Zverbose
 // normalize-stderr-test: "h[[:xdigit:]]{16}" -> "h[HASH]"
 
 #![feature(never_type)]
@@ -149,15 +149,21 @@ pub fn b() {
     impl Type<[u8; 0]> {}
 
     #[rustc_symbol_name]
-    //~^ ERROR symbol-name(_ZN1a1b22Type$LT$fn$LP$$RP$$GT$
-    //~| ERROR demangling(a::b::Type<fn()>::
-    //~| ERROR demangling-alt(a::b::Type<fn()>)
+    //[legacy]~^ ERROR symbol-name(_ZN1a1b22Type$LT$fn$LP$$RP$$GT$
+    //[legacy]~| ERROR demangling(a::b::Type<fn()>::
+    //[legacy]~| ERROR demangling-alt(a::b::Type<fn()>)
+    //[verbose_legacy]~^^^^ ERROR symbol-name(_ZN1a1b36Type$LT$ForAll$LP$fn$LP$$RP$$RP$$GT$
+    //[verbose_legacy]~| ERROR demangling(a::b::Type<ForAll(fn())>::
+    //[verbose_legacy]~| ERROR demangling-alt(a::b::Type<ForAll(fn())>)
     impl Type<fn()> {}
 
     #[rustc_symbol_name]
-    //~^ ERROR symbol-name(_ZN1a1b60Type$LT$unsafe$u20$extern$u20$$u22$C$u22$$u20$fn$LP$$RP$$GT$
-    //~| ERROR demangling(a::b::Type<unsafe extern "C" fn()>::
-    //~| ERROR demangling-alt(a::b::Type<unsafe extern "C" fn()>)
+    //[legacy]~^ ERROR symbol-name(_ZN1a1b60Type$LT$unsafe$u20$extern$u20$$u22$C$u22$$u20$fn$LP$$RP$$GT$
+    //[legacy]~| ERROR demangling(a::b::Type<unsafe extern "C" fn()>::
+    //[legacy]~| ERROR demangling-alt(a::b::Type<unsafe extern "C" fn()>)
+    //[verbose_legacy]~^^^^ ERROR symbol-name(_ZN1a1b74Type$LT$ForAll$LP$unsafe$u20$extern$u20$$u22$C$u22$$u20$fn$LP$$RP$$RP$$GT$
+    //[verbose_legacy]~| ERROR demangling(a::b::Type<ForAll(unsafe extern "C" fn())>::
+    //[verbose_legacy]~| ERROR demangling-alt(a::b::Type<ForAll(unsafe extern "C" fn())>)
     impl Type<unsafe extern "C" fn()> {}
 
     #[rustc_symbol_name]

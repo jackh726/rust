@@ -412,56 +412,56 @@ error: demangling-alt(a::b::Type<[u8; 0]>)
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
-error: symbol-name(_ZN1a1b22Type$LT$fn$LP$$RP$$GT$17h[HASH]E)
+error: symbol-name(_ZN1a1b36Type$LT$ForAll$LP$fn$LP$$RP$$RP$$GT$17h[HASH]E)
   --> $DIR/types.rs:151:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
-error: demangling(a::b::Type<fn()>::h[HASH])
+error: demangling(a::b::Type<ForAll(fn())>::h[HASH])
   --> $DIR/types.rs:151:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
-error: demangling-alt(a::b::Type<fn()>)
+error: demangling-alt(a::b::Type<ForAll(fn())>)
   --> $DIR/types.rs:151:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
-error: symbol-name(_ZN1a1b60Type$LT$unsafe$u20$extern$u20$$u22$C$u22$$u20$fn$LP$$RP$$GT$17h[HASH]E)
-  --> $DIR/types.rs:157:5
+error: symbol-name(_ZN1a1b74Type$LT$ForAll$LP$unsafe$u20$extern$u20$$u22$C$u22$$u20$fn$LP$$RP$$RP$$GT$17h[HASH]E)
+  --> $DIR/types.rs:160:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
-error: demangling(a::b::Type<unsafe extern "C" fn()>::h[HASH])
-  --> $DIR/types.rs:157:5
+error: demangling(a::b::Type<ForAll(unsafe extern "C" fn())>::h[HASH])
+  --> $DIR/types.rs:160:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
-error: demangling-alt(a::b::Type<unsafe extern "C" fn()>)
-  --> $DIR/types.rs:157:5
+error: demangling-alt(a::b::Type<ForAll(unsafe extern "C" fn())>)
+  --> $DIR/types.rs:160:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
 error: symbol-name(_ZN1a1b34Type$LT$$u5b$T$u3b$$u20$N$u5d$$GT$17h[HASH]E)
-  --> $DIR/types.rs:163:5
+  --> $DIR/types.rs:169:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
 error: demangling(a::b::Type<[T; N]>::h[HASH])
-  --> $DIR/types.rs:163:5
+  --> $DIR/types.rs:169:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
 
 error: demangling-alt(a::b::Type<[T; N]>)
-  --> $DIR/types.rs:163:5
+  --> $DIR/types.rs:169:5
    |
 LL |     #[rustc_symbol_name]
    |     ^^^^^^^^^^^^^^^^^^^^
