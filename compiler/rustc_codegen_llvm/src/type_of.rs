@@ -231,7 +231,7 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
             if let Some(&llty) = cx.scalar_lltypes.borrow().get(&self.ty) {
                 return llty;
             }
-            let llty = match *self.ty.kind() {
+            let llty = match *self.ty.clean(cx.tcx).kind() {
                 ty::Ref(_, ty, _) | ty::RawPtr(ty::TypeAndMut { ty, .. }) => {
                     cx.type_ptr_to(cx.layout_of(ty).llvm_type(cx))
                 }

@@ -663,7 +663,7 @@ fn encode_ty<'tcx>(
 // c_void types into unit types unconditionally, and generalizes all pointers if
 // TransformTyOptions::GENERALIZE_POINTERS option is set.
 fn transform_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, options: TransformTyOptions) -> Ty<'tcx> {
-    let mut ty = ty;
+    let mut ty = ty.clean(tcx);
 
     match ty.kind() {
         ty::Bool
