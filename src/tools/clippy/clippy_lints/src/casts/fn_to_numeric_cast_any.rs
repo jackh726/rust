@@ -11,24 +11,33 @@ pub(super) fn check(cx: &LateContext<'_>, expr: &Expr<'_>, cast_expr: &Expr<'_>,
     // We allow casts from any function type to any function type.
     match cast_to.kind() {
         ty::FnDef(..) | ty::FnPtr(..) => return,
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => match bound_ty.skip_binder().kind() {
+            ty::FnDef(..) | ty::FnPtr(..) => return,
+            _ => { /* continue to checks */ },
+        }
         _ => { /* continue to checks */ },
     }
 
-    match cast_from.kind() {
-        ty::FnDef(..) | ty::FnPtr(_) => {
-            let mut applicability = Applicability::MaybeIncorrect;
-            let from_snippet = snippet_with_applicability(cx, cast_expr.span, "..", &mut applicability);
+    let emit = || {
+        let mut applicability = Applicability::MaybeIncorrect;
+        let from_snippet = snippet_with_applicability(cx, cast_expr.span, "..", &mut applicability);
 
-            span_lint_and_sugg(
-                cx,
-                FN_TO_NUMERIC_CAST_ANY,
-                expr.span,
-                &format!("casting function pointer `{from_snippet}` to `{cast_to}`"),
-                "did you mean to invoke the function?",
-                format!("{from_snippet}() as {cast_to}"),
-                applicability,
-            );
-        },
+        span_lint_and_sugg(
+            cx,
+            FN_TO_NUMERIC_CAST_ANY,
+            expr.span,
+            &format!("casting function pointer `{from_snippet}` to `{cast_to}`"),
+            "did you mean to invoke the function?",
+            format!("{from_snippet}() as {cast_to}"),
+            applicability,
+        );
+    };
+    match cast_from.kind() {
+        ty::FnDef(..) | ty::FnPtr(_) => emit(),
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => match bound_ty.skip_binder().kind() {
+            ty::FnDef(..) | ty::FnPtr(..) => emit(),
+            _ => {},
+        }
         _ => {},
     }
 }

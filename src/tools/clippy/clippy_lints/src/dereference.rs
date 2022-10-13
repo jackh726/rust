@@ -1245,7 +1245,7 @@ fn ty_auto_deref_stability<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>, precedenc
     };
 
     loop {
-        break match *ty.kind() {
+        break match *ty.clean(cx.tcx).kind() {
             ty::Ref(_, ref_ty, _) => {
                 ty = ref_ty;
                 continue;
@@ -1282,6 +1282,7 @@ fn ty_auto_deref_stability<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>, precedenc
                 ty.is_sized(cx.tcx.at(DUMMY_SP), cx.param_env.without_caller_bounds()),
             )
             .into(),
+            ty::PredicateTy(..) => panic!("Unexpected use of unimplemented PredicateTy"),
         };
     }
 }
