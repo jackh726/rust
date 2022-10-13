@@ -1584,7 +1584,7 @@ pub(crate) fn clean_middle_ty<'tcx>(
 ) -> Type {
     trace!("cleaning type: {:?}", ty);
     let ty = normalize(cx, ty).unwrap_or(ty);
-    match *ty.kind() {
+    match *ty.clean(cx.tcx).kind() {
         ty::Never => Primitive(PrimitiveType::Never),
         ty::Bool => Primitive(PrimitiveType::Bool),
         ty::Char => Primitive(PrimitiveType::Char),
@@ -1762,6 +1762,7 @@ pub(crate) fn clean_middle_ty<'tcx>(
         ty::GeneratorWitness(..) => panic!("GeneratorWitness"),
         ty::Infer(..) => panic!("Infer"),
         ty::Error(_) => panic!("Error"),
+        ty::PredicateTy(..) => panic!("PredicateTy"),
     }
 }
 

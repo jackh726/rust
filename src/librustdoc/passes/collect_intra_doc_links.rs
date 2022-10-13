@@ -547,7 +547,8 @@ impl<'a, 'tcx> LinkCollector<'a, 'tcx> {
             | ty::Bound(..)
             | ty::Placeholder(_)
             | ty::Infer(_)
-            | ty::Error(_) => return None,
+            | ty::Error(_)
+            | ty::PredicateTy(..) => return None,
         })
     }
 
