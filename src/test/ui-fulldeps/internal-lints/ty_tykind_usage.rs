@@ -40,6 +40,7 @@ fn main() {
         TyKind::Placeholder(..) => (),      //~ ERROR usage of `ty::TyKind::<kind>`
         TyKind::Infer(..) => (),            //~ ERROR usage of `ty::TyKind::<kind>`
         TyKind::Error(_) => (),             //~ ERROR usage of `ty::TyKind::<kind>`
+        TyKind::PredicateTy(_) => (),       //~ ERROR usage of `ty::TyKind::<kind>`
     }
 
     if let ty::Int(int_ty) = kind {}
