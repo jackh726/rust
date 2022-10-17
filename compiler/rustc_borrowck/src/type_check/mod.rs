@@ -1968,7 +1968,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
 
                     CastKind::Pointer(PointerCast::ClosureFnPointer(unsafety)) => {
                         let sig = match op.ty(body, tcx).kind() {
-                            ty::Closure(_, substs) => substs.as_closure().sig(),
+                            ty::Closure(_, substs) => substs.as_closure().sig(tcx),
                             _ => bug!(),
                         };
                         let ty_fn_ptr_from = tcx.mk_fn_ptr(tcx.signature_unclosure(sig, *unsafety));

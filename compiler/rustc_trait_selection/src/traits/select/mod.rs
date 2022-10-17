@@ -2277,7 +2277,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         obligation: &TraitObligation<'tcx>,
         substs: SubstsRef<'tcx>,
     ) -> ty::PolyTraitRef<'tcx> {
-        let closure_sig = substs.as_closure().sig();
+        let closure_sig = substs.as_closure().sig(self.tcx());
 
         debug!(?closure_sig);
 

@@ -407,7 +407,7 @@ impl<'tcx> NiceRegionError<'_, 'tcx> {
                     let closure_sig = self_ty.map(|closure| {
                         if let ty::Closure(_, substs) = closure.kind() {
                             self.tcx().signature_unclosure(
-                                substs.as_closure().sig(),
+                                substs.as_closure().sig(self.tcx()),
                                 rustc_hir::Unsafety::Normal,
                             )
                         } else {

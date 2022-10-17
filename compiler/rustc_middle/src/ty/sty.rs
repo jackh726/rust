@@ -330,9 +330,9 @@ impl<'tcx> ClosureSubsts<'tcx> {
     }
 
     /// Extracts the signature from the closure.
-    pub fn sig(self) -> ty::PolyFnSig<'tcx> {
+    pub fn sig(self, tcx: TyCtxt<'tcx>) -> ty::PolyFnSig<'tcx> {
         let ty = self.sig_as_fn_ptr_ty();
-        match ty.kind() {
+        match ty.clean(tcx).kind() {
             ty::FnPtr(sig) => *sig,
             _ => bug!("closure_sig_as_fn_ptr_ty is not a fn-ptr: {:?}", ty.kind()),
         }
@@ -1260,7 +1260,7 @@ impl<'tcx> PolyFnSig<'tcx> {
 
     pub fn to_forall_ty(&self, tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
         let fn_sig = ty::fold::shift_vars(tcx, self.skip_binder(), 1);
-        let fn_sig = tcx.mk_fn_ptr(Binder::bind_with_vars(fn_sig, ty::List::empty()));
+        let fn_sig = tcx.mk_ty(ty::FnPtr(Binder::bind_with_vars(fn_sig, ty::List::empty())));
         tcx.mk_ty(ty::PredicateTy(ty::PredicateTyKind::ForAllTy(self.rebind(fn_sig))))
     }
 }
@@ -2029,7 +2029,7 @@ impl<'tcx> Ty<'tcx> {
 
     /// Returns the type of the discriminant of this type.
     pub fn discriminant_ty(self, tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
-        match self.kind() {
+        match self.clean(tcx).kind() {
             ty::Adt(adt, _) if adt.is_enum() => adt.repr().discr_type().to_ty(tcx),
             ty::Generator(_, substs, _) => substs.as_generator().discr_ty(tcx),
 
@@ -2301,11 +2301,9 @@ impl<'tcx> Ty<'tcx> {
         match self.kind() {
             ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
                 match bound_ty.skip_binder().kind() {
-                    ty::FnPtr(fn_sig) => tcx.mk_fn_ptr(bound_ty.rebind(ty::fold::shift_vars_out(
-                        tcx,
-                        fn_sig.skip_binder(),
-                        1,
-                    ))),
+                    ty::FnPtr(fn_sig) => tcx.mk_ty(ty::FnPtr(
+                        bound_ty.rebind(ty::fold::shift_vars_out(tcx, fn_sig.skip_binder(), 1)),
+                    )),
                     _ => bug!("Unexpected use of unimplemented PredicateTy"),
                 }
             }

@@ -1537,7 +1537,7 @@ pub trait PrettyPrinter<'tcx>:
         mut self,
         closure: ty::ClosureSubsts<'tcx>,
     ) -> Result<Self::Const, Self::Error> {
-        let sig = closure.sig();
+        let sig = closure.sig(self.tcx());
         let kind = closure.kind_ty().to_opt_closure_kind().unwrap_or(ty::ClosureKind::Fn);
 
         write!(self, "impl ")?;

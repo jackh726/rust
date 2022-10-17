@@ -1989,7 +1989,7 @@ fn confirm_closure_candidate<'cx, 'tcx>(
     obligation: &ProjectionTyObligation<'tcx>,
     impl_source: ImplSourceClosureData<'tcx, PredicateObligation<'tcx>>,
 ) -> Progress<'tcx> {
-    let closure_sig = impl_source.substs.as_closure().sig();
+    let closure_sig = impl_source.substs.as_closure().sig(selcx.tcx());
     let Normalized { value: closure_sig, obligations } = normalize_with_depth(
         selcx,
         obligation.param_env,

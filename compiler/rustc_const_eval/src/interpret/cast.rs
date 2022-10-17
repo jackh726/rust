@@ -79,7 +79,7 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
 
             Pointer(PointerCast::UnsafeFnPointer) => {
                 let src = self.read_immediate(src)?;
-                match cast_ty.kind() {
+                match cast_ty.clean(*self.tcx).kind() {
                     ty::FnPtr(_) => {
                         // No change to value
                         self.write_immediate(*src, dest)?;

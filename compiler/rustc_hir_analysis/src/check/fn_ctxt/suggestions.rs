@@ -162,7 +162,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     Some((DefIdOrName::DefId(def_id), fn_sig.output(), fn_sig.inputs()))
                 }
                 ty::Closure(def_id, substs) => {
-                    let fn_sig = substs.as_closure().sig();
+                    let fn_sig = substs.as_closure().sig(self.tcx);
                     Some((DefIdOrName::DefId(def_id), fn_sig.output(), fn_sig.inputs().map_bound(|inputs| &inputs[1..])))
                 }
                 ty::Opaque(def_id, substs) => {
@@ -694,7 +694,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 } else if let ty::Closure(_, substs) = found.kind()
                     // FIXME(compiler-errors): Get better at printing binders...
                     && let closure = substs.as_closure()
-                    && closure.sig().is_suggestable(self.tcx, false)
+                    && closure.sig(self.tcx).is_suggestable(self.tcx, false)
                 {
                     err.subdiagnostic(AddReturnTypeSuggestion::Add { span, found: closure.print_as_impl_trait().to_string() });
                     return true;

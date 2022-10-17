@@ -157,7 +157,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // haven't yet decided on whether the closure is fn vs
                 // fnmut vs fnonce. If so, we have to defer further processing.
                 if self.closure_kind(substs).is_none() {
-                    let closure_sig = substs.as_closure().sig();
+                    let closure_sig = substs.as_closure().sig(self.tcx);
                     let closure_sig = self.replace_bound_vars_with_fresh_vars(
                         call_expr.span,
                         infer::FnCall,

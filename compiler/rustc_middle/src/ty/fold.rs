@@ -920,6 +920,9 @@ impl<'tcx> TypeFolder<'tcx> for Cleaner<'tcx> {
     }
 
     fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
+        if let ty::Closure(..) = ty.kind() {
+            return ty;
+        }
         if ty.has_type_flags(rustc_type_ir::TypeFlags::HAS_PREDICATE_TY) {
             ty.super_fold_with(self).clean(self.tcx)
         } else {

@@ -2543,7 +2543,7 @@ impl<'tcx> TyCtxt<'tcx> {
 
     #[inline]
     pub fn mk_fn_ptr(self, fty: PolyFnSig<'tcx>) -> Ty<'tcx> {
-        self.mk_ty(FnPtr(fty))
+        fty.to_forall_ty(self)
     }
 
     #[inline]

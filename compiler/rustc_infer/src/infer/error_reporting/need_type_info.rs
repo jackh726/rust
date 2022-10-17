@@ -204,7 +204,7 @@ fn ty_to_string<'tcx>(infcx: &InferCtxt<'tcx>, ty: Ty<'tcx>) -> String {
 /// doesn't work as they actually use the "rust-call" API.
 fn closure_as_fn_str<'tcx>(infcx: &InferCtxt<'tcx>, ty: Ty<'tcx>) -> String {
     let ty::Closure(_, substs) = ty.kind() else { unreachable!() };
-    let fn_sig = substs.as_closure().sig();
+    let fn_sig = substs.as_closure().sig(infcx.tcx);
     let args = fn_sig
         .inputs()
         .skip_binder()
@@ -1182,7 +1182,7 @@ impl<'a, 'tcx> Visitor<'tcx> for FindInferSourceVisitor<'a, 'tcx> {
                 ty::Closure(_, substs),
             ) = (&expr.kind, node_ty.kind())
             {
-                let output = substs.as_closure().sig().output().skip_binder();
+                let output = substs.as_closure().sig(tcx).output().skip_binder();
                 if self.generic_arg_contains_target(output.into()) {
                     let body = self.infcx.tcx.hir().body(body);
                     let should_wrap_expr = if matches!(body.value.kind, ExprKind::Block(..)) {

@@ -2352,8 +2352,10 @@ impl<'cx, 'tcx> MirBorrowckCtxt<'cx, 'tcx> {
                                 // If a closure captured our `target` and then assigned
                                 // into a place then we should annotate the closure in
                                 // case it ends up being assigned into the return place.
-                                annotated_closure =
-                                    self.annotate_fn_sig(def_id, substs.as_closure().sig());
+                                annotated_closure = self.annotate_fn_sig(
+                                    def_id,
+                                    substs.as_closure().sig(self.infcx.tcx),
+                                );
                                 debug!(
                                     "annotate_argument_and_return_for_borrow: \
                                      annotated_closure={:?} assigned_from_local={:?} \

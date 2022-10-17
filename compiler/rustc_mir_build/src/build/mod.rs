@@ -625,7 +625,7 @@ fn construct_error<'tcx>(
             let ty = tcx.type_of(def);
             match ty.kind() {
                 ty::Closure(_, substs) => {
-                    1 + substs.as_closure().sig().inputs().skip_binder().len()
+                    1 + substs.as_closure().sig(tcx).inputs().skip_binder().len()
                 }
                 ty::Generator(..) => 2,
                 _ => bug!("expected closure or generator, found {ty:?}"),

@@ -60,7 +60,7 @@ fn fn_sig_for_fn_abi<'tcx>(
             sig
         }
         ty::Closure(def_id, substs) => {
-            let sig = substs.as_closure().sig();
+            let sig = substs.as_closure().sig(tcx);
 
             let bound_vars = tcx.mk_bound_variable_kinds(
                 sig.bound_vars().iter().chain(iter::once(ty::BoundVariableKind::Region(ty::BrEnv))),

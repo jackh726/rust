@@ -606,7 +606,7 @@ impl<'cx, 'tcx> UniversalRegionsBuilder<'cx, 'tcx> {
         match defining_ty {
             DefiningTy::Closure(def_id, substs) => {
                 assert_eq!(self.mir_def.did.to_def_id(), def_id);
-                let closure_sig = substs.as_closure().sig();
+                let closure_sig = substs.as_closure().sig(tcx);
                 let inputs_and_output = closure_sig.inputs_and_output();
                 let bound_vars = tcx.mk_bound_variable_kinds(
                     inputs_and_output

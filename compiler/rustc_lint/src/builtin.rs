@@ -2534,7 +2534,7 @@ impl<'tcx> LateLintPass<'tcx> for InvalidValue {
             init: InitKind,
         ) -> Option<InitError> {
             use rustc_type_ir::sty::TyKind::*;
-            match ty.kind() {
+            match ty.clean(cx.tcx).kind() {
                 // Primitive types that don't like 0 as a value.
                 Ref(..) => Some(("references must be non-null".to_string(), None)),
                 Adt(..) if ty.is_box() => Some(("`Box` must be non-null".to_string(), None)),
