@@ -1422,17 +1422,12 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 for arg in args {
                     self.check_operand(arg, term_location);
                 }
-
                 let func_ty = func.ty(body, tcx);
-                let func_ty = func_ty.clean(tcx);
                 debug!("func_ty.kind: {:?}", func_ty.kind());
 
-                let sig = match func_ty.kind() {
-                    ty::FnDef(..) | ty::FnPtr(_) => func_ty.fn_sig(tcx),
-                    _ => {
-                        span_mirbug!(self, term, "call to non-function {:?}", func_ty);
-                        return;
-                    }
+                let Some(sig) = func_ty.opt_fn_sig(tcx) else {
+                    span_mirbug!(self, term, "call to non-function {:?}", func_ty);
+                    return;
                 };
                 let (sig, map) = tcx.replace_late_bound_regions(sig, |br| {
                     self.infcx.next_region_var(LateBoundRegion(

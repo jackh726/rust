@@ -52,6 +52,9 @@ fn may_contain_reference<'tcx>(ty: Ty<'tcx>, depth: u32, tcx: TyCtxt<'tcx>) -> b
                     v.fields.iter().any(|f| may_contain_reference(f.ty(tcx, subst), depth - 1, tcx))
                 })
         }
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+            may_contain_reference(bound_ty.skip_binder(), depth, tcx)
+        }
         // Conservative fallback
         _ => true,
     }

@@ -1935,6 +1935,20 @@ impl<'tcx> Ty<'tcx> {
         }
     }
 
+    pub fn opt_fn_sig(self, tcx: TyCtxt<'tcx>) -> Option<PolyFnSig<'tcx>> {
+        let fn_sig = match self.clean(tcx).kind() {
+            FnDef(def_id, substs) => tcx.bound_fn_sig(*def_id).subst(tcx, substs),
+            FnPtr(f) => *f,
+            Error(_) => {
+                // ignore errors (#54954)
+                ty::Binder::dummy(FnSig::fake())
+            }
+            PredicateTy(PredicateTyKind::ForAllTy(_)) => return self.clean(tcx).opt_fn_sig(tcx),
+            _ => return None,
+        };
+        Some(fn_sig)
+    }
+
     pub fn fn_sig(self, tcx: TyCtxt<'tcx>) -> PolyFnSig<'tcx> {
         match self.clean(tcx).kind() {
             FnDef(def_id, substs) => tcx.bound_fn_sig(*def_id).subst(tcx, substs),
@@ -1943,6 +1957,7 @@ impl<'tcx> Ty<'tcx> {
                 // ignore errors (#54954)
                 ty::Binder::dummy(FnSig::fake())
             }
+            PredicateTy(PredicateTyKind::ForAllTy(_)) => self.clean(tcx).fn_sig(tcx),
             Closure(..) => bug!(
                 "to get the signature of a closure, use `substs.as_closure().sig()` not `fn_sig()`",
             ),
