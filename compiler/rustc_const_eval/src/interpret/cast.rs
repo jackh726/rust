@@ -79,13 +79,11 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
 
             Pointer(PointerCast::UnsafeFnPointer) => {
                 let src = self.read_immediate(src)?;
-                match cast_ty.clean(*self.tcx).kind() {
-                    ty::FnPtr(_) => {
-                        // No change to value
-                        self.write_immediate(*src, dest)?;
-                    }
-                    _ => span_bug!(self.cur_span(), "fn to unsafe fn cast on {:?}", cast_ty),
+                if !cast_ty.is_fn_ptr() {
+                    span_bug!(self.cur_span(), "fn to unsafe fn cast on {:?}", cast_ty);
                 }
+                // No change to value
+                self.write_immediate(*src, dest)?;
             }
 
             Pointer(PointerCast::ClosureFnPointer(_)) => {
@@ -190,7 +188,10 @@ impl<'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         src: &ImmTy<'tcx, M::Provenance>,
         cast_ty: Ty<'tcx>,
     ) -> InterpResult<'tcx, Immediate<M::Provenance>> {
-        assert_matches!(src.layout.ty.clean(*self.tcx).kind(), ty::RawPtr(_) | ty::FnPtr(_));
+        assert!(
+            matches!(src.layout.ty.kind(), ty::RawPtr(_) | ty::FnPtr(_))
+                || src.layout.ty.is_fn_ptr()
+        );
         assert!(cast_ty.is_integral());
 
         let scalar = src.to_scalar();

@@ -2319,10 +2319,40 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 self.check_operand(right, location);
 
                 let ty_left = left.ty(body, tcx);
-                let ty_left = ty_left.clean(tcx);
                 match ty_left.kind() {
                     // Types with regions are comparable if they have a common super-type.
                     ty::RawPtr(_) | ty::FnPtr(_) => {
+                        let ty_right = right.ty(body, tcx);
+                        let common_ty = self.infcx.next_ty_var(TypeVariableOrigin {
+                            kind: TypeVariableOriginKind::MiscVariable,
+                            span: body.source_info(location).span,
+                        });
+                        self.sub_types(
+                            ty_left,
+                            common_ty,
+                            location.to_locations(),
+                            ConstraintCategory::Boring,
+                        )
+                        .unwrap_or_else(|err| {
+                            bug!("Could not equate type variable with {:?}: {:?}", ty_left, err)
+                        });
+                        if let Err(terr) = self.sub_types(
+                            ty_right,
+                            common_ty,
+                            location.to_locations(),
+                            ConstraintCategory::Boring,
+                        ) {
+                            span_mirbug!(
+                                self,
+                                rvalue,
+                                "unexpected comparison types {:?} and {:?} yields {:?}",
+                                ty_left,
+                                ty_right,
+                                terr
+                            )
+                        }
+                    }
+                    _ if ty_left.is_fn_ptr() => {
                         let ty_right = right.ty(body, tcx);
                         let common_ty = self.infcx.next_ty_var(TypeVariableOrigin {
                             kind: TypeVariableOriginKind::MiscVariable,

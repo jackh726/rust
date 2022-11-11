@@ -449,6 +449,7 @@ fn encode_ty<'tcx>(
 ) -> String {
     let mut typeid = String::new();
 
+    let ty = ty::fold::clean(tcx, ty);
     match ty.kind() {
         // Primitive types
         ty::Bool => {
