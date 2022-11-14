@@ -701,12 +701,18 @@ impl<'tcx> Visitor<'tcx> for Checker<'_, 'tcx> {
                 let caller = self.def_id();
 
                 let fn_ty = func.ty(body, tcx);
-                let fn_ty = fn_ty.clean(tcx);
 
                 let (mut callee, mut substs) = match *fn_ty.kind() {
                     ty::FnDef(def_id, substs) => (def_id, substs),
 
                     ty::FnPtr(_) => {
+                        self.check_op(ops::FnCallIndirect);
+                        return;
+                    }
+
+                    ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
+                        if bound_ty.skip_binder().is_fn_ptr() =>
+                    {
                         self.check_op(ops::FnCallIndirect);
                         return;
                     }

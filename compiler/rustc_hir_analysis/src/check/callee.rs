@@ -143,8 +143,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         );
 
         // If the callee is a bare function or a closure, then we're all set.
-        match *adjusted_ty.clean(self.tcx).kind() {
+        match *adjusted_ty.kind() {
             ty::FnDef(..) | ty::FnPtr(_) => {
+                let adjustments = self.adjust_steps(autoderef);
+                self.apply_adjustments(callee_expr, adjustments);
+                return Some(CallStep::Builtin(adjusted_ty));
+            }
+
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
+                if bound_ty.skip_binder().is_fn() =>
+            {
                 let adjustments = self.adjust_steps(autoderef);
                 self.apply_adjustments(callee_expr, adjustments);
                 return Some(CallStep::Builtin(adjusted_ty));

@@ -792,13 +792,11 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
             }
             TerminatorKind::Call { func, args, destination, target, cleanup, .. } => {
                 let func_ty = func.ty(&self.body.local_decls, self.tcx);
-                let func_ty = func_ty.clean(self.tcx);
-                match func_ty.kind() {
-                    ty::FnPtr(..) | ty::FnDef(..) => {}
-                    _ => self.fail(
+                if !func_ty.is_fn() {
+                    self.fail(
                         location,
                         format!("encountered non-callable type {} in `Call` terminator", func_ty),
-                    ),
+                    )
                 }
                 if let Some(target) = target {
                     self.check_edge(location, *target, EdgeKind::Normal);

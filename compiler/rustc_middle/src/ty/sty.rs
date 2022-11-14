@@ -1967,7 +1967,11 @@ impl<'tcx> Ty<'tcx> {
 
     #[inline]
     pub fn is_fn(self) -> bool {
-        matches!(self.kind(), FnDef(..) | FnPtr(_))
+        match self.kind() {
+            FnDef(..) | FnPtr(_) => true,
+            PredicateTy(PredicateTyKind::ForAllTy(bound_ty)) => bound_ty.skip_binder().is_fn(),
+            _ => false,
+        }
     }
 
     #[inline]
