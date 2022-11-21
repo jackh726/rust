@@ -312,7 +312,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
             ty::FnDef(def_id, substs) => {
                 chalk_ir::TyKind::FnDef(chalk_ir::FnDefId(def_id), substs.lower_into(interner))
             }
-            ty::FnPtr(sig) => {
+            _ if let Some(sig) = self.opt_fn_ptr_poly_fn_sig() => {
                 let (inputs_and_outputs, binders, _named_regions) =
                     collect_bound_vars(interner, interner.tcx, sig.inputs_and_output());
                 chalk_ir::TyKind::Function(chalk_ir::FnPointer {
@@ -326,6 +326,7 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
                     )),
                 })
             }
+            ty::FnPtr(_) => unreachable!(),
             // FIXME(dyn-star): handle the dynamic kind (dyn or dyn*)
             ty::Dynamic(predicates, region, _kind) => chalk_ir::TyKind::Dyn(chalk_ir::DynTy {
                 bounds: predicates.lower_into(interner),

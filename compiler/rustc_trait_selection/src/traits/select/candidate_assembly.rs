@@ -492,7 +492,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 candidates.ambiguous = true; // Could wind up being a fn() type.
             }
             // Provide an impl, but only for suitable `fn` pointers.
-            ty::FnPtr(_) => {
+            _ if self_ty.is_fn_ptr() => {
                 if let ty::FnSig {
                     unsafety: hir::Unsafety::Normal,
                     abi: Abi::Rust,
@@ -503,6 +503,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                     candidates.vec.push(FnPointerCandidate { is_const: false });
                 }
             }
+            ty::FnPtr(_) => unreachable!(),
             // Provide an impl for suitable functions, rejecting `#[target_feature]` functions (RFC 2396).
             ty::FnDef(def_id, _) => {
                 if let ty::FnSig {
@@ -984,6 +985,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             | ty::Generator(..)
             | ty::Tuple(_)
             | ty::GeneratorWitness(_) => {
+                // These are built-in, and cannot have a custom `impl const Destruct`.
+                candidates.vec.push(ConstDestructCandidate(None));
+            }
+
+            _ if self_ty.skip_binder().is_fn_ptr() => {
                 // These are built-in, and cannot have a custom `impl const Destruct`.
                 candidates.vec.push(ConstDestructCandidate(None));
             }

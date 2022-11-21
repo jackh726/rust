@@ -454,7 +454,8 @@ pub fn type_di_node<'ll, 'tcx>(cx: &CodegenCx<'ll, 'tcx>, t: Ty<'tcx>) -> &'ll D
         ty::Adt(def, substs) if def.is_box() && cx.layout_of(substs.type_at(1)).is_zst() => {
             build_pointer_or_reference_di_node(cx, t, t.boxed_ty(), unique_type_id)
         }
-        ty::FnDef(..) | ty::FnPtr(_) => build_subroutine_type_di_node(cx, unique_type_id),
+        _ if t.is_fn() => build_subroutine_type_di_node(cx, unique_type_id),
+        ty::FnDef(..) | ty::FnPtr(_) => unreachable!(),
         ty::Closure(..) => build_closure_env_di_node(cx, unique_type_id),
         ty::Generator(..) => enums::build_generator_di_node(cx, unique_type_id),
         ty::Adt(def, ..) => match def.adt_kind() {

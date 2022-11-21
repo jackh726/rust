@@ -558,7 +558,7 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
                 self.check_safe_pointer(value, "reference")?;
                 Ok(true)
             }
-            ty::FnPtr(_sig) => {
+            _ if ty.is_fn_ptr() => {
                 let value = self.read_scalar(value, "a function pointer")?;
 
                 // If we check references recursively, also check that this points to a function.
@@ -580,6 +580,7 @@ impl<'rt, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> ValidityVisitor<'rt, 'mir, '
                 }
                 Ok(true)
             }
+            ty::FnPtr(_) => unreachable!(),
             ty::Never => throw_validation_failure!(self.path, { "a value of the never type `!`" }),
             ty::Foreign(..) | ty::FnDef(..) => {
                 // Nothing to check.

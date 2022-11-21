@@ -238,9 +238,10 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
                 ty::Adt(def, _) if def.is_box() => {
                     cx.type_ptr_to(cx.layout_of(self.ty.boxed_ty()).llvm_type(cx))
                 }
-                ty::FnPtr(sig) => {
+                _ if let Some(sig) = self.ty.opt_fn_ptr_poly_fn_sig() => {
                     cx.fn_ptr_backend_type(cx.fn_abi_of_fn_ptr(sig, ty::List::empty()))
                 }
+                ty::FnPtr(_) => unreachable!(),
                 _ => self.scalar_llvm_type_at(cx, scalar, Size::ZERO),
             };
             cx.scalar_lltypes.borrow_mut().insert(self.ty, llty);

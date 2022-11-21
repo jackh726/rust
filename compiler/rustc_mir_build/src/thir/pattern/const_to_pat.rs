@@ -541,7 +541,7 @@ impl<'tcx> ConstToPat<'tcx> {
             // FIXME: these can have very surprising behaviour where optimization levels or other
             // compilation choices change the runtime behaviour of the match.
             // See https://github.com/rust-lang/rust/issues/70861 for examples.
-            ty::FnPtr(..) | ty::RawPtr(..) => {
+            _ if cv_ty.is_fn_ptr() || matches!(cv_ty.kind(), ty::RawPtr(..)) => {
                 if self.include_lint_checks
                     && !self.saw_const_match_error.get()
                     && !self.saw_const_match_lint.get()
@@ -560,6 +560,7 @@ impl<'tcx> ConstToPat<'tcx> {
                 }
                 PatKind::Constant { value: cv }
             }
+            ty::FnPtr(..) | ty::RawPtr(..) => unreachable!(),
             _ => {
                 self.saw_const_match_error.set(true);
                 let msg = format!("`{}` cannot be used in patterns", cv.ty());

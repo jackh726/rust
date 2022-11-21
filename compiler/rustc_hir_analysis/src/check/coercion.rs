@@ -230,11 +230,12 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
                 // items to drop the unsafe qualifier.
                 self.coerce_from_fn_item(a, b)
             }
-            ty::FnPtr(a_f) => {
+            _ if let Some(a_f) = a.opt_fn_ptr_poly_fn_sig() => {
                 // We permit coercion of fn pointers to drop the
                 // unsafe qualifier.
                 self.coerce_from_fn_pointer(a, a_f, b)
             }
+            ty::FnPtr(_) => unreachable!(),
             ty::Closure(closure_def_id_a, substs_a) => {
                 // Non-capturing closures are coercible to
                 // function pointers or unsafe function pointers.
@@ -760,7 +761,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         G: FnOnce(Ty<'tcx>) -> Vec<Adjustment<'tcx>>,
     {
         self.commit_if_ok(|snapshot| {
-            let result = if let ty::FnPtr(fn_ty_b) = b.kind()
+            let result = if let Some(fn_ty_b) = b.opt_fn_ptr_poly_fn_sig()
                 && let (hir::Unsafety::Normal, hir::Unsafety::Unsafe) =
                     (fn_ty_a.unsafety(), fn_ty_b.unsafety())
             {
@@ -814,7 +815,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         debug!("coerce_from_fn_item(a={:?}, b={:?})", a, b);
 
         match b.clean(self.tcx).kind() {
-            ty::FnPtr(b_sig) => {
+            _ if let Some(b_sig) = b.opt_fn_ptr_poly_fn_sig() => {
                 let a_sig = a.fn_sig(self.tcx);
                 if let ty::FnDef(def_id, _) = *a.kind() {
                     // Intrinsics are not coercible to function pointers
@@ -858,6 +859,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
                 obligations.extend(o2);
                 Ok(InferOk { value, obligations })
             }
+            ty::FnPtr(_) => unreachable!(),
             _ => self.unify_and(a, b, identity),
         }
     }
@@ -883,11 +885,10 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             //
             // All we care here is if any variable is being captured and not the exact paths,
             // so we check `upvars_mentioned` for root variables being captured.
-            ty::FnPtr(fn_ty)
-                if self
-                    .tcx
-                    .upvars_mentioned(closure_def_id_a.expect_local())
-                    .map_or(true, |u| u.is_empty()) =>
+            _ if let Some(fn_ty) = b.opt_fn_ptr_poly_fn_sig() && self
+                .tcx
+                .upvars_mentioned(closure_def_id_a.expect_local())
+                .map_or(true, |u| u.is_empty()) =>
             {
                 // We coerce the closure, which has fn type
                 //     `extern "rust-call" fn((arg0,arg1,...)) -> _`
@@ -906,6 +907,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
                     simple(Adjust::Pointer(PointerCast::ClosureFnPointer(unsafety))),
                 )
             }
+            ty::FnPtr(_) => unreachable!(),
             _ => self.unify_and(a, b, identity),
         }
     }

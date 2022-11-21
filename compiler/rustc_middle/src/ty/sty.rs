@@ -330,10 +330,19 @@ impl<'tcx> ClosureSubsts<'tcx> {
     }
 
     /// Extracts the signature from the closure.
-    pub fn sig(self, tcx: TyCtxt<'tcx>) -> ty::PolyFnSig<'tcx> {
+    pub fn sig(self, _tcx: TyCtxt<'tcx>) -> ty::PolyFnSig<'tcx> {
         let ty = self.sig_as_fn_ptr_ty();
-        match ty.clean(tcx).kind() {
-            ty::FnPtr(sig) => *sig,
+        match ty.kind() {
+            ty::FnPtr(sig) => ty::Binder::dummy(*sig),
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
+                if bound_ty.skip_binder().is_fn_ptr() =>
+            {
+                let fn_sig = match bound_ty.skip_binder().kind() {
+                    FnPtr(fn_sig) => *fn_sig,
+                    _ => unreachable!(),
+                };
+                bound_ty.rebind(fn_sig)
+            }
             _ => bug!("closure_sig_as_fn_ptr_ty is not a fn-ptr: {:?}", ty.kind()),
         }
     }
@@ -1259,9 +1268,8 @@ impl<'tcx> PolyFnSig<'tcx> {
     }
 
     pub fn to_forall_ty(&self, tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
-        let fn_sig = ty::fold::shift_vars(tcx, self.skip_binder(), 1);
-        let fn_sig = tcx.mk_ty(ty::FnPtr(Binder::bind_with_vars(fn_sig, ty::List::empty())));
-        tcx.mk_ty(ty::PredicateTy(ty::PredicateTyKind::ForAllTy(self.rebind(fn_sig))))
+        let bound_ty = self.map_bound(|fn_sig| tcx.mk_ty(ty::FnPtr(fn_sig)));
+        tcx.mk_ty(ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)))
     }
 }
 
@@ -1936,12 +1944,21 @@ impl<'tcx> Ty<'tcx> {
     }
 
     pub fn opt_fn_sig(self, tcx: TyCtxt<'tcx>) -> Option<PolyFnSig<'tcx>> {
-        let fn_sig = match self.clean(tcx).kind() {
+        let fn_sig = match self.kind() {
             FnDef(def_id, substs) => tcx.bound_fn_sig(*def_id).subst(tcx, substs),
-            FnPtr(f) => *f,
+            FnPtr(f) => ty::Binder::dummy(*f),
             Error(_) => {
                 // ignore errors (#54954)
                 ty::Binder::dummy(FnSig::fake())
+            }
+            PredicateTy(PredicateTyKind::ForAllTy(bound_ty))
+                if bound_ty.skip_binder().is_fn_ptr() =>
+            {
+                let fn_sig = match bound_ty.skip_binder().kind() {
+                    FnPtr(fn_sig) => *fn_sig,
+                    _ => return None,
+                };
+                bound_ty.rebind(fn_sig)
             }
             PredicateTy(PredicateTyKind::ForAllTy(_)) => return self.clean(tcx).opt_fn_sig(tcx),
             _ => return None,
@@ -1950,12 +1967,21 @@ impl<'tcx> Ty<'tcx> {
     }
 
     pub fn fn_sig(self, tcx: TyCtxt<'tcx>) -> PolyFnSig<'tcx> {
-        match self.clean(tcx).kind() {
+        match self.kind() {
             FnDef(def_id, substs) => tcx.bound_fn_sig(*def_id).subst(tcx, substs),
-            FnPtr(f) => *f,
+            FnPtr(f) => ty::Binder::dummy(*f),
             Error(_) => {
                 // ignore errors (#54954)
                 ty::Binder::dummy(FnSig::fake())
+            }
+            PredicateTy(PredicateTyKind::ForAllTy(bound_ty))
+                if bound_ty.skip_binder().is_fn_ptr() =>
+            {
+                let fn_sig = match bound_ty.skip_binder().kind() {
+                    FnPtr(fn_sig) => *fn_sig,
+                    _ => unreachable!(),
+                };
+                bound_ty.rebind(fn_sig)
             }
             PredicateTy(PredicateTyKind::ForAllTy(_)) => self.clean(tcx).fn_sig(tcx),
             Closure(..) => bug!(
@@ -1963,6 +1989,22 @@ impl<'tcx> Ty<'tcx> {
             ),
             _ => bug!("Ty::fn_sig() called on non-fn type: {:?}", self),
         }
+    }
+
+    pub fn opt_fn_ptr_poly_fn_sig(self) -> Option<PolyFnSig<'tcx>> {
+        let fn_sig = match self.kind() {
+            FnPtr(f) => ty::Binder::dummy(*f),
+            PredicateTy(PredicateTyKind::ForAllTy(bound_ty))
+                if bound_ty.skip_binder().is_fn_ptr() =>
+            {
+                let FnPtr(fn_sig) = bound_ty.skip_binder().kind() else {
+                    return None;
+                };
+                bound_ty.rebind(*fn_sig)
+            }
+            _ => return None,
+        };
+        Some(fn_sig)
     }
 
     #[inline]
@@ -2081,6 +2123,8 @@ impl<'tcx> Ty<'tcx> {
             | ty::Error(_)
             | ty::Infer(IntVar(_) | FloatVar(_)) => tcx.types.u8,
 
+            _ if self.is_fn_ptr() => tcx.types.u8,
+
             ty::Bound(..)
             | ty::Placeholder(_)
             | ty::Infer(FreshTy(_) | ty::FreshIntTy(_) | ty::FreshFloatTy(_)) => {
@@ -2126,6 +2170,8 @@ impl<'tcx> Ty<'tcx> {
             // If returned by `struct_tail_without_normalization` this is the empty tuple,
             // a.k.a. unit type, which is Sized
             | ty::Tuple(..) => (tcx.types.unit, false),
+
+            _ if tail.is_fn_ptr() => (tcx.types.unit, false),
 
             ty::Str | ty::Slice(_) => (tcx.types.usize, false),
             ty::Dynamic(..) => {
@@ -2316,16 +2362,8 @@ impl<'tcx> Ty<'tcx> {
         }
     }
 
-    pub fn clean(self, tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
+    pub fn clean(self, _tcx: TyCtxt<'tcx>) -> Ty<'tcx> {
         match self.kind() {
-            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
-                match bound_ty.skip_binder().kind() {
-                    ty::FnPtr(fn_sig) => tcx.mk_ty(ty::FnPtr(
-                        bound_ty.rebind(ty::fold::shift_vars_out(tcx, fn_sig.skip_binder(), 1)),
-                    )),
-                    _ => bug!("Unexpected use of unimplemented PredicateTy"),
-                }
-            }
             ty::PredicateTy(ty::PredicateTyKind::ImplicationTy(predicates, ty)) => {
                 if predicates.is_empty() {
                     *ty

@@ -212,10 +212,11 @@ fn resolve_associated_item<'tcx>(
             )
         }
         traits::ImplSource::FnPointer(ref data) => match data.fn_ty.kind() {
-            ty::FnDef(..) | ty::FnPtr(..) => Some(Instance {
+            _ if data.fn_ty.is_fn() => Some(Instance {
                 def: ty::InstanceDef::FnPtrShim(trait_item_id, data.fn_ty),
                 substs: rcvr_substs,
             }),
+            ty::FnDef(..) | ty::FnPtr(..) => unreachable!(),
             _ => None,
         },
         traits::ImplSource::Object(ref data) => {

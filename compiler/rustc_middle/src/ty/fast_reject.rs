@@ -121,7 +121,10 @@ pub fn simplify_type<'tcx>(
         ty::GeneratorWitness(tys) => Some(GeneratorWitnessSimplifiedType(tys.skip_binder().len())),
         ty::Never => Some(NeverSimplifiedType),
         ty::Tuple(tys) => Some(TupleSimplifiedType(tys.len())),
-        ty::FnPtr(f) => Some(FunctionSimplifiedType(f.skip_binder().inputs().len())),
+        _ if let Some(f) = ty.opt_fn_ptr_poly_fn_sig() => {
+            Some(FunctionSimplifiedType(f.skip_binder().inputs().len()))
+        }
+        ty::FnPtr(_) => unreachable!(),
         ty::Placeholder(..) => Some(PlaceholderSimplifiedType),
         ty::Param(_) => match treat_params {
             TreatParams::AsPlaceholder => Some(PlaceholderSimplifiedType),
@@ -320,9 +323,8 @@ impl DeepRejectCtxt {
             }
             ty::FnPtr(obl_sig) => match k {
                 ty::FnPtr(impl_sig) => {
-                    let ty::FnSig { inputs_and_output, c_variadic, unsafety, abi } =
-                        obl_sig.skip_binder();
-                    let impl_sig = impl_sig.skip_binder();
+                    let ty::FnSig { inputs_and_output, c_variadic, unsafety, abi } = obl_sig;
+                    let impl_sig = impl_sig;
 
                     abi == impl_sig.abi
                         && c_variadic == impl_sig.c_variadic

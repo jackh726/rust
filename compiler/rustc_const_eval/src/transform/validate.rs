@@ -434,17 +434,19 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
                     }
                     Eq | Lt | Le | Ne | Ge | Gt => {
                         for x in [a, b] {
-                            check_kinds!(
-                                x.clean(self.tcx),
-                                "Cannot compare type {:?}",
-                                ty::Bool
-                                    | ty::Char
-                                    | ty::Int(..)
-                                    | ty::Uint(..)
-                                    | ty::Float(..)
-                                    | ty::RawPtr(..)
-                                    | ty::FnPtr(..)
-                            )
+                            if !x.is_fn_ptr() {
+                                check_kinds!(
+                                    x.clean(self.tcx),
+                                    "Cannot compare type {:?}",
+                                    ty::Bool
+                                        | ty::Char
+                                        | ty::Int(..)
+                                        | ty::Uint(..)
+                                        | ty::Float(..)
+                                        | ty::RawPtr(..)
+                                        | ty::FnPtr(..)
+                                )
+                            }
                         }
                         // The function pointer types can have lifetimes
                         if !self.mir_assign_valid_types(a, b) {

@@ -286,9 +286,10 @@ impl<'a, 'tcx> ConstraintContext<'a, 'tcx> {
                 self.add_constraint(current, data.index, variance);
             }
 
-            ty::FnPtr(sig) => {
+            _ if let Some(sig) = ty.opt_fn_ptr_poly_fn_sig() => {
                 self.add_constraints_from_sig(current, sig, variance);
             }
+            ty::FnPtr(_) => unreachable!(),
 
             ty::Error(_) => {
                 // we encounter this when walking the trait references for object

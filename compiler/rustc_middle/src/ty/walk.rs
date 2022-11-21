@@ -183,8 +183,8 @@ fn push_inner<'tcx>(stack: &mut TypeWalkerStack<'tcx>, parent: GenericArg<'tcx>)
                 stack.extend(ts.skip_binder().iter().rev().map(|ty| ty.into()));
             }
             ty::FnPtr(sig) => {
-                stack.push(sig.skip_binder().output().into());
-                stack.extend(sig.skip_binder().inputs().iter().copied().rev().map(|ty| ty.into()));
+                stack.push(sig.output().into());
+                stack.extend(sig.inputs().iter().copied().rev().map(|ty| ty.into()));
             }
 
             ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {

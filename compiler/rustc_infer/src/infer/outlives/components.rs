@@ -200,6 +200,14 @@ fn compute_components<'tcx>(
                 // themselves can be readily identified.
                 compute_components_recursive(tcx, ty.into(), out, visited);
             }
+            _ if let Some(_) = ty.opt_fn_ptr_poly_fn_sig() => {
+                // (*) Function pointers and trait objects are both binders.
+                // In the RFC, this means we would add the bound regions to
+                // the "bound regions list".  In our representation, no such
+                // list is maintained explicitly, because bound regions
+                // themselves can be readily identified.
+                compute_components_recursive(tcx, ty.into(), out, visited);
+            }
 
             ty::PredicateTy(..) => bug!("Unexpected use of unimplemented PredicateTy"),
         }

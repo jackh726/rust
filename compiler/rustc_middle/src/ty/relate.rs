@@ -547,10 +547,11 @@ pub fn super_relate_tys<'tcx, R: TypeRelation<'tcx>>(
             Ok(tcx.mk_fn_def(a_def_id, substs))
         }
 
-        (&ty::FnPtr(a_fty), &ty::FnPtr(b_fty)) => {
+        (_, _) if let Some(a_fty) = a.opt_fn_ptr_poly_fn_sig() && let Some(b_fty) = b.opt_fn_ptr_poly_fn_sig() => {
             let fty = relation.relate(a_fty, b_fty)?;
             Ok(tcx.mk_fn_ptr(fty))
         }
+        (&ty::FnPtr(_), &ty::FnPtr(_)) => unreachable!(),
 
         // these two are already handled downstream in case of lazy normalization
         (&ty::Projection(a_data), &ty::Projection(b_data)) => {

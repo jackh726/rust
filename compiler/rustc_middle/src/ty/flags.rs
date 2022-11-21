@@ -209,10 +209,10 @@ impl FlagComputation {
                 self.add_substs(substs);
             }
 
-            &ty::FnPtr(fn_sig) => self.bound_computation(fn_sig, |computation, fn_sig| {
-                computation.add_tys(fn_sig.inputs());
-                computation.add_ty(fn_sig.output());
-            }),
+            &ty::FnPtr(fn_sig) => {
+                self.add_tys(fn_sig.inputs());
+                self.add_ty(fn_sig.output());
+            }
 
             ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
                 self.add_flags(TypeFlags::HAS_PREDICATE_TY);

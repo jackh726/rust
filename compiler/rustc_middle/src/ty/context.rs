@@ -18,10 +18,10 @@ use crate::ty::query::{self, TyCtxtAt};
 use crate::ty::{
     self, AdtDef, AdtDefData, AdtKind, Binder, BindingMode, BoundVar, CanonicalPolyFnSig,
     ClosureSizeProfileData, Const, ConstS, ConstVid, DefIdTree, ExistentialPredicate, FloatTy,
-    FloatVar, FloatVid, GenericParamDefKind, InferConst, InferTy, IntTy, IntVar, IntVid, List,
-    ParamConst, ParamTy, PolyFnSig, Predicate, PredicateKind, PredicateS, ProjectionTy, Region,
-    RegionKind, ReprOptions, TraitObjectVisitor, Ty, TyKind, TyS, TyVar, TyVid, TypeAndMut, UintTy,
-    Visibility,
+    FloatVar, FloatVid, FnSig, GenericParamDefKind, InferConst, InferTy, IntTy, IntVar, IntVid,
+    List, ParamConst, ParamTy, PolyFnSig, Predicate, PredicateKind, PredicateS, ProjectionTy,
+    Region, RegionKind, ReprOptions, TraitObjectVisitor, Ty, TyKind, TyS, TyVar, TyVid, TypeAndMut,
+    UintTy, Visibility,
 };
 use crate::ty::{GenericArg, GenericArgKind, InternalSubsts, SubstsRef, UserSubsts};
 use rustc_ast as ast;
@@ -108,7 +108,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     type TypeAndMut = TypeAndMut<'tcx>;
     type Mutability = hir::Mutability;
     type Movability = hir::Movability;
-    type PolyFnSig = PolyFnSig<'tcx>;
+    type FnSig = FnSig<'tcx>;
     type ListBinderExistentialPredicate = &'tcx List<Binder<'tcx, ExistentialPredicate<'tcx>>>;
     type BinderListTy = Binder<'tcx, &'tcx List<Ty<'tcx>>>;
     type ListTy = &'tcx List<Ty<'tcx>>;

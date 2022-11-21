@@ -37,7 +37,7 @@ pub trait Interner {
     type TypeAndMut: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type Mutability: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type Movability: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
-    type PolyFnSig: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
+    type FnSig: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type ListBinderExistentialPredicate: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type BinderListTy: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;
     type ListTy: Clone + Debug + Hash + PartialEq + Eq + PartialOrd + Ord;

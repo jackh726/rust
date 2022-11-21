@@ -214,10 +214,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 (sig, kind)
             }
             ty::Infer(ty::TyVar(vid)) => self.deduce_expectations_from_obligations(vid),
-            ty::FnPtr(sig) => {
+            _ if let Some(sig) = expected_ty.opt_fn_ptr_poly_fn_sig() => {
                 let expected_sig = ExpectedSig { cause_span: None, sig };
                 (Some(expected_sig), Some(ty::ClosureKind::Fn))
             }
+            ty::FnPtr(_) => unreachable!(),
             _ => (None, None),
         }
     }

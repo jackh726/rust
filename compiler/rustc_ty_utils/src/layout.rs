@@ -375,11 +375,12 @@ fn layout_of_uncached<'tcx>(
             ty::FloatTy::F32 => F32,
             ty::FloatTy::F64 => F64,
         }),
-        ty::FnPtr(_) => {
+        _ if ty.is_fn_ptr() => {
             let mut ptr = scalar_unit(Pointer);
             ptr.valid_range_mut().start = 1;
             tcx.intern_layout(LayoutS::scalar(cx, ptr))
         }
+        ty::FnPtr(_) => unreachable!(),
 
         // The never type.
         ty::Never => tcx.intern_layout(LayoutS {

@@ -453,7 +453,7 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
 
             ty::FnPtr(sig) => {
                 self.push("F");
-                self = self.in_binder(&sig, |mut cx, sig| {
+                self = self.in_binder(&ty::Binder::dummy(sig), |mut cx, sig| {
                     if sig.unsafety == hir::Unsafety::Unsafe {
                         cx.push("U");
                     }
@@ -489,6 +489,45 @@ impl<'tcx> Printer<'tcx> for &mut SymbolMangler<'tcx> {
                 });
                 self = self.print_dyn_existential(predicates)?;
                 self = r.print(self)?;
+            }
+
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty)) => {
+                // Keep same mangling for higher-ranked FnPtrs
+                if bound_ty.skip_binder().is_fn_ptr() {
+                    // FIXME: copied from above
+                    self.push("F");
+                    self = self.in_binder(&bound_ty, |mut cx, ty| {
+                        let ty::FnPtr(sig) = ty.kind() else {
+                            unreachable!()
+                        };
+                        if sig.unsafety == hir::Unsafety::Unsafe {
+                            cx.push("U");
+                        }
+                        match sig.abi {
+                            Abi::Rust => {}
+                            Abi::C { unwind: false } => cx.push("KC"),
+                            abi => {
+                                cx.push("K");
+                                let name = abi.name();
+                                if name.contains('-') {
+                                    cx.push_ident(&name.replace('-', "_"));
+                                } else {
+                                    cx.push_ident(name);
+                                }
+                            }
+                        }
+                        for &ty in sig.inputs() {
+                            cx = ty.print(cx)?;
+                        }
+                        if sig.c_variadic {
+                            cx.push("v");
+                        }
+                        cx.push("E");
+                        sig.output().print(cx)
+                    })?;
+                } else {
+                    bug!("Unexpected use of unimplemented PredicateTy");
+                }
             }
 
             ty::GeneratorWitness(_) => bug!("symbol_names: unexpected `GeneratorWitness`"),

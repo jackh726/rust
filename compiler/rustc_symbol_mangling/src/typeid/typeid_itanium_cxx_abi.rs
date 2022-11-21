@@ -622,7 +622,22 @@ fn encode_ty<'tcx>(
         ty::FnPtr(fn_sig) => {
             // PF<return-type><parameter-type1..parameter-typeN>E
             let mut s = String::from("P");
-            s.push_str(&encode_fnsig(tcx, &fn_sig.skip_binder(), dict, TypeIdOptions::NO_OPTIONS));
+            s.push_str(&encode_fnsig(tcx, &fn_sig, dict, TypeIdOptions::NO_OPTIONS));
+            compress(dict, DictKey::Ty(ty, TyQ::None), &mut s);
+            typeid.push_str(&s);
+        }
+
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
+            if bound_ty.skip_binder().is_fn_ptr() =>
+        {
+            let ty::FnPtr(fn_sig) = bound_ty.skip_binder().kind() else {
+                unreachable!()
+            };
+
+            // FIXME: copied from above
+            // PF<return-type><parameter-type1..parameter-typeN>E
+            let mut s = String::from("P");
+            s.push_str(&encode_fnsig(tcx, &fn_sig, dict, TypeIdOptions::NO_OPTIONS));
             compress(dict, DictKey::Ty(ty, TyQ::None), &mut s);
             typeid.push_str(&s);
         }
@@ -778,23 +793,40 @@ fn transform_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, options: TransformTyOptio
             if options.contains(TransformTyOptions::GENERALIZE_POINTERS) {
                 ty = tcx.mk_imm_ptr(tcx.mk_unit());
             } else {
-                let parameters: Vec<Ty<'tcx>> = fn_sig
-                    .skip_binder()
-                    .inputs()
-                    .iter()
-                    .map(|ty| transform_ty(tcx, *ty, options))
-                    .collect();
-                let output = transform_ty(tcx, fn_sig.skip_binder().output(), options);
-                ty = tcx.mk_fn_ptr(ty::Binder::bind_with_vars(
-                    tcx.mk_fn_sig(
-                        parameters.iter(),
-                        &output,
-                        fn_sig.c_variadic(),
-                        fn_sig.unsafety(),
-                        fn_sig.abi(),
-                    ),
-                    fn_sig.bound_vars(),
-                ));
+                let parameters: Vec<Ty<'tcx>> =
+                    fn_sig.inputs().iter().map(|ty| transform_ty(tcx, *ty, options)).collect();
+                let output = transform_ty(tcx, fn_sig.output(), options);
+                ty = tcx.mk_fn_ptr(ty::Binder::dummy(tcx.mk_fn_sig(
+                    parameters.iter(),
+                    &output,
+                    fn_sig.c_variadic,
+                    fn_sig.unsafety,
+                    fn_sig.abi,
+                )));
+            }
+        }
+
+        ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
+            if bound_ty.skip_binder().is_fn_ptr() =>
+        {
+            let ty::FnPtr(fn_sig) = bound_ty.skip_binder().kind() else {
+                unreachable!()
+            };
+
+            // FIXME: copied from above
+            if options.contains(TransformTyOptions::GENERALIZE_POINTERS) {
+                ty = tcx.mk_imm_ptr(tcx.mk_unit());
+            } else {
+                let parameters: Vec<Ty<'tcx>> =
+                    fn_sig.inputs().iter().map(|ty| transform_ty(tcx, *ty, options)).collect();
+                let output = transform_ty(tcx, fn_sig.output(), options);
+                ty = tcx.mk_fn_ptr(bound_ty.rebind(tcx.mk_fn_sig(
+                    parameters.iter(),
+                    &output,
+                    fn_sig.c_variadic,
+                    fn_sig.unsafety,
+                    fn_sig.abi,
+                )));
             }
         }
 

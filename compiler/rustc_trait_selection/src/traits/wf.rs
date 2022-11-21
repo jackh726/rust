@@ -651,10 +651,11 @@ impl<'tcx> WfPredicates<'tcx> {
                     self.out.extend(obligations);
                 }
 
-                ty::FnPtr(_) => {
+                _ if ty.is_fn_ptr() => {
                     // let the loop iterate into the argument/return
                     // types appearing in the fn signature
                 }
+                ty::FnPtr(_) => unreachable!(),
 
                 ty::Opaque(did, substs) => {
                     // All of the requirements on type parameters

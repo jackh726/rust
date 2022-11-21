@@ -4,6 +4,7 @@
 #![deny(rustc::untranslatable_diagnostic)]
 #![deny(rustc::diagnostic_outside_of_impl)]
 #![recursion_limit = "256"]
+#![feature(if_let_guard)]
 
 #[macro_use]
 extern crate tracing;

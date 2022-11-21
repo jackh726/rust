@@ -705,17 +705,12 @@ impl<'tcx> Visitor<'tcx> for Checker<'_, 'tcx> {
                 let (mut callee, mut substs) = match *fn_ty.kind() {
                     ty::FnDef(def_id, substs) => (def_id, substs),
 
-                    ty::FnPtr(_) => {
+                    _ if fn_ty.is_fn_ptr() => {
                         self.check_op(ops::FnCallIndirect);
                         return;
                     }
+                    ty::FnPtr(_) => unreachable!(),
 
-                    ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
-                        if bound_ty.skip_binder().is_fn_ptr() =>
-                    {
-                        self.check_op(ops::FnCallIndirect);
-                        return;
-                    }
                     _ => {
                         span_bug!(terminator.source_info.span, "invalid callee of type {:?}", fn_ty)
                     }

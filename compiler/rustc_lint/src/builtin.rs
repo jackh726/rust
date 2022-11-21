@@ -2538,7 +2538,10 @@ impl<'tcx> LateLintPass<'tcx> for InvalidValue {
                 // Primitive types that don't like 0 as a value.
                 Ref(..) => Some(("references must be non-null".to_string(), None)),
                 Adt(..) if ty.is_box() => Some(("`Box` must be non-null".to_string(), None)),
-                FnPtr(..) => Some(("function pointers must be non-null".to_string(), None)),
+                _ if ty.is_fn_ptr() => {
+                    Some(("function pointers must be non-null".to_string(), None))
+                }
+                FnPtr(..) => unreachable!(),
                 Never => Some(("the `!` type has no valid value".to_string(), None)),
                 RawPtr(tm) if matches!(tm.ty.kind(), Dynamic(..)) =>
                 // raw ptr to dyn Trait

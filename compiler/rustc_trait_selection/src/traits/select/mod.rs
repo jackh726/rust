@@ -1822,6 +1822,11 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
                 Where(ty::Binder::dummy(Vec::new()))
             }
 
+            _ if let Some(_) = self_ty.opt_fn_ptr_poly_fn_sig() => {
+                // safe for everything
+                Where(ty::Binder::dummy(Vec::new()))
+            }
+
             ty::Str | ty::Slice(_) | ty::Dynamic(..) | ty::Foreign(..) => None,
 
             ty::Tuple(tys) => Where(
@@ -1866,8 +1871,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             ty::Infer(ty::IntVar(_))
             | ty::Infer(ty::FloatVar(_))
             | ty::FnDef(..)
-            | ty::FnPtr(_)
             | ty::Error(_) => Where(ty::Binder::dummy(Vec::new())),
+
+            _ if let Some(_) = self_ty.opt_fn_ptr_poly_fn_sig() => {
+                Where(ty::Binder::dummy(Vec::new()))
+            }
+            ty::FnPtr(_) => unreachable!(),
 
             ty::Uint(_)
             | ty::Int(_)
@@ -1991,6 +2000,8 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             | ty::Infer(ty::IntVar(_) | ty::FloatVar(_))
             | ty::Never
             | ty::Char => ty::Binder::dummy(Vec::new()),
+
+            _ if t.skip_binder().is_fn_ptr() => ty::Binder::dummy(Vec::new()),
 
             ty::Placeholder(..)
             | ty::Dynamic(..)

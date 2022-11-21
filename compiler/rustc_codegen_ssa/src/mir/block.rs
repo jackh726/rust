@@ -695,7 +695,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 ),
                 None,
             ),
-            ty::FnPtr(_) => (None, Some(callee.immediate())),
+            _ if callee_ty.is_fn_ptr() => (None, Some(callee.immediate())),
+            ty::FnPtr(_) => unreachable!(),
             _ => bug!("{} is not callable", callee.layout.ty),
         };
         let def = instance.map(|i| i.def);

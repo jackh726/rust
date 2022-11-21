@@ -558,10 +558,7 @@ impl<'a, 'tcx> CastCheck<'tcx> {
                         suggestion,
                         Applicability::MachineApplicable,
                     );
-                } else if !matches!(
-                    self.cast_ty.kind(),
-                    ty::FnDef(..) | ty::FnPtr(..) | ty::Closure(..)
-                ) {
+                } else if !(self.cast_ty.is_fn_ptr() || self.cast_ty.is_closure()) {
                     let mut label = true;
                     // Check `impl From<self.expr_ty> for self.cast_ty {}` for accurate suggestion:
                     if let Ok(snippet) = fcx.tcx.sess.source_map().span_to_snippet(self.expr_span)

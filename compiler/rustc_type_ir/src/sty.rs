@@ -258,7 +258,7 @@ pub enum TyKind<I: Interner> {
     /// fn foo() -> i32 { 1 }
     /// let bar: fn() -> i32 = foo;
     /// ```
-    FnPtr(I::PolyFnSig),
+    FnPtr(I::FnSig),
 
     /// A trait object. Written as `dyn for<'b> Trait<'b, Assoc = u32> + Send + 'a`.
     Dynamic(I::ListBinderExistentialPredicate, I::Region, DynKind),
@@ -787,7 +787,7 @@ where
     I::TypeAndMut: Encodable<E>,
     I::Mutability: Encodable<E>,
     I::Movability: Encodable<E>,
-    I::PolyFnSig: Encodable<E>,
+    I::FnSig: Encodable<E>,
     I::ListBinderExistentialPredicate: Encodable<E>,
     I::BinderListTy: Encodable<E>,
     I::ListTy: Encodable<E>,
@@ -842,8 +842,8 @@ where
                 def_id.encode(e);
                 substs.encode(e);
             }),
-            FnPtr(polyfnsig) => e.emit_enum_variant(disc, |e| {
-                polyfnsig.encode(e);
+            FnPtr(fnsig) => e.emit_enum_variant(disc, |e| {
+                fnsig.encode(e);
             }),
             Dynamic(l, r, repr) => e.emit_enum_variant(disc, |e| {
                 l.encode(e);
@@ -909,7 +909,7 @@ where
     I::TypeAndMut: Decodable<D>,
     I::Mutability: Decodable<D>,
     I::Movability: Decodable<D>,
-    I::PolyFnSig: Decodable<D>,
+    I::FnSig: Decodable<D>,
     I::ListBinderExistentialPredicate: Decodable<D>,
     I::BinderListTy: Decodable<D>,
     I::ListTy: Decodable<D>,
@@ -974,7 +974,7 @@ where
     I::Ty: HashStable<CTX>,
     I::Const: HashStable<CTX>,
     I::TypeAndMut: HashStable<CTX>,
-    I::PolyFnSig: HashStable<CTX>,
+    I::FnSig: HashStable<CTX>,
     I::ListBinderExistentialPredicate: HashStable<CTX>,
     I::Region: HashStable<CTX>,
     I::Movability: HashStable<CTX>,
@@ -1035,8 +1035,8 @@ where
                 def_id.hash_stable(__hcx, __hasher);
                 substs.hash_stable(__hcx, __hasher);
             }
-            FnPtr(polyfnsig) => {
-                polyfnsig.hash_stable(__hcx, __hasher);
+            FnPtr(fnsig) => {
+                fnsig.hash_stable(__hcx, __hasher);
             }
             Dynamic(l, r, repr) => {
                 l.hash_stable(__hcx, __hasher);

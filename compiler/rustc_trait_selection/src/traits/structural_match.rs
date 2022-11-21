@@ -180,13 +180,14 @@ impl<'tcx> TypeVisitor<'tcx> for Search<'tcx> {
                 return ControlFlow::CONTINUE;
             }
 
-            ty::FnPtr(..) => {
+            _ if ty.is_fn_ptr() => {
                 if !self.adt_const_param {
                     return ControlFlow::CONTINUE;
                 } else {
                     return ControlFlow::Break(ty);
                 }
             }
+            ty::FnPtr(..) => unreachable!(),
 
             ty::RawPtr(..) => {
                 if !self.adt_const_param {

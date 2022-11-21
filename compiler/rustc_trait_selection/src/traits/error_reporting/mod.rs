@@ -1734,7 +1734,8 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
                 | ty::Infer(ty::IntVar(..) | ty::FloatVar(..)) => Some(4),
                 ty::Ref(..) | ty::RawPtr(..) => Some(5),
                 ty::Array(..) | ty::Slice(..) => Some(6),
-                ty::FnDef(..) | ty::FnPtr(..) => Some(7),
+                _ if t.is_fn() => Some(7),
+                ty::FnDef(..) | ty::FnPtr(..) => unreachable!(),
                 ty::Dynamic(..) => Some(8),
                 ty::Closure(..) => Some(9),
                 ty::Tuple(..) => Some(10),
@@ -1846,7 +1847,8 @@ impl<'tcx> InferCtxtPrivExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
             }
             if candidates.len() == 1 {
                 let ty_desc = match candidates[0].self_ty().clean(self.tcx).kind() {
-                    ty::FnPtr(_) => Some("fn pointer"),
+                    _ if candidates[0].self_ty().is_fn_ptr() => Some("fn pointer"),
+                    ty::FnPtr(_) => unreachable!(),
                     _ => None,
                 };
                 let the_desc = match ty_desc {

@@ -938,7 +938,10 @@ fn visit_fn_use<'tcx>(
 ) {
     if let ty::FnDef(def_id, substs) = *ty.kind() {
         let instance = if is_direct_call {
-            ty::Instance::resolve(tcx, ty::ParamEnv::reveal_all(), def_id, substs).unwrap().unwrap()
+            let instance = ty::Instance::resolve(tcx, ty::ParamEnv::reveal_all(), def_id, substs);
+            instance
+                .unwrap_or_else(|e| bug!("{:?} {:?} {:?}", e, def_id, substs))
+                .unwrap_or_else(|| bug!("{:?} {:?}", def_id, substs))
         } else {
             ty::Instance::resolve_for_fn_ptr(tcx, ty::ParamEnv::reveal_all(), def_id, substs)
                 .unwrap()

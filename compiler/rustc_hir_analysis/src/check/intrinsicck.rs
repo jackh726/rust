@@ -182,7 +182,8 @@ impl<'a, 'tcx> InlineAsmCtxt<'a, 'tcx> {
             ty::Int(IntTy::Isize) | ty::Uint(UintTy::Usize) => Some(asm_ty_isize),
             ty::Float(FloatTy::F32) => Some(InlineAsmType::F32),
             ty::Float(FloatTy::F64) => Some(InlineAsmType::F64),
-            ty::FnPtr(_) => Some(asm_ty_isize),
+            _ if ty.is_fn_ptr() => Some(asm_ty_isize),
+            ty::FnPtr(_) => unreachable!(),
             ty::RawPtr(ty::TypeAndMut { ty, mutbl: _ }) if self.is_thin_ptr_ty(ty) => {
                 Some(asm_ty_isize)
             }

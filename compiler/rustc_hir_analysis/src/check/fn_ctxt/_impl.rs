@@ -1042,9 +1042,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 );
                 (sig1, *did1, substs1)
             }
-            (ty::FnDef(did, substs), ty::FnPtr(sig2)) => {
+            (ty::FnDef(did, substs), _) if let Some(sig2) = found.opt_fn_ptr_poly_fn_sig() => {
                 let sig1 = self.tcx.bound_fn_sig(*did).subst(self.tcx, substs);
-                if sig1 != *sig2 {
+                if sig1 != sig2 {
                     return;
                 }
                 (sig1, *did, substs)

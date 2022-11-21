@@ -668,6 +668,7 @@ impl<'tcx> TypeVisitor<'tcx> for OrphanChecker<'tcx> {
             | ty::Never
             | ty::Tuple(..)
             | ty::Projection(..) => self.found_non_local_ty(ty),
+            _ if ty.is_fn_ptr() => self.found_non_local_ty(ty),
 
             ty::Param(..) => self.found_param_ty(ty),
 

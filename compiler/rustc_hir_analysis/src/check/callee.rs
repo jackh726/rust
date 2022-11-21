@@ -407,7 +407,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
                 (fn_sig, Some(def_id))
             }
-            ty::FnPtr(sig) => (sig, None),
+            _ if let Some(sig) = callee_ty.opt_fn_ptr_poly_fn_sig() => (sig, None),
+            ty::FnPtr(_) => unreachable!(),
             _ => {
                 if let hir::ExprKind::Path(hir::QPath::Resolved(_, path)) = &callee_expr.kind
                     && let [segment] = path.segments

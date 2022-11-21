@@ -305,7 +305,7 @@ fn push_debuginfo_type_name<'tcx>(
                 output.push(')');
             }
         }
-        ty::FnDef(..) | ty::FnPtr(_) => {
+        _ if t.is_fn() => {
             // We've encountered a weird 'recursive type'
             // Currently, the only way to generate such a type
             // is by using 'impl trait':
@@ -385,6 +385,7 @@ fn push_debuginfo_type_name<'tcx>(
             // processing
             visited.remove(&t);
         }
+        ty::FnDef(..) | ty::FnPtr(_) => unreachable!(),
         ty::Closure(def_id, substs) | ty::Generator(def_id, substs, ..) => {
             // Name will be "{closure_env#0}<T1, T2, ...>", "{generator_env#0}<T1, T2, ...>", or
             // "{async_fn_env#0}<T1, T2, ...>", etc.

@@ -155,8 +155,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // Autoderef is useful here because sometimes we box callables, etc.
         let Some((def_id_or_name, output, inputs)) = self.autoderef(expr.span, found).silence_errors().find_map(|(found, _)| {
             match *found.kind() {
-                ty::FnPtr(fn_sig) =>
+                _ if let Some(fn_sig) = found.opt_fn_ptr_poly_fn_sig() =>
                     Some((DefIdOrName::Name("function pointer"), fn_sig.output(), fn_sig.inputs())),
+                ty::FnPtr(_) => unreachable!(),
                 ty::FnDef(def_id, _) => {
                     let fn_sig = found.fn_sig(self.tcx);
                     Some((DefIdOrName::DefId(def_id), fn_sig.output(), fn_sig.inputs()))
@@ -480,7 +481,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         found: Ty<'tcx>,
     ) -> bool {
         let expected = expected.clean(self.tcx);
-        if let (ty::FnPtr(_), ty::Closure(def_id, _)) = (expected.kind(), found.kind()) {
+        if let ty::Closure(def_id, _) = found.kind() && expected.is_fn_ptr() {
             if let Some(upvars) = self.tcx.upvars_mentioned(*def_id) {
                 // Report upto four upvars being captured to reduce the amount error messages
                 // reported back to the user.

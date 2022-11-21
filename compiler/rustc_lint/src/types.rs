@@ -709,7 +709,8 @@ pub fn transparent_newtype_field<'a, 'tcx>(
 fn ty_is_known_nonnull<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>, mode: CItemKind) -> bool {
     let tcx = cx.tcx;
     match ty.kind() {
-        ty::FnPtr(_) => true,
+        _ if ty.is_fn_ptr() => true,
+        ty::FnPtr(_) => unreachable!(),
         ty::Ref(..) => true,
         ty::Adt(def, _) if def.is_box() && matches!(mode, CItemKind::Definition) => true,
         ty::Adt(def, substs) if def.repr().transparent() && !def.is_union() => {
@@ -762,11 +763,12 @@ fn get_nullable_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Option<Ty<'t
         // As these types are always non-null, the nullable equivalent of
         // Option<T> of these types are their raw pointer counterparts.
         ty::Ref(_region, ty, mutbl) => tcx.mk_ptr(ty::TypeAndMut { ty, mutbl }),
-        ty::FnPtr(..) => {
+        _ if ty.is_fn_ptr() => {
             // There is no nullable equivalent for Rust's function pointers -- you
             // must use an Option<fn(..) -> _> to represent it.
             ty
         }
+        ty::FnPtr(..) => unreachable!(),
 
         // We should only ever reach this case if ty_is_known_nonnull is extended
         // to other types.
@@ -1102,7 +1104,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
 
             ty::Array(inner_ty, _) => self.check_type_for_ffi(cache, inner_ty),
 
-            ty::FnPtr(sig) => {
+            _ if let Some(sig) = ty.opt_fn_ptr_poly_fn_sig() => {
                 if self.is_internal_abi(sig.abi()) {
                     return FfiUnsafe {
                         ty,
@@ -1132,6 +1134,7 @@ impl<'a, 'tcx> ImproperCTypesVisitor<'a, 'tcx> {
                 }
                 FfiSafe
             }
+            ty::FnPtr(_) => unreachable!(),
 
             ty::Foreign(..) => FfiSafe,
 

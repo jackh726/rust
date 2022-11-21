@@ -892,7 +892,7 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &hir::GenericParam<'_>) {
                             .note("floats do not derive `Eq` or `Ord`, which are required for const parameters")
                             .emit();
                         }
-                        ty::FnPtr(_) => {
+                        _ if non_structural_match_ty.is_fn_ptr() => {
                             struct_span_err!(
                                 tcx.sess,
                                 hir_ty.span,
@@ -901,6 +901,7 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &hir::GenericParam<'_>) {
                             )
                             .emit();
                         }
+                        ty::FnPtr(_) => unreachable!(),
                         ty::RawPtr(_) => {
                             struct_span_err!(
                                 tcx.sess,
@@ -937,7 +938,7 @@ fn check_param_wf(tcx: TyCtxt<'_>, param: &hir::GenericParam<'_>) {
 
                 let err = match ty.clean(tcx).kind() {
                     ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Error(_) => None,
-                    ty::FnPtr(_) => Some("function pointers"),
+                    _ if ty.is_fn_ptr() => Some("function pointers"),
                     ty::RawPtr(_) => Some("raw pointers"),
                     _ => {
                         is_ptr = false;

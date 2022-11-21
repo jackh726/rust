@@ -1434,9 +1434,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                 values
             }
 
-            (ty::FnDef(did1, substs1), ty::FnPtr(sig2)) => {
+            (ty::FnDef(did1, substs1), _) if let Some(sig2) = t2.opt_fn_sig(self.tcx) => {
                 let sig1 = self.tcx.bound_fn_sig(*did1).subst(self.tcx, substs1);
-                let mut values = self.cmp_fn_sig(&sig1, sig2);
+                let mut values = self.cmp_fn_sig(&sig1, &sig2);
                 values.0.push_highlighted(format!(
                     " {{{}}}",
                     self.tcx.def_path_str_with_substs(*did1, substs1)
@@ -1444,9 +1444,9 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                 values
             }
 
-            (ty::FnPtr(sig1), ty::FnDef(did2, substs2)) => {
+            (_, ty::FnDef(did2, substs2)) if let Some(sig1) = t1.opt_fn_sig(self.tcx) => {
                 let sig2 = self.tcx.bound_fn_sig(*did2).subst(self.tcx, substs2);
-                let mut values = self.cmp_fn_sig(sig1, &sig2);
+                let mut values = self.cmp_fn_sig(&sig1, &sig2);
                 values.1.push_normal(format!(
                     " {{{}}}",
                     self.tcx.def_path_str_with_substs(*did2, substs2)
@@ -1454,7 +1454,7 @@ impl<'tcx> TypeErrCtxt<'_, 'tcx> {
                 values
             }
 
-            (ty::FnPtr(sig1), ty::FnPtr(sig2)) => self.cmp_fn_sig(sig1, sig2),
+            (_, _) if let Some(sig1) = t1.opt_fn_sig(self.tcx) && let Some(sig2) = t2.opt_fn_sig(self.tcx) => self.cmp_fn_sig(&sig1, &sig2),
 
             _ => {
                 if t1 == t2 {

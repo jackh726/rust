@@ -281,6 +281,8 @@ where
             | ty::Param(..)
             | ty::Error(_)
             | ty::GeneratorWitness(..) => {}
+            ty::PredicateTy(ty::PredicateTyKind::ForAllTy(bound_ty))
+                if bound_ty.skip_binder().is_fn_ptr() => {}
             ty::Bound(..) | ty::Placeholder(..) | ty::Infer(..) => {
                 bug!("unexpected type: {:?}", ty)
             }

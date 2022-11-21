@@ -795,14 +795,15 @@ where
                     address_space: addr_space_of_ty(mt.ty),
                 })
             }
-            ty::FnPtr(fn_sig) if offset.bytes() == 0 => {
-                tcx.layout_of(param_env.and(tcx.mk_fn_ptr(fn_sig))).ok().map(|layout| PointeeInfo {
+            _ if this.ty.is_fn_ptr() && offset.bytes() == 0 => {
+                tcx.layout_of(param_env.and(this.ty)).ok().map(|layout| PointeeInfo {
                     size: layout.size,
                     align: layout.align.abi,
                     safe: None,
                     address_space: cx.data_layout().instruction_address_space,
                 })
             }
+            ty::FnPtr(_) if offset.bytes() == 0 => unreachable!(),
             ty::Ref(_, ty, mt) if offset.bytes() == 0 => {
                 let address_space = addr_space_of_ty(ty);
                 let kind = if tcx.sess.opts.optimize == OptLevel::No {
