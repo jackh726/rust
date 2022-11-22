@@ -532,7 +532,7 @@ impl<'tcx> Instance<'tcx> {
 
         let self_ty = tcx.mk_closure(closure_did, substs);
 
-        let sig = substs.as_closure().sig(tcx);
+        let sig = substs.as_closure().sig();
         let sig =
             tcx.try_normalize_erasing_late_bound_regions(ty::ParamEnv::reveal_all(), sig).ok()?;
         assert_eq!(sig.inputs().len(), 1);

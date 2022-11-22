@@ -1660,7 +1660,7 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
             }
 
             ty::Closure(_, substs) => {
-                record!(self.tables.fn_sig[def_id.to_def_id()] <- substs.as_closure().sig(self.tcx));
+                record!(self.tables.fn_sig[def_id.to_def_id()] <- substs.as_closure().sig());
             }
 
             _ => bug!("closure that is neither generator nor closure"),

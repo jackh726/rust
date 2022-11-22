@@ -809,9 +809,7 @@ impl<'tcx> TypeErrCtxtExt<'tcx> for TypeErrCtxt<'_, 'tcx> {
         let self_ty = trait_pred.self_ty().skip_binder();
 
         let (def_id, output_ty, callable) = match *self_ty.kind() {
-            ty::Closure(def_id, substs) => {
-                (def_id, substs.as_closure().sig(self.tcx).output(), "closure")
-            }
+            ty::Closure(def_id, substs) => (def_id, substs.as_closure().sig().output(), "closure"),
             ty::FnDef(def_id, _) => (def_id, self_ty.fn_sig(self.tcx).output(), "function"),
             _ => return false,
         };

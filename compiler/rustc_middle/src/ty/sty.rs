@@ -330,7 +330,7 @@ impl<'tcx> ClosureSubsts<'tcx> {
     }
 
     /// Extracts the signature from the closure.
-    pub fn sig(self, _tcx: TyCtxt<'tcx>) -> ty::PolyFnSig<'tcx> {
+    pub fn sig(self) -> ty::PolyFnSig<'tcx> {
         let ty = self.sig_as_fn_ptr_ty();
         match ty.kind() {
             ty::FnPtr(sig) => ty::Binder::dummy(*sig),
