@@ -422,10 +422,7 @@ pub fn peel_mid_ty_refs_is_mutable(ty: Ty<'_>) -> (Ty<'_>, usize, Mutability) {
 
 /// Returns `true` if the given type is an `unsafe` function.
 pub fn type_is_unsafe_function<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
-    match ty.kind() {
-        ty::FnDef(..) | ty::FnPtr(_) => ty.fn_sig(cx.tcx).unsafety() == Unsafety::Unsafe,
-        _ => false,
-    }
+    ty.opt_fn_sig(cx.tcx).map_or(false, |sig| sig.unsafety() == Unsafety::Unsafe)
 }
 
 /// Returns the base type for HIR references and pointers.
@@ -583,7 +580,7 @@ pub fn ty_sig<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Option<ExprFnSig<'t
         },
         ty::FnDef(id, subs) => Some(ExprFnSig::Sig(cx.tcx.bound_fn_sig(id).subst(cx.tcx, subs), Some(id))),
         ty::Opaque(id, _) => sig_from_bounds(cx, ty, cx.tcx.item_bounds(id), cx.tcx.opt_parent(id)),
-        ty::FnPtr(sig) => Some(ExprFnSig::Sig(sig, None)),
+        _ if let Some(sig) = ty.opt_fn_ptr_poly_fn_sig() => Some(ExprFnSig::Sig(sig, None)),
         ty::Dynamic(bounds, _, _) => {
             let lang_items = cx.tcx.lang_items();
             match bounds.principal() {

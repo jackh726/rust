@@ -56,15 +56,14 @@ fn try_get_caller_ty_name_and_method_name(
 
 fn is_map_to_option(cx: &LateContext<'_>, map_arg: &Expr<'_>) -> bool {
     let map_closure_ty = cx.typeck_results().expr_ty(map_arg);
-    match map_closure_ty.kind() {
-        ty::Closure(_, _) | ty::FnDef(_, _) | ty::FnPtr(_) => {
-            let map_closure_sig = match map_closure_ty.kind() {
-                ty::Closure(_, substs) => substs.as_closure().sig(),
-                _ => map_closure_ty.fn_sig(cx.tcx),
-            };
-            let map_closure_return_ty = cx.tcx.erase_late_bound_regions(map_closure_sig.output());
-            is_type_diagnostic_item(cx, map_closure_return_ty, sym::Option)
-        },
-        _ => false,
+    if map_closure_ty.is_closure() || map_closure_ty.is_fn() {
+        let map_closure_sig = match map_closure_ty.kind() {
+            ty::Closure(_, substs) => substs.as_closure().sig(),
+            _ => map_closure_ty.fn_sig(cx.tcx),
+        };
+        let map_closure_return_ty = cx.tcx.erase_late_bound_regions(map_closure_sig.output());
+        is_type_diagnostic_item(cx, map_closure_return_ty, sym::Option)
+    } else {
+        false
     }
 }

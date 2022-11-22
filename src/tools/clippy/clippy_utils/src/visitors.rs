@@ -398,7 +398,7 @@ pub fn is_expr_unsafe<'tcx>(cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) -> bool {
                 },
                 ExprKind::Call(func, _) => match *self.cx.typeck_results().expr_ty(func).peel_refs().kind() {
                     ty::FnDef(id, _) if self.cx.tcx.fn_sig(id).unsafety() == Unsafety::Unsafe => self.is_unsafe = true,
-                    ty::FnPtr(sig) if sig.unsafety() == Unsafety::Unsafe => self.is_unsafe = true,
+                    _ if let Some(sig) = self.cx.typeck_results().expr_ty(func).peel_refs().opt_fn_ptr_poly_fn_sig() && sig.unsafety() == Unsafety::Unsafe => self.is_unsafe = true,
                     _ => walk_expr(self, e),
                 },
                 ExprKind::Path(ref p)

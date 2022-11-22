@@ -79,7 +79,7 @@ fn check_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, span: Span) -> McfResult {
                 return Err((span, "mutable references in const fn are unstable".into()));
             },
             ty::Opaque(..) => return Err((span, "`impl Trait` in const fn is unstable".into())),
-            ty::FnPtr(..) => {
+            _ if ty.is_fn_ptr() => {
                 return Err((span, "function pointers in const fn are unstable".into()));
             },
             ty::Dynamic(preds, _, _) => {
