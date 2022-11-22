@@ -1604,7 +1604,7 @@ pub(crate) fn clean_middle_ty<'tcx>(
             mutability: mutbl,
             type_: Box::new(clean_middle_ty(ty, cx, None)),
         },
-        ty::FnDef(..) | ty::FnPtr(_) => {
+        _ if ty.is_fn() => {
             let sig = ty.fn_sig(cx.tcx);
             let decl = clean_fn_decl_from_did_and_sig(cx, None, sig);
             BareFunction(Box::new(BareFunctionDecl {
@@ -1614,6 +1614,7 @@ pub(crate) fn clean_middle_ty<'tcx>(
                 abi: sig.abi(),
             }))
         }
+        ty::FnDef(..) | ty::FnPtr(_) => unreachable!(),
         ty::Adt(def, substs) => {
             let did = def.did();
             let kind = match def.adt_kind() {
