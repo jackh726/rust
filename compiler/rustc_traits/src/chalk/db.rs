@@ -597,16 +597,19 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         &self,
         _closure_id: chalk_ir::ClosureId<RustInterner<'tcx>>,
         substs: &chalk_ir::Substitution<RustInterner<'tcx>>,
-    ) -> chalk_solve::rust_ir::ClosureKind {
+    ) -> Option<chalk_solve::rust_ir::ClosureKind> {
         let kind = &substs.as_slice(self.interner)[substs.len(self.interner) - 3];
+        // Matches `to_opt_closure_kind`
         match kind.assert_ty_ref(self.interner).kind(self.interner) {
             chalk_ir::TyKind::Scalar(chalk_ir::Scalar::Int(int_ty)) => match int_ty {
-                chalk_ir::IntTy::I8 => chalk_solve::rust_ir::ClosureKind::Fn,
-                chalk_ir::IntTy::I16 => chalk_solve::rust_ir::ClosureKind::FnMut,
-                chalk_ir::IntTy::I32 => chalk_solve::rust_ir::ClosureKind::FnOnce,
-                _ => bug!("bad closure kind"),
+                chalk_ir::IntTy::I8 => Some(chalk_solve::rust_ir::ClosureKind::Fn),
+                chalk_ir::IntTy::I16 => Some(chalk_solve::rust_ir::ClosureKind::FnMut),
+                chalk_ir::IntTy::I32 => Some(chalk_solve::rust_ir::ClosureKind::FnOnce),
+                _ => bug!("bad closure kind {:?}", int_ty),
             },
-            _ => bug!("bad closure kind"),
+            chalk_ir::TyKind::BoundVar(..) | chalk_ir::TyKind::InferenceVar(..) => None,
+            chalk_ir::TyKind::Error => Some(chalk_solve::rust_ir::ClosureKind::Fn),
+            _ => bug!("bad closure kind {:?}", kind),
         }
     }
 
