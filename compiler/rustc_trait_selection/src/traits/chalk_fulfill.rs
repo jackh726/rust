@@ -85,6 +85,7 @@ impl<'tcx> TraitEngine<'tcx> for FulfillmentContext<'tcx> {
             // We iterate over all obligations, and record if we are able
             // to unambiguously prove at least one obligation.
             for obligation in self.obligations.drain(..) {
+                debug!(?obligation);
                 let obligation = infcx.resolve_vars_if_possible(obligation);
                 let environment = obligation.param_env.caller_bounds();
                 let goal = ChalkEnvironmentAndGoal { environment, goal: obligation.predicate };

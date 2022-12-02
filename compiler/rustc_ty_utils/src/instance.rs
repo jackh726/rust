@@ -36,13 +36,14 @@ fn resolve_instance_of_const_arg<'tcx>(
     )
 }
 
+#[instrument(level = "debug", skip(tcx), ret)]
 fn inner_resolve_instance<'tcx>(
     tcx: TyCtxt<'tcx>,
     key: ty::ParamEnvAnd<'tcx, (ty::WithOptConstParam<DefId>, SubstsRef<'tcx>)>,
 ) -> Result<Option<Instance<'tcx>>, ErrorGuaranteed> {
     let (param_env, (def, substs)) = key.into_parts();
 
-    let result = if let Some(trait_def_id) = tcx.trait_of_item(def.did) {
+    if let Some(trait_def_id) = tcx.trait_of_item(def.did) {
         debug!(" => associated item, attempting to find impl in param_env {:#?}", param_env);
         resolve_associated_item(tcx, def.did, param_env, trait_def_id, substs)
     } else {
@@ -83,9 +84,7 @@ fn inner_resolve_instance<'tcx>(
             }
         };
         Ok(Some(Instance { def, substs }))
-    };
-    debug!("inner_resolve_instance: result={:?}", result);
-    result
+    }
 }
 
 fn resolve_associated_item<'tcx>(
@@ -99,7 +98,9 @@ fn resolve_associated_item<'tcx>(
 
     let trait_ref = ty::TraitRef::from_method(tcx, trait_id, rcvr_substs);
 
-    let vtbl = match tcx.codegen_select_candidate((param_env, ty::Binder::dummy(trait_ref))) {
+    let candidate = tcx.codegen_select_candidate((param_env, ty::Binder::dummy(trait_ref)));
+    debug!(?candidate);
+    let vtbl = match candidate {
         Ok(vtbl) => vtbl,
         Err(CodegenObligationError::Ambiguity) => {
             let reported = tcx.sess.delay_span_bug(

@@ -1,4 +1,5 @@
 // run-pass
+// ignore-compare-mode-chalk
 
 #![feature(macro_metavar_expr)]
 

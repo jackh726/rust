@@ -6,6 +6,7 @@
 //! either the `TyCtxt` (for information about types) or
 //! `crate::chalk::lowering` (to lower rustc types into Chalk types).
 
+use chalk_ir::fold::Shift;
 use rustc_middle::traits::ChalkRustInterner as RustInterner;
 use rustc_middle::ty::{self, AssocKind, EarlyBinder, Ty, TyCtxt, TypeFoldable, TypeSuperFoldable};
 use rustc_middle::ty::{InternalSubsts, SubstsRef};
@@ -648,7 +649,8 @@ impl<'tcx> chalk_solve::RustIrDatabase<RustInterner<'tcx>> for RustIrDatabase<'t
         _closure_id: chalk_ir::ClosureId<RustInterner<'tcx>>,
         substs: &chalk_ir::Substitution<RustInterner<'tcx>>,
     ) -> chalk_ir::Binders<chalk_ir::Ty<RustInterner<'tcx>>> {
-        let inputs_and_output = self.closure_inputs_and_output(_closure_id, substs);
+        let substs = substs.clone().shifted_in(self.interner);
+        let inputs_and_output = self.closure_inputs_and_output(_closure_id, &substs);
         let tuple = substs.as_slice(self.interner).last().unwrap().assert_ty_ref(self.interner);
         inputs_and_output.map_ref(|_| tuple.clone())
     }
