@@ -68,9 +68,18 @@ impl<'tcx> LowerInto<'tcx, SubstsRef<'tcx>> for &chalk_ir::Substitution<RustInte
 
 impl<'tcx> LowerInto<'tcx, chalk_ir::AliasTy<RustInterner<'tcx>>> for ty::ProjectionTy<'tcx> {
     fn lower_into(self, interner: RustInterner<'tcx>) -> chalk_ir::AliasTy<RustInterner<'tcx>> {
+        // In Chalk, the associated type substs come first
+        let (trait_ref, own_substs) = self.trait_ref_and_own_substs(interner.tcx);
+        let substitution = chalk_ir::Substitution::from_iter(
+            interner,
+            own_substs
+                .into_iter()
+                .map(|arg| arg.lower_into(interner))
+                .chain(trait_ref.substs.into_iter().map(|arg| arg.lower_into(interner))),
+        );
         chalk_ir::AliasTy::Projection(chalk_ir::ProjectionTy {
             associated_ty_id: chalk_ir::AssocTypeId(self.item_def_id),
-            substitution: self.substs.lower_into(interner),
+            substitution,
         })
     }
 }
