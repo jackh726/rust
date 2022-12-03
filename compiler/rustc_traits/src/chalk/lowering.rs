@@ -133,13 +133,15 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::InEnvironment<chalk_ir::Goal<RustInterner<'
                         interner.tcx.types.unit.lower_into(interner),
                     )),
                 },
+                ty::PredicateKind::ConstEvaluatable(..) => {
+                    unimplemented!("predicate `ConstEvaluatable")
+                }
                 ty::PredicateKind::ObjectSafe(..)
                 | ty::PredicateKind::ClosureKind(..)
                 | ty::PredicateKind::Subtype(..)
                 | ty::PredicateKind::Coerce(..)
-                | ty::PredicateKind::ConstEvaluatable(..)
                 | ty::PredicateKind::Ambiguous
-                | ty::PredicateKind::ConstEquate(..) => bug!("unexpected predicate {}", predicate),
+                | ty::PredicateKind::ConstEquate(..) => unimplemented!("predicate {}", predicate),
             };
             let value = chalk_ir::ProgramClauseImplication {
                 consequence,
@@ -367,12 +369,10 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Ty<RustInterner<'tcx>>> for Ty<'tcx> {
                 chalk_ir::TyKind::Tuple(types.len(), types.as_substs().lower_into(interner))
             }
             ty::Projection(proj) => chalk_ir::TyKind::Alias(proj.lower_into(interner)),
-            ty::Opaque(def_id, substs) => {
-                chalk_ir::TyKind::Alias(chalk_ir::AliasTy::Opaque(chalk_ir::OpaqueTy {
-                    opaque_ty_id: chalk_ir::OpaqueTyId(def_id),
-                    substitution: substs.lower_into(interner),
-                }))
-            }
+            ty::Opaque(def_id, substs) => chalk_ir::TyKind::OpaqueType(
+                chalk_ir::OpaqueTyId(def_id),
+                substs.lower_into(interner),
+            ),
             // This should have been done eagerly prior to this, and all Params
             // should have been substituted to placeholders
             ty::Param(_) => panic!("Lowering Param when not expected."),
@@ -573,7 +573,9 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::Const<RustInterner<'tcx>>> for ty::Const<'t
             ty::ConstKind::Bound(db, bound) => chalk_ir::ConstValue::BoundVar(
                 chalk_ir::BoundVar::new(chalk_ir::DebruijnIndex::new(db.as_u32()), bound.index()),
             ),
-            _ => unimplemented!("Const not implemented. {:?}", self),
+            ty::ConstKind::Unevaluated(..) => unimplemented!("lowering ty::ConstKind::Unevaluated"),
+            ty::ConstKind::Param(..) => unimplemented!("lowering ty::ConstKind::Param"),
+            _ => unimplemented!("lowering ty::ConstKind::Param"),
         };
         chalk_ir::ConstData { ty, value }.intern(interner)
     }
