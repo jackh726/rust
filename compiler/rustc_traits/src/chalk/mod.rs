@@ -75,7 +75,10 @@ pub(crate) fn evaluate_goal<'tcx>(
                         chalk_ir::VariableKind::Lifetime,
                         chalk_ir::UniverseIndex { counter: ui.index() },
                     ),
-                    CanonicalVarKind::Const(_ui, _ty) => unimplemented!(),
+                    CanonicalVarKind::Const(ui, ty) => chalk_ir::WithKind::new(
+                        chalk_ir::VariableKind::Const(ty.lower_into(interner)),
+                        chalk_ir::UniverseIndex { counter: ui.index() },
+                    ),
                     CanonicalVarKind::PlaceholderConst(_pc, _ty) => unimplemented!(),
                 }),
             ),
