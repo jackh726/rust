@@ -473,7 +473,29 @@ impl<'tcx> LowerInto<'tcx, Ty<'tcx>> for &chalk_ir::Ty<RustInterner<'tcx>> {
                     ty::Opaque(opaque.opaque_ty_id.0, opaque.substitution.lower_into(interner))
                 }
             },
-            TyKind::Function(_quantified_ty) => unimplemented!(),
+            TyKind::Function(quantified_ty) => {
+                let inputs_and_output = interner.tcx.mk_type_list(
+                    quantified_ty
+                        .substitution
+                        .0
+                        .iter(interner)
+                        .map(|s| s.assert_ty_ref(interner).lower_into(interner)),
+                );
+                let fn_sig = ty::FnSig {
+                    abi: quantified_ty.sig.abi,
+                    unsafety: match quantified_ty.sig.safety {
+                        chalk_ir::Safety::Safe => Unsafety::Normal,
+                        chalk_ir::Safety::Unsafe => Unsafety::Unsafe,
+                    },
+                    c_variadic: quantified_ty.sig.variadic,
+                    inputs_and_output,
+                };
+                let bound_vars = interner.tcx.mk_bound_variable_kinds(
+                    (0..quantified_ty.num_binders)
+                        .map(|i| ty::BoundVariableKind::Region(ty::BrAnon(i as u32, None))),
+                );
+                ty::FnPtr(ty::Binder::bind_with_vars(fn_sig, bound_vars))
+            }
             TyKind::BoundVar(_bound) => ty::Bound(
                 ty::DebruijnIndex::from_usize(_bound.debruijn.depth() as usize),
                 ty::BoundTy {
