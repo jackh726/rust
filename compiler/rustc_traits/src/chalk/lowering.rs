@@ -262,8 +262,12 @@ impl<'tcx> LowerInto<'tcx, chalk_ir::AliasEq<RustInterner<'tcx>>>
 {
     fn lower_into(self, interner: RustInterner<'tcx>) -> chalk_ir::AliasEq<RustInterner<'tcx>> {
         // FIXME(associated_const_equality): teach chalk about terms for alias eq.
+        let ty = match self.term.unpack() {
+            ty::TermKind::Ty(ty) => ty,
+            ty::TermKind::Const(_) => unimplemented!(),
+        };
         chalk_ir::AliasEq {
-            ty: self.term.ty().unwrap().lower_into(interner),
+            ty: ty.lower_into(interner),
             alias: self.projection_ty.lower_into(interner),
         }
     }
