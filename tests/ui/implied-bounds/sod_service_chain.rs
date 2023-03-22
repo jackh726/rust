@@ -1,3 +1,4 @@
+// check-pass
 // Found in a crater run on #118553
 
 pub trait Debug {}
@@ -27,11 +28,10 @@ pub struct ServiceChainBuilder<P: Service, S: Service<Input = P::Output>> {
 }
 impl<P: Service, S: Service<Input = P::Output>> ServiceChainBuilder<P, S> {
     pub fn next<NS: Service<Input = S::Output>>(
+    //~^ WARN method is missing
+    //~| WARN this was previously accepted
         self,
     ) -> ServiceChainBuilder<ServiceChain<P, S>, NS> {
-        //~^ the associated type
-        //~| the associated type
-        //~| the associated type
         panic!();
     }
 }

@@ -1,31 +1,17 @@
-error[E0310]: the associated type `<P as Service>::Error` may not live long enough
-  --> $DIR/sod_service_chain.rs:31:10
+warning: method is missing necessary lifetime bounds
+  --> $DIR/sod_service_chain.rs:30:5
    |
-LL |     ) -> ServiceChainBuilder<ServiceChain<P, S>, NS> {
-   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |          |
-   |          the associated type `<P as Service>::Error` must be valid for the static lifetime...
-   |          ...so that the type `<P as Service>::Error` will meet its required lifetime bounds
+LL | /     pub fn next<NS: Service<Input = S::Output>>(
+LL | |
+LL | |
+LL | |         self,
+LL | |     ) -> ServiceChainBuilder<ServiceChain<P, S>, NS> {
+   | |____________________________________________________^
    |
-help: consider adding an explicit lifetime bound
-   |
-LL |     ) -> ServiceChainBuilder<ServiceChain<P, S>, NS> where <P as Service>::Error: 'static {
-   |                                                      ++++++++++++++++++++++++++++++++++++
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #109628 <https://github.com/rust-lang/rust/issues/109628>
+   = note: to get more detailed errors, use `#[deny(implied_bounds_from_trait_impl)]`
+   = note: `#[warn(implied_bounds_from_trait_impl)]` on by default
 
-error[E0310]: the associated type `<S as Service>::Error` may not live long enough
-  --> $DIR/sod_service_chain.rs:31:10
-   |
-LL |     ) -> ServiceChainBuilder<ServiceChain<P, S>, NS> {
-   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |          |
-   |          the associated type `<S as Service>::Error` must be valid for the static lifetime...
-   |          ...so that the type `<S as Service>::Error` will meet its required lifetime bounds
-   |
-help: consider adding an explicit lifetime bound
-   |
-LL |     ) -> ServiceChainBuilder<ServiceChain<P, S>, NS> where <S as Service>::Error: 'static {
-   |                                                      ++++++++++++++++++++++++++++++++++++
+warning: 1 warning emitted
 
-error: aborting due to 2 previous errors
-
-For more information about this error, try `rustc --explain E0310`.

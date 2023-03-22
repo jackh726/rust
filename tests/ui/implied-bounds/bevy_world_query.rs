@@ -1,8 +1,7 @@
 // check-pass
 
-// We currently special case bevy from erroring on incorrect implied bounds
-// from normalization (issue #109628).
-// Otherwise, we would expect this to hit that error.
+// We currently special case bevy from emitting the `IMPLIED_BOUNDS_FROM_TRAIT_IMPL` lint.
+// Otherwise, we would expect this to hit the lint.
 
 pub trait WorldQuery {}
 impl WorldQuery for &u8 {}
