@@ -1,24 +1,21 @@
-// check-pass
-// known-bug: #109628
+// Foo<Vec<X>> shouldn't imply X: 'static.
+// We don't use region constraints from trait impls in implied bounds.
 
 trait Trait {
     type Assoc;
 }
 
-impl<X: 'static> Trait for (X,) {
+impl<X: 'static> Trait for Vec<X> {
     type Assoc = ();
 }
 
 struct Foo<T: Trait>(T)
 where
-    T::Assoc: Clone; // any predicate using `T::Assoc` works here
+    T::Assoc: 'static, // any predicate naming T::Assoc
+;
 
-fn func1(foo: Foo<(&str,)>) {
-    let _: &'static str = foo.0.0;
-}
-
-trait TestTrait {}
-
-impl<X> TestTrait for [Foo<(X,)>; 1] {}
+fn foo<X>(_: Foo<Vec<X>>) {}
+//~^ ERROR `X` may not live long enough
+//~| ERROR `X` may not live long enough
 
 fn main() {}
