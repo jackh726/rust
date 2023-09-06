@@ -9,6 +9,7 @@
 // we check that the spans for the error message are sane here.
 
 #![feature(associated_type_bounds)]
+#![feature(associated_type_bounds_in_associated_types)]
 
 fn main() {}
 

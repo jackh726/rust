@@ -1,4 +1,5 @@
 #![feature(associated_type_bounds)]
+#![feature(associated_type_bounds_in_associated_types)]
 
 use std::fmt::Debug;
 use std::iter::Empty;

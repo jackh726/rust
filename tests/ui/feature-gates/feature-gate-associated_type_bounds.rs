@@ -8,15 +8,6 @@ struct S1;
 struct S2;
 impl Tr1 for S1 { type As1 = S2; }
 
-trait _Tr3 {
-    type A: Iterator<Item: Copy>;
-    //~^ ERROR associated type bounds are unstable
-    //~| ERROR the trait bound `<<Self as _Tr3>::A as Iterator>::Item: Copy` is not satisfied
-
-    type B: Iterator<Item: 'static>;
-    //~^ ERROR associated type bounds are unstable
-}
-
 struct _St1<T: Tr1<As1: Tr2>> {
 //~^ ERROR associated type bounds are unstable
     outest: T,

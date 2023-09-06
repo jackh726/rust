@@ -60,7 +60,7 @@ macro_rules! gate_feature_post {
 }
 
 pub fn check_attribute(attr: &ast::Attribute, sess: &Session, features: &Features) {
-    PostExpansionVisitor { sess, features }.visit_attribute(attr)
+    PostExpansionVisitor { sess, features, in_associated_type: false }.visit_attribute(attr)
 }
 
 struct PostExpansionVisitor<'a> {
@@ -68,9 +68,18 @@ struct PostExpansionVisitor<'a> {
 
     // `sess` contains a `Features`, but this might not be that one.
     features: &'a Features,
+
+    /// Used to gate associated type constraints within associated types.
+    in_associated_type: bool,
 }
 
 impl<'a> PostExpansionVisitor<'a> {
+    fn with_in_associated_type(&mut self, f: impl FnOnce(&mut Self)) {
+        let old = std::mem::replace(&mut self.in_associated_type, true);
+        f(self);
+        self.in_associated_type = old;
+    }
+
     fn check_abi(&self, abi: ast::StrLit, constness: ast::Const) {
         let ast::StrLit { symbol_unescaped, span, .. } = abi;
 
@@ -459,7 +468,14 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
 
     fn visit_assoc_constraint(&mut self, constraint: &'a AssocConstraint) {
         if let AssocConstraintKind::Bound { .. } = constraint.kind {
-            if let Some(ast::GenericArgs::Parenthesized(args)) = constraint.gen_args.as_ref()
+            if self.in_associated_type {
+                gate_feature_post!(
+                    &self,
+                    associated_type_bounds_in_associated_types,
+                    constraint.span,
+                    "associated type bounds in associated types are unstable"
+                );
+            } else if let Some(ast::GenericArgs::Parenthesized(args)) = constraint.gen_args.as_ref()
                 && args.inputs.is_empty()
                 && matches!(args.output, ast::FnRetTy::Default(..))
             {
@@ -482,8 +498,8 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
     }
 
     fn visit_assoc_item(&mut self, i: &'a ast::AssocItem, ctxt: AssocCtxt) {
-        let is_fn = match &i.kind {
-            ast::AssocItemKind::Fn(_) => true,
+        let (is_fn, is_associated_type) = match &i.kind {
+            ast::AssocItemKind::Fn(_) => (true, false),
             ast::AssocItemKind::Type(box ast::TyAlias { ty, .. }) => {
                 if let (Some(_), AssocCtxt::Trait) = (ty, ctxt) {
                     gate_feature_post!(
@@ -496,9 +512,9 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
                 if let Some(ty) = ty {
                     self.check_impl_trait(ty, true);
                 }
-                false
+                (false, true)
             }
-            _ => false,
+            _ => (false, true),
         };
         if let ast::Defaultness::Default(_) = i.kind.defaultness() {
             // Limit `min_specialization` to only specializing functions.
@@ -510,14 +526,18 @@ impl<'a> Visitor<'a> for PostExpansionVisitor<'a> {
                 "specialization is unstable"
             );
         }
-        visit::walk_assoc_item(self, i, ctxt)
+        if is_associated_type {
+            self.with_in_associated_type(|this| visit::walk_assoc_item(this, i, ctxt));
+        } else {
+            visit::walk_assoc_item(self, i, ctxt)
+        }
     }
 }
 
 pub fn check_crate(krate: &ast::Crate, sess: &Session, features: &Features) {
     maybe_stage_features(sess, features, krate);
     check_incompatible_features(sess, features);
-    let mut visitor = PostExpansionVisitor { sess, features };
+    let mut visitor = PostExpansionVisitor { sess, features, in_associated_type: false };
 
     let spans = sess.parse_sess.gated_spans.spans.borrow();
     macro_rules! gate_all {

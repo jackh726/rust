@@ -398,6 +398,7 @@ symbols! {
         associated_const_equality,
         associated_consts,
         associated_type_bounds,
+        associated_type_bounds_in_associated_types,
         associated_type_defaults,
         associated_types,
         assume,

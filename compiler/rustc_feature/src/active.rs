@@ -332,8 +332,10 @@ declare_features! (
     (active, asm_unwind, "1.58.0", Some(93334), None),
     /// Allows users to enforce equality of associated constants `TraitImpl<AssocConst=3>`.
     (active, associated_const_equality, "1.58.0", Some(92827), None),
-    /// Allows the user of associated type bounds.
+    /// Allows the use of associated type bounds.
     (active, associated_type_bounds, "1.34.0", Some(52662), None),
+    /// Allows the use of associated type bounds within associated type definitions.
+    (active, associated_type_bounds_in_associated_types, "CURRENT_RUSTC_VERSION", Some(52662), None),
     /// Allows associated type defaults.
     (active, associated_type_defaults, "1.2.0", Some(29661), None),
     /// Allows `async || body` closures.

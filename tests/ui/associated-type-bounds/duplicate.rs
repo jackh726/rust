@@ -1,4 +1,5 @@
 #![feature(associated_type_bounds)]
+#![feature(associated_type_bounds_in_associated_types)]
 #![feature(type_alias_impl_trait)]
 
 use std::iter;
