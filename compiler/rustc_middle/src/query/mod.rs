@@ -1953,7 +1953,7 @@ rustc_queries! {
         desc { "normalizing `{}`", goal.value }
     }
 
-    query implied_outlives_bounds(
+    query implied_outlives_bounds_compat(
         goal: CanonicalTyGoal<'tcx>
     ) -> Result<
         &'tcx Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>>,

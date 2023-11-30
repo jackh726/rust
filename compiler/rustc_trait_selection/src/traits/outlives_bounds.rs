@@ -11,7 +11,7 @@ pub use rustc_middle::traits::query::OutlivesBound;
 
 pub type Bounds<'a, 'tcx: 'a> = impl Iterator<Item = OutlivesBound<'tcx>> + 'a;
 pub trait InferCtxtExt<'a, 'tcx> {
-    fn implied_outlives_bounds(
+    fn implied_outlives_bounds_compat(
         &self,
         param_env: ty::ParamEnv<'tcx>,
         body_id: LocalDefId,
@@ -47,7 +47,7 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
     ///   into the inference context with this body-id.
     /// - `ty`, the type that we are supposed to assume is WF.
     #[instrument(level = "debug", skip(self, param_env, body_id), ret)]
-    fn implied_outlives_bounds(
+    fn implied_outlives_bounds_compat(
         &self,
         param_env: ty::ParamEnv<'tcx>,
         body_id: LocalDefId,
@@ -67,7 +67,7 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
         let mut canonical_var_values = OriginalQueryValues::default();
         let canonical_ty =
             self.canonicalize_query_keep_static(param_env.and(ty), &mut canonical_var_values);
-        let Ok(canonical_result) = self.tcx.implied_outlives_bounds(canonical_ty) else {
+        let Ok(canonical_result) = self.tcx.implied_outlives_bounds_compat(canonical_ty) else {
             return vec![];
         };
 
@@ -113,7 +113,7 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
             if !errors.is_empty() {
                 self.tcx.sess.span_delayed_bug(
                     span,
-                    "implied_outlives_bounds failed to solve obligations from instantiation",
+                    "implied_outlives_bounds_compat failed to solve obligations from instantiation",
                 );
             }
         };
@@ -127,6 +127,7 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
         body_id: LocalDefId,
         tys: FxIndexSet<Ty<'tcx>>,
     ) -> Bounds<'a, 'tcx> {
-        tys.into_iter().flat_map(move |ty| self.implied_outlives_bounds(param_env, body_id, ty))
+        tys.into_iter()
+            .flat_map(move |ty| self.implied_outlives_bounds_compat(param_env, body_id, ty))
     }
 }

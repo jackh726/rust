@@ -12,10 +12,10 @@ use rustc_trait_selection::traits::query::type_op::implied_outlives_bounds::comp
 use rustc_trait_selection::traits::query::{CanonicalTyGoal, NoSolution};
 
 pub(crate) fn provide(p: &mut Providers) {
-    *p = Providers { implied_outlives_bounds, ..*p };
+    *p = Providers { implied_outlives_bounds_compat, ..*p };
 }
 
-fn implied_outlives_bounds<'tcx>(
+fn implied_outlives_bounds_compat<'tcx>(
     tcx: TyCtxt<'tcx>,
     goal: CanonicalTyGoal<'tcx>,
 ) -> Result<
