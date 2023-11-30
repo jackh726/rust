@@ -1,7 +1,4 @@
-// This is an ICE because of #104478.
-// known-bug: unknown
-// failure-status: 101
-// dont-check-compiler-stderr
+// check-pass
 
 #![allow(unreachable_code, unused)]
 

@@ -1,10 +1,11 @@
 // Test for normalization of projections that appear in the item bounds
 // (versus those that appear directly in the input types).
-// Both revisions should pass.
-// `lifetime` revision was incorrectly rejected. See #109799.
+// Both revisions should pass. `lifetime` revision is a bug.
 //
 // revisions: param_ty lifetime
-// check-pass
+// [param_ty] check-pass
+// [lifetime] check-fail
+// [lifetime] known-bug: #109799
 
 pub trait Iter {
     type Item;

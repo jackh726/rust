@@ -9,6 +9,7 @@ use rustc_span::def_id::LocalDefId;
 
 pub use rustc_middle::traits::query::OutlivesBound;
 
+pub type BoundsCompat<'a, 'tcx: 'a> = impl Iterator<Item = OutlivesBound<'tcx>> + 'a;
 pub type Bounds<'a, 'tcx: 'a> = impl Iterator<Item = OutlivesBound<'tcx>> + 'a;
 pub trait InferCtxtExt<'a, 'tcx> {
     fn implied_outlives_bounds_compat(
@@ -23,6 +24,12 @@ pub trait InferCtxtExt<'a, 'tcx> {
         param_env: ty::ParamEnv<'tcx>,
         body_id: LocalDefId,
         tys: FxIndexSet<Ty<'tcx>>,
+    ) -> BoundsCompat<'a, 'tcx>;
+
+    fn implied_bounds_tys(
+        &'a self,
+        param_env: ty::ParamEnv<'tcx>,
+        tys: &'a FxIndexSet<Ty<'tcx>>,
     ) -> Bounds<'a, 'tcx>;
 }
 
@@ -126,8 +133,27 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
         param_env: ParamEnv<'tcx>,
         body_id: LocalDefId,
         tys: FxIndexSet<Ty<'tcx>>,
-    ) -> Bounds<'a, 'tcx> {
+    ) -> BoundsCompat<'a, 'tcx> {
         tys.into_iter()
             .flat_map(move |ty| self.implied_outlives_bounds_compat(param_env, body_id, ty))
+    }
+
+    fn implied_bounds_tys(
+        &'a self,
+        param_env: ParamEnv<'tcx>,
+        tys: &'a FxIndexSet<Ty<'tcx>>,
+    ) -> Bounds<'a, 'tcx> {
+        tys.iter()
+            .flat_map(move |&ty| {
+                let ty = self.resolve_vars_if_possible(ty);
+                let ty = OpportunisticRegionResolver::new(self).fold_ty(ty);
+
+                if ty.has_infer() {
+                    return &[] as &[OutlivesBound<'_>];
+                }
+
+                self.tcx.implied_outlives_bounds(param_env.and(ty)).unwrap_or(&[])
+            })
+            .copied()
     }
 }

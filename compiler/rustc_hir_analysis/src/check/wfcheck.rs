@@ -110,8 +110,6 @@ where
 
     let assumed_wf_types = wfcx.ocx.assumed_wf_types_and_report_errors(param_env, body_def_id)?;
 
-    let implied_bounds = infcx.implied_bounds_tys_compat(param_env, body_def_id, assumed_wf_types);
-
     let errors = wfcx.select_all_or_error();
     if !errors.is_empty() {
         let err = infcx.err_ctxt().report_fulfillment_errors(errors);
@@ -126,9 +124,46 @@ where
         }
     }
 
+    let infcx_compat = infcx.fork();
+
+    let implied_bounds = infcx.implied_bounds_tys(param_env, &assumed_wf_types);
     let outlives_env = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
 
-    wfcx.ocx.resolve_regions_and_report_errors(body_def_id, &outlives_env)?;
+    let errors = infcx.resolve_regions(&outlives_env);
+    if errors.is_empty() {
+        return Ok(());
+    }
+
+    let implied_bounds =
+        infcx_compat.implied_bounds_tys_compat(param_env, body_def_id, assumed_wf_types);
+    let outlives_env = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
+    let errors_compat = infcx_compat.resolve_regions(&outlives_env);
+    if !errors_compat.is_empty() {
+        return Err(infcx_compat.err_ctxt().report_region_errors(body_def_id, &errors_compat));
+    }
+
+    let hir_id = tcx.local_def_id_to_hir_id(body_def_id);
+    let (lint_level, _) = tcx
+        .lint_level_at_node(rustc_session::lint::builtin::IMPLIED_BOUNDS_FROM_TRAIT_IMPL, hir_id);
+    tcx.struct_span_lint_hir(
+        rustc_session::lint::builtin::IMPLIED_BOUNDS_FROM_TRAIT_IMPL,
+        hir_id,
+        tcx.def_span(body_def_id),
+        format!("{} is missing necessary lifetime bounds", tcx.def_descr(body_def_id.into())),
+        |lint| {
+            if !lint_level.is_error() {
+                lint.note(
+                    "to get more detailed errors, use `#[deny(implied_bounds_from_trait_impl)]`",
+                )
+            } else {
+                lint.note("more concrete lifetime errors are emitted below")
+            }
+        },
+    );
+    if lint_level.is_error() {
+        infcx.err_ctxt().report_region_errors(body_def_id, &errors);
+    }
+
     infcx.tainted_by_errors().error_reported()
 }
 

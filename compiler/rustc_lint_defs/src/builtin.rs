@@ -48,6 +48,7 @@ declare_lint_pass! {
         ILL_FORMED_ATTRIBUTE_INPUT,
         ILLEGAL_FLOATING_POINT_LITERAL_PATTERN,
         IMPLIED_BOUNDS_ENTAILMENT,
+        IMPLIED_BOUNDS_FROM_TRAIT_IMPL,
         INCOMPLETE_INCLUDE,
         INDIRECT_STRUCTURAL_MATCH,
         INEFFECTIVE_UNSTABLE_TRAIT_IMPL,
@@ -4654,5 +4655,61 @@ declare_lint! {
     @future_incompatible = FutureIncompatibleInfo {
         reason: FutureIncompatibilityReason::FutureReleaseErrorReportInDeps,
         reference: "issue #X <https://github.com/rust-lang/rust/issues/X>",
+    };
+}
+
+
+Viewed
+@@ -3389,6 +3389,7 @@ declare_lint_pass! {
+        ILL_FORMED_ATTRIBUTE_INPUT,
+        ILLEGAL_FLOATING_POINT_LITERAL_PATTERN,
+        IMPLIED_BOUNDS_ENTAILMENT,
+        IMPLIED_BOUNDS_FROM_TRAIT_IMPL,
+        INCOMPLETE_INCLUDE,
+        INDIRECT_STRUCTURAL_MATCH,
+        INEFFECTIVE_UNSTABLE_TRAIT_IMPL,
+@@ -4621,3 +4622,44 @@ declare_lint! {
+        reference: "issue #115010 <https://github.com/rust-lang/rust/issues/115010>",
+    };
+}
+
+declare_lint! {
+    /// The `implied_bounds_from_trait_impl` lint detects
+    /// a compiler bug allowed some code to assume invalid implied lifetime bounds.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,compile_fail
+    /// #![deny(implied_bounds_from_trait_impl)]
+    ///
+    /// trait Trait {
+    ///     type Assoc;
+    /// }
+    ///
+    /// impl<X: 'static> Trait for (X,) {
+    ///     type Assoc = ();
+    /// }
+    ///
+    /// struct Foo<T: Trait>(T)
+    /// where
+    ///     T::Assoc: Clone; // any bound using `T::Assoc`
+    ///
+    /// fn func(foo: Foo<(&str,)>) {
+    ///     let _: &'static str = foo.0.0;
+    /// }
+    /// ```
+    ///
+    /// {{produces}}
+    ///
+    /// ### Explanation
+    ///
+    /// FIXME: explanataion
+    ///
+    pub IMPLIED_BOUNDS_FROM_TRAIT_IMPL,
+    Warn,
+    "item uses illegal implied bounds derived from a trait impl",
+    @future_incompatible = FutureIncompatibleInfo {
+        reason: FutureIncompatibilityReason::FutureReleaseErrorDontReportInDeps,
+        reference: "issue #109628 <https://github.com/rust-lang/rust/issues/109628>",
     };
 }
