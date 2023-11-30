@@ -110,7 +110,7 @@ where
 
     let assumed_wf_types = wfcx.ocx.assumed_wf_types_and_report_errors(param_env, body_def_id)?;
 
-    let implied_bounds = infcx.implied_bounds_tys(param_env, body_def_id, assumed_wf_types);
+    let implied_bounds = infcx.implied_bounds_tys_compat(param_env, body_def_id, assumed_wf_types);
 
     let errors = wfcx.select_all_or_error();
     if !errors.is_empty() {
@@ -717,7 +717,7 @@ fn resolve_regions_with_wf_tys<'tcx>(
     let infcx = tcx.infer_ctxt().build();
     let outlives_environment = OutlivesEnvironment::with_bounds(
         param_env,
-        infcx.implied_bounds_tys(param_env, id, wf_tys.clone()),
+        infcx.implied_bounds_tys_compat(param_env, id, wf_tys.clone()),
     );
     let region_bound_pairs = outlives_environment.region_bound_pairs();
 

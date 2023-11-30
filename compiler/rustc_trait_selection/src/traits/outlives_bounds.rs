@@ -18,7 +18,7 @@ pub trait InferCtxtExt<'a, 'tcx> {
         ty: Ty<'tcx>,
     ) -> Vec<OutlivesBound<'tcx>>;
 
-    fn implied_bounds_tys(
+    fn implied_bounds_tys_compat(
         &'a self,
         param_env: ty::ParamEnv<'tcx>,
         body_id: LocalDefId,
@@ -121,7 +121,7 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
         bounds
     }
 
-    fn implied_bounds_tys(
+    fn implied_bounds_tys_compat(
         &'a self,
         param_env: ParamEnv<'tcx>,
         body_id: LocalDefId,
