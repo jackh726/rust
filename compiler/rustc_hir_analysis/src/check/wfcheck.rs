@@ -175,7 +175,7 @@ where
             }
         },
     );
-    if lint_level.is_error() {
+    if true || lint_level.is_error() {
         infcx.err_ctxt().report_region_errors(body_def_id, &errors);
     }
 
