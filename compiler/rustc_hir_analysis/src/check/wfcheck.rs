@@ -13,6 +13,7 @@ use rustc_infer::infer::outlives::obligations::TypeOutlives;
 use rustc_infer::infer::{self, InferCtxt, TyCtxtInferExt};
 use rustc_middle::mir::ConstraintCategory;
 use rustc_middle::query::Providers;
+use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::trait_def::TraitSpecializationKind;
 use rustc_middle::ty::{
     self, AdtKind, GenericParamDefKind, ToPredicate, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable,
@@ -126,6 +127,7 @@ where
 
     let infcx_compat = infcx.fork();
 
+    debug!(?assumed_wf_types);
     let implied_bounds = infcx.implied_bounds_tys(param_env, &assumed_wf_types);
     let outlives_env = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
 
@@ -135,11 +137,24 @@ where
     }
 
     let implied_bounds =
-        infcx_compat.implied_bounds_tys_compat(param_env, body_def_id, assumed_wf_types);
+        infcx_compat.implied_bounds_tys_compat(param_env, body_def_id, &assumed_wf_types);
     let outlives_env = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
     let errors_compat = infcx_compat.resolve_regions(&outlives_env);
     if !errors_compat.is_empty() {
         return Err(infcx_compat.err_ctxt().report_region_errors(body_def_id, &errors_compat));
+    }
+
+    // We don't want to emit this for dependents of Bevy, for now.
+    for ty in assumed_wf_types.iter() {
+        match ty.kind() {
+            ty::Adt(def, _) => {
+                let adt_did = with_no_trimmed_paths!(infcx.tcx.def_path_str(def.0.did));
+                if adt_did == "bevy_ecs::system::ParamSet" {
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
     }
 
     let hir_id = tcx.local_def_id_to_hir_id(body_def_id);
@@ -752,7 +767,7 @@ fn resolve_regions_with_wf_tys<'tcx>(
     let infcx = tcx.infer_ctxt().build();
     let outlives_environment = OutlivesEnvironment::with_bounds(
         param_env,
-        infcx.implied_bounds_tys_compat(param_env, id, wf_tys.clone()),
+        infcx.implied_bounds_tys_compat(param_env, id, wf_tys),
     );
     let region_bound_pairs = outlives_environment.region_bound_pairs();
 

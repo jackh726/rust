@@ -23,7 +23,7 @@ pub trait InferCtxtExt<'a, 'tcx> {
         &'a self,
         param_env: ty::ParamEnv<'tcx>,
         body_id: LocalDefId,
-        tys: FxIndexSet<Ty<'tcx>>,
+        tys: &'a FxIndexSet<Ty<'tcx>>,
     ) -> BoundsCompat<'a, 'tcx>;
 
     fn implied_bounds_tys(
@@ -132,10 +132,9 @@ impl<'a, 'tcx: 'a> InferCtxtExt<'a, 'tcx> for InferCtxt<'tcx> {
         &'a self,
         param_env: ParamEnv<'tcx>,
         body_id: LocalDefId,
-        tys: FxIndexSet<Ty<'tcx>>,
+        tys: &'a FxIndexSet<Ty<'tcx>>,
     ) -> BoundsCompat<'a, 'tcx> {
-        tys.into_iter()
-            .flat_map(move |ty| self.implied_outlives_bounds_compat(param_env, body_id, ty))
+        tys.iter().flat_map(move |ty| self.implied_outlives_bounds_compat(param_env, body_id, *ty))
     }
 
     fn implied_bounds_tys(
