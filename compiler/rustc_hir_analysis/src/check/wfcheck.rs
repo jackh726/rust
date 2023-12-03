@@ -149,7 +149,7 @@ where
         match ty.kind() {
             ty::Adt(def, _) => {
                 let adt_did = with_no_trimmed_paths!(infcx.tcx.def_path_str(def.0.did));
-                if adt_did == "bevy_ecs::system::ParamSet" {
+                if adt_did.contains("ParamSet") {
                     return Ok(());
                 }
             }
