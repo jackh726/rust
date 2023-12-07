@@ -66,7 +66,7 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
     ocx: &ObligationCtxt<'_, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     ty: Ty<'tcx>,
-) -> Result<&'tcx [OutlivesBound<'tcx>], NoSolution> {
+) -> Result<Vec<OutlivesBound<'tcx>>, NoSolution> {
     let normalize_op = |ty| {
         let ty = ocx.normalize(&ObligationCause::dummy(), param_env, ty);
         if !ocx.select_all_or_error().is_empty() {
@@ -74,7 +74,6 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
         }
         let ty = ocx.infcx.resolve_vars_if_possible(ty);
         let ty = OpportunisticRegionResolver::new(&ocx.infcx).fold_ty(ty);
-        assert!(!ty.has_infer());
         Ok(ty)
     };
 
@@ -139,7 +138,7 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
         }
     }
 
-    Ok(ocx.infcx.tcx.arena.alloc_slice(&outlives_bounds))
+    Ok(outlives_bounds)
 }
 
 pub fn compute_implied_outlives_bounds_compat_inner<'tcx>(

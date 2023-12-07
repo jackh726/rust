@@ -1,5 +1,5 @@
 // check-pass
-// Related to crater regressions on #118553
+// Found in a crater run on #118553
 
 pub trait Debug {}
 

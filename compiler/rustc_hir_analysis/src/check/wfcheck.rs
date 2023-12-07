@@ -128,7 +128,7 @@ where
     let infcx_compat = infcx.fork();
 
     debug!(?assumed_wf_types);
-    let implied_bounds = infcx.implied_bounds_tys(param_env, &assumed_wf_types);
+    let implied_bounds = infcx.implied_bounds_tys(param_env, body_def_id, &assumed_wf_types);
     let outlives_env = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
 
     let errors = infcx.resolve_regions(&outlives_env);
