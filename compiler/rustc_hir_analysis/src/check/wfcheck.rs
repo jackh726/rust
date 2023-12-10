@@ -145,13 +145,24 @@ where
     }
 
     // We don't want to emit this for dependents of Bevy, for now.
+    let is_bevy_paramset = |def: ty::AdtDef<'_>| {
+        let adt_did = with_no_trimmed_paths!(infcx.tcx.def_path_str(def.0.did));
+        adt_did.contains("ParamSet")
+    };
     for ty in assumed_wf_types.iter() {
         match ty.kind() {
             ty::Adt(def, _) => {
-                let adt_did = with_no_trimmed_paths!(infcx.tcx.def_path_str(def.0.did));
-                if adt_did.contains("ParamSet") {
+                if is_bevy_paramset(*def) {
                     return Ok(());
                 }
+            }
+            ty::Ref(_, ty, _) => match ty.kind() {
+                ty::Adt(def, _) => {
+                    if is_bevy_paramset(*def) {
+                        return Ok(());
+                    }
+                }
+                _ => {}
             }
             _ => {}
         }

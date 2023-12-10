@@ -21,4 +21,6 @@ pub struct ParamSet<T: SystemParam>(T) where T::State: Sized;
 
 fn handler<'a>(_: ParamSet<Query<&'a u8>>) {}
 
+fn ref_handler<'a>(_: &ParamSet<Query<&'a u8>>) {}
+
 fn main() {}
