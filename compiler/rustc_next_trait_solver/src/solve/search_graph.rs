@@ -27,7 +27,7 @@ where
     type ValidationScope = Infallible;
     fn enter_validation_scope(
         _cx: Self::Cx,
-        _input: CanonicalInput<I>,
+        _input: &CanonicalInput<I>,
     ) -> Option<Self::ValidationScope> {
         None
     }
@@ -44,7 +44,7 @@ where
     fn initial_provisional_result(
         cx: I,
         kind: PathKind,
-        input: CanonicalInput<I>,
+        input: &CanonicalInput<I>,
     ) -> QueryResult<I> {
         match kind {
             PathKind::Coinductive => response_no_constraints(cx, input, Certainty::Yes),
@@ -55,13 +55,13 @@ where
     fn is_initial_provisional_result(
         cx: Self::Cx,
         kind: PathKind,
-        input: CanonicalInput<I>,
+        input: &CanonicalInput<I>,
         result: &QueryResult<I>,
     ) -> bool {
         match kind {
-            PathKind::Coinductive => &response_no_constraints(cx, input, Certainty::Yes) == result,
+            PathKind::Coinductive => &response_no_constraints(cx, &input, Certainty::Yes) == result,
             PathKind::Inductive => {
-                &response_no_constraints(cx, input, Certainty::overflow(false)) == result
+                &response_no_constraints(cx, &input, Certainty::overflow(false)) == result
             }
         }
     }
@@ -72,10 +72,10 @@ where
         input: CanonicalInput<I>,
     ) -> QueryResult<I> {
         inspect.canonical_goal_evaluation_overflow();
-        response_no_constraints(cx, input, Certainty::overflow(true))
+        response_no_constraints(cx, &input, Certainty::overflow(true))
     }
 
-    fn on_fixpoint_overflow(cx: I, input: CanonicalInput<I>) -> QueryResult<I> {
+    fn on_fixpoint_overflow(cx: I, input: &CanonicalInput<I>) -> QueryResult<I> {
         response_no_constraints(cx, input, Certainty::overflow(false))
     }
 
@@ -88,21 +88,21 @@ where
 
     fn propagate_ambiguity(
         cx: I,
-        for_input: CanonicalInput<I>,
+        for_input: &CanonicalInput<I>,
         from_result: &QueryResult<I>,
     ) -> QueryResult<I> {
         let certainty = from_result.unwrap().value.certainty;
         response_no_constraints(cx, for_input, certainty)
     }
 
-    fn step_is_coinductive(cx: I, input: CanonicalInput<I>) -> bool {
+    fn step_is_coinductive(cx: I, input: &CanonicalInput<I>) -> bool {
         input.canonical.value.goal.predicate.is_coinductive(cx)
     }
 }
 
 fn response_no_constraints<I: Interner>(
     cx: I,
-    input: CanonicalInput<I>,
+    input: &CanonicalInput<I>,
     certainty: Certainty,
 ) -> QueryResult<I> {
     Ok(super::response_no_constraints_raw(

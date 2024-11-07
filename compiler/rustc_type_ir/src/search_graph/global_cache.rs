@@ -76,11 +76,11 @@ impl<X: Cx> GlobalCache<X> {
     pub(super) fn get<'a>(
         &'a self,
         cx: X,
-        input: X::Input,
+        input: &X::Input,
         available_depth: AvailableDepth,
         mut candidate_is_applicable: impl FnMut(&NestedGoals<X>) -> bool,
     ) -> Option<CacheData<'a, X>> {
-        let entry = self.map.get(&input)?;
+        let entry = self.map.get(input)?;
         if let Some(Success { additional_depth, ref nested_goals, ref result }) = entry.success {
             if available_depth.cache_entry_is_applicable(additional_depth)
                 && candidate_is_applicable(nested_goals)
