@@ -36,12 +36,12 @@ pub trait Interner:
     type Span: Span<Self>;
 
     type GenericArgs: GenericArgs<Self>;
-    type GenericArgsSlice: Copy + Debug + Hash + Eq + SliceLike<Item = Self::GenericArg>;
+    type GenericArgsSlice: Debug + Hash + Eq + SliceLike<Item = Self::GenericArg>;
     type GenericArg: GenericArg<Self>;
     type Term: Term<Self>;
 
-    type BoundVarKinds: Copy + Debug + Hash + Eq + SliceLike<Item = Self::BoundVarKind> + Default;
-    type BoundVarKind: Copy + Debug + Hash + Eq;
+    type BoundVarKinds: Debug + Hash + Eq + SliceLike<Item = Self::BoundVarKind> + Default;
+    type BoundVarKind: Debug + Hash + Eq;
 
     type PredefinedOpaques: Copy
         + Debug

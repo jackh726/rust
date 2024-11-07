@@ -106,7 +106,8 @@ pub enum ProbeStep<I: Interner> {
 /// What kind of probe we're in. In case the probe represents a candidate, or
 /// the final result of the current goal - via [ProbeKind::Root] - we also
 /// store the [QueryResult].
-#[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, QueryResult<I>: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 pub enum ProbeKind<I: Interner> {
     /// The root inference context while proving a goal.

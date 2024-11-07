@@ -51,7 +51,7 @@ impl<X: Cx> GlobalCache<X> {
         encountered_overflow: bool,
         nested_goals: NestedGoals<X>,
     ) {
-        let result = cx.mk_tracked(origin_result, dep_node);
+        let result = cx.mk_tracked(origin_result.clone(), dep_node);
         let entry = self.map.entry(input).or_default();
         if encountered_overflow {
             let with_overflow = WithOverflow { nested_goals, result };

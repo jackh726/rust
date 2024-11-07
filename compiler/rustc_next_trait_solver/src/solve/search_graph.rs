@@ -56,12 +56,12 @@ where
         cx: Self::Cx,
         kind: PathKind,
         input: CanonicalInput<I>,
-        result: QueryResult<I>,
+        result: &QueryResult<I>,
     ) -> bool {
         match kind {
-            PathKind::Coinductive => response_no_constraints(cx, input, Certainty::Yes) == result,
+            PathKind::Coinductive => &response_no_constraints(cx, input, Certainty::Yes) == result,
             PathKind::Inductive => {
-                response_no_constraints(cx, input, Certainty::overflow(false)) == result
+                &response_no_constraints(cx, input, Certainty::overflow(false)) == result
             }
         }
     }
@@ -79,7 +79,7 @@ where
         response_no_constraints(cx, input, Certainty::overflow(false))
     }
 
-    fn is_ambiguous_result(result: QueryResult<I>) -> bool {
+    fn is_ambiguous_result(result: &QueryResult<I>) -> bool {
         result.is_ok_and(|response| {
             has_no_inference_or_external_constraints(response)
                 && matches!(response.value.certainty, Certainty::Maybe(_))
@@ -89,7 +89,7 @@ where
     fn propagate_ambiguity(
         cx: I,
         for_input: CanonicalInput<I>,
-        from_result: QueryResult<I>,
+        from_result: &QueryResult<I>,
     ) -> QueryResult<I> {
         let certainty = from_result.unwrap().value.certainty;
         response_no_constraints(cx, for_input, certainty)

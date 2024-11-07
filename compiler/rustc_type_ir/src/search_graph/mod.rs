@@ -35,7 +35,7 @@ pub use global_cache::GlobalCache;
 /// of the search graph.
 pub trait Cx: Copy {
     type Input: Debug + Eq + Hash + Copy;
-    type Result: Debug + Eq + Hash + Copy;
+    type Result: Debug + Eq + Hash + Clone;
 
     type DepNodeIndex;
     type Tracked<T: Debug + Clone>: Debug;
@@ -86,7 +86,7 @@ pub trait Delegate {
         cx: Self::Cx,
         kind: PathKind,
         input: <Self::Cx as Cx>::Input,
-        result: <Self::Cx as Cx>::Result,
+        result: &<Self::Cx as Cx>::Result,
     ) -> bool;
     fn on_stack_overflow(
         cx: Self::Cx,
@@ -98,11 +98,11 @@ pub trait Delegate {
         input: <Self::Cx as Cx>::Input,
     ) -> <Self::Cx as Cx>::Result;
 
-    fn is_ambiguous_result(result: <Self::Cx as Cx>::Result) -> bool;
+    fn is_ambiguous_result(result: &<Self::Cx as Cx>::Result) -> bool;
     fn propagate_ambiguity(
         cx: Self::Cx,
         for_input: <Self::Cx as Cx>::Input,
-        from_result: <Self::Cx as Cx>::Result,
+        from_result: &<Self::Cx as Cx>::Result,
     ) -> <Self::Cx as Cx>::Result;
 
     fn step_is_coinductive(cx: Self::Cx, input: <Self::Cx as Cx>::Input) -> bool;
@@ -538,7 +538,7 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
                 // the global cache.
                 assert_eq!(result, expected, "input={input:?}");
             } else if D::inspect_is_noop(inspect) {
-                self.insert_global_cache(cx, input, final_entry, result, dep_node)
+                self.insert_global_cache(cx, input, final_entry, result.clone(), dep_node)
             }
         } else if D::ENABLE_PROVISIONAL_CACHE {
             debug_assert!(validate_cache.is_none());
@@ -550,7 +550,7 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
                 heads,
                 path_from_head,
                 nested_goals,
-                result,
+                result: result.clone(),
             });
         } else {
             debug_assert!(validate_cache.is_none());
@@ -670,7 +670,7 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
                 *path_from_head = Self::stack_path_kind(cx, &self.stack, head);
                 // Mutate the result of the provisional cache entry in case we did
                 // not reach a fixpoint.
-                *result = mutate_result(input, *result);
+                *result = mutate_result(input, result.clone());
                 true
             });
             !entries.is_empty()
@@ -688,7 +688,7 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
             ref heads,
             path_from_head,
             ref nested_goals,
-            result,
+            ref result,
         } in entries
         {
             let head = heads.highest_cycle_head();
@@ -729,7 +729,7 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
                 );
                 debug_assert!(self.stack[head].has_been_used.is_some());
                 debug!(?head, ?path_from_head, "provisional cache hit");
-                return Some(result);
+                return Some(result.clone());
             }
         }
 
@@ -903,8 +903,8 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
 
         // Return the provisional result or, if we're in the first iteration,
         // start with no constraints.
-        if let Some(result) = self.stack[head].provisional_result {
-            Some(result)
+        if let Some(result) = &self.stack[head].provisional_result {
+            Some(result.clone())
         } else {
             Some(D::initial_provisional_result(cx, path_kind, input))
         }
@@ -916,9 +916,9 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
         cx: X,
         stack_entry: &StackEntry<X>,
         usage_kind: UsageKind,
-        result: X::Result,
+        result: &X::Result,
     ) -> bool {
-        if let Some(prev) = stack_entry.provisional_result {
+        if let Some(prev) = &stack_entry.provisional_result {
             prev == result
         } else if let UsageKind::Single(kind) = usage_kind {
             D::is_initial_provisional_result(cx, kind, stack_entry.input, result)
@@ -963,7 +963,7 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
             // is equal to the provisional result of the previous iteration, or because
             // this was only the root of either coinductive or inductive cycles, and the
             // final result is equal to the initial response for that case.
-            if self.reached_fixpoint(cx, &stack_entry, usage_kind, result) {
+            if self.reached_fixpoint(cx, &stack_entry, usage_kind, &result) {
                 self.rebase_provisional_cache_entries(cx, &stack_entry, |_, result| result);
                 return (stack_entry, result);
             }
@@ -980,9 +980,9 @@ impl<D: Delegate<Cx = X>, X: Cx> SearchGraph<D> {
             // As we only get to this branch if we haven't yet reached a fixpoint,
             // we also taint all provisional cache entries which depend on the
             // current goal.
-            if D::is_ambiguous_result(result) {
+            if D::is_ambiguous_result(&result) {
                 self.rebase_provisional_cache_entries(cx, &stack_entry, |input, _| {
-                    D::propagate_ambiguity(cx, input, result)
+                    D::propagate_ambiguity(cx, input, &result)
                 });
                 return (stack_entry, result);
             };

@@ -291,8 +291,7 @@ pub trait GenericsOf<I: Interner<GenericsOf = Self>> {
 }
 
 pub trait GenericArg<I: Interner<GenericArg = Self>>:
-    Copy
-    + Debug
+    Debug
     + Hash
     + Eq
     + IntoKind<Kind = ty::GenericArgKind<I>>
@@ -336,7 +335,7 @@ pub trait GenericArg<I: Interner<GenericArg = Self>>:
 }
 
 pub trait Term<I: Interner<Term = Self>>:
-    Copy + Debug + Hash + Eq + IntoKind<Kind = ty::TermKind<I>> + TypeFoldable<I> + Relate<I>
+    Debug + Hash + Eq + IntoKind<Kind = ty::TermKind<I>> + TypeFoldable<I> + Relate<I>
 {
     fn as_type(&self) -> Option<I::Ty> {
         if let ty::TermKind::Ty(ty) = self.kind() { Some(ty) } else { None }
@@ -376,7 +375,7 @@ pub trait Term<I: Interner<Term = Self>>:
 }
 
 pub trait GenericArgs<I: Interner<GenericArgs = Self>>:
-    Copy + Debug + Hash + Eq + SliceLike<Item = I::GenericArg> + Default + Relate<I>
+    Debug + Hash + Eq + SliceLike<Item = I::GenericArg> + Default + Relate<I>
 {
     fn rebase_onto(
         self,

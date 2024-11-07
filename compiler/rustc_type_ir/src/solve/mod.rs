@@ -125,7 +125,7 @@ pub enum GoalSource {
 }
 
 #[derive_where(Clone; I: Interner, Goal<I, P>: Clone)]
-#[derive_where(Copy; I: Interner, Goal<I, P>: Copy)]
+#[derive_where(Copy; I: Interner, Goal<I, P>: Copy, I::PredefinedOpaques: Copy)]
 #[derive_where(Hash; I: Interner, Goal<I, P>: Hash)]
 #[derive_where(PartialEq; I: Interner, Goal<I, P>: PartialEq)]
 #[derive_where(Eq; I: Interner, Goal<I, P>: Eq)]
@@ -230,7 +230,8 @@ pub enum BuiltinImplSource {
     TupleUnsizing,
 }
 
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::ExternalConstraints: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
 pub struct Response<I: Interner> {
