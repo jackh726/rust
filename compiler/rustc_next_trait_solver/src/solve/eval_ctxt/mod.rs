@@ -285,7 +285,7 @@ where
             variables: canonical_input.canonical.variables,
             var_values,
             is_normalizes_to_goal: false,
-            predefined_opaques_in_body: input.predefined_opaques_in_body,
+            predefined_opaques_in_body: input.predefined_opaques_in_body.clone(),
             max_input_universe: canonical_input.canonical.max_universe,
             search_graph,
             nested_goals: NestedGoals::new(),
@@ -293,8 +293,8 @@ where
             inspect: canonical_goal_evaluation.new_goal_evaluation_step(var_values),
         };
 
-        for &(key, ty) in &input.predefined_opaques_in_body.opaque_types {
-            ecx.delegate.inject_new_hidden_type_unchecked(key, ty);
+        for (key, ty) in &input.predefined_opaques_in_body.opaque_types {
+            ecx.delegate.inject_new_hidden_type_unchecked(key.clone(), *ty);
         }
 
         if !ecx.nested_goals.is_empty() {
@@ -332,7 +332,7 @@ where
         goal_evaluation: &mut ProofTreeBuilder<D>,
     ) -> QueryResult<I> {
         let mut canonical_goal_evaluation =
-            goal_evaluation.new_canonical_goal_evaluation(canonical_input);
+            goal_evaluation.new_canonical_goal_evaluation(canonical_input.clone());
 
         // Deal with overflow, caching, and coinduction.
         //
@@ -340,13 +340,13 @@ where
         let result = ensure_sufficient_stack(|| {
             search_graph.with_new_goal(
                 cx,
-                canonical_input,
+                canonical_input.clone(),
                 &mut canonical_goal_evaluation,
                 |search_graph, canonical_goal_evaluation| {
                     EvalCtxt::enter_canonical(
                         cx,
                         search_graph,
-                        canonical_input,
+                        canonical_input.clone(),
                         canonical_goal_evaluation,
                         |ecx, goal| {
                             let result = ecx.compute_goal(goal);

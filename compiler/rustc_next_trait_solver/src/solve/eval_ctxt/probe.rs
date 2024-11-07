@@ -35,7 +35,7 @@ where
             variables: outer_ecx.variables,
             var_values: outer_ecx.var_values,
             is_normalizes_to_goal: outer_ecx.is_normalizes_to_goal,
-            predefined_opaques_in_body: outer_ecx.predefined_opaques_in_body,
+            predefined_opaques_in_body: outer_ecx.predefined_opaques_in_body.clone(),
             max_input_universe,
             search_graph: outer_ecx.search_graph,
             nested_goals: outer_ecx.nested_goals.clone(),

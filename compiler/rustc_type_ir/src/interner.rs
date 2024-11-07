@@ -43,7 +43,7 @@ pub trait Interner:
     type BoundVarKinds: Debug + Hash + Eq + SliceLike<Item = Self::BoundVarKind> + Default;
     type BoundVarKind: Debug + Hash + Eq;
 
-    type PredefinedOpaques: Copy
+    type PredefinedOpaques: Clone
         + Debug
         + Hash
         + Eq
