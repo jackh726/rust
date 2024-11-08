@@ -852,7 +852,7 @@ pub struct Placeholder<T> {
     pub bound: T,
 }
 impl Placeholder<BoundVar> {
-    pub fn find_const_ty_from_env<'tcx>(self, env: ParamEnv<'tcx>) -> Ty<'tcx> {
+    pub fn find_const_ty_from_env<'tcx>(self, env: &ParamEnv<'tcx>) -> Ty<'tcx> {
         let mut candidates = env.caller_bounds().iter().filter_map(|clause| {
             // `ConstArgHasType` are never desugared to be higher ranked.
             match clause.kind().skip_binder() {
@@ -978,7 +978,7 @@ pub struct ParamEnv<'tcx> {
 }
 
 impl<'tcx> rustc_type_ir::inherent::ParamEnv<TyCtxt<'tcx>> for ParamEnv<'tcx> {
-    fn reveal(self) -> Reveal {
+    fn reveal(&self) -> Reveal {
         self.reveal()
     }
 
@@ -1052,7 +1052,7 @@ impl<'tcx> ParamEnv<'tcx> {
     }
 
     #[inline]
-    pub fn reveal(self) -> traits::Reveal {
+    pub fn reveal(&self) -> traits::Reveal {
         self.packed.tag().reveal
     }
 

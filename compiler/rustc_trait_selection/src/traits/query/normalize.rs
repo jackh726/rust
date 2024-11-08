@@ -215,7 +215,7 @@ impl<'a, 'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for QueryNormalizer<'a, 'tcx> {
         let res = match kind {
             ty::Opaque => {
                 // Only normalize `impl Trait` outside of type inference, usually in codegen.
-                match self.infcx.typing_mode(self.param_env) {
+                match self.infcx.typing_mode(&self.param_env) {
                     TypingMode::Coherence | TypingMode::Analysis { defining_opaque_types: _ } => {
                         ty.try_super_fold_with(self)?
                     }

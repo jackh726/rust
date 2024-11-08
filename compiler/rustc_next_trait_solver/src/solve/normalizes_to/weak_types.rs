@@ -26,7 +26,7 @@ where
             GoalSource::Misc,
             cx.predicates_of(weak_ty.def_id)
                 .iter_instantiated(cx, weak_ty.args)
-                .map(|pred| goal.with(cx, pred)),
+                .map(|pred| goal.clone().with(cx, pred)),
         );
 
         let actual = cx.type_of(weak_ty.def_id).instantiate(cx, weak_ty.args);

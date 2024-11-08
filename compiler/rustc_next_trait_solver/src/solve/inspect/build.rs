@@ -422,7 +422,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> ProofTreeBuilder<D> {
             delegate,
             max_input_universe,
             GoalSource::Misc,
-            goal.with(delegate.cx(), goal.predicate),
+            goal.clone().with_predicate(delegate.cx(), |pred| pred),
         );
     }
 

@@ -72,7 +72,7 @@ pub trait InferCtxtLike: Sized {
 
     fn typing_mode(
         &self,
-        param_env_for_debug_assertion: <Self::Interner as Interner>::ParamEnv,
+        param_env_for_debug_assertion: &<Self::Interner as Interner>::ParamEnv,
     ) -> TypingMode<Self::Interner>;
 
     fn universe(&self) -> ty::UniverseIndex;

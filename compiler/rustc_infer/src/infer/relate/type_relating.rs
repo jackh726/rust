@@ -197,7 +197,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for TypeRelating<'_, 'tcx> {
                     a,
                     b,
                     self.trace.cause.span,
-                    self.param_env(),
+                    *self.param_env(),
                 )?);
             }
 
@@ -344,8 +344,8 @@ impl<'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for TypeRelating<'_, 'tcx>
         self.trace.span()
     }
 
-    fn param_env(&self) -> ty::ParamEnv<'tcx> {
-        self.param_env
+    fn param_env(&self) -> &ty::ParamEnv<'tcx> {
+        &self.param_env
     }
 
     fn structurally_relate_aliases(&self) -> StructurallyRelateAliases {

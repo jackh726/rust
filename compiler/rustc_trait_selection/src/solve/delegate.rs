@@ -221,7 +221,7 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
     // register candidates. We probably need to register >1 since we may have an OR of ANDs.
     fn is_transmutable(
         &self,
-        param_env: ty::ParamEnv<'tcx>,
+        param_env: &ty::ParamEnv<'tcx>,
         dst: Ty<'tcx>,
         src: Ty<'tcx>,
         assume: ty::Const<'tcx>,
@@ -230,7 +230,7 @@ impl<'tcx> rustc_next_trait_solver::delegate::SolverDelegate for SolverDelegate<
         // which will ICE for region vars.
         let (dst, src) = self.tcx.erase_regions((dst, src));
 
-        let Some(assume) = rustc_transmute::Assume::from_const(self.tcx, param_env, assume) else {
+        let Some(assume) = rustc_transmute::Assume::from_const(self.tcx, *param_env, assume) else {
             return Err(NoSolution);
         };
 

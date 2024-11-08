@@ -159,7 +159,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for LatticeOp<'_, 'tcx> {
                     a,
                     b,
                     self.span(),
-                    self.param_env(),
+                    *self.param_env(),
                 )?);
                 Ok(a)
             }
@@ -253,8 +253,8 @@ impl<'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for LatticeOp<'_, 'tcx> {
         StructurallyRelateAliases::No
     }
 
-    fn param_env(&self) -> ty::ParamEnv<'tcx> {
-        self.param_env
+    fn param_env(&self) -> &ty::ParamEnv<'tcx> {
+        &self.param_env
     }
 
     fn register_predicates(

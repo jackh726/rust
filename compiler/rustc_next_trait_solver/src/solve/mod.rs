@@ -201,7 +201,7 @@ where
             ty::ConstKind::Bound(_, _) => panic!("escaping bound vars in {:?}", ct),
             ty::ConstKind::Value(ty, _) => ty,
             ty::ConstKind::Placeholder(placeholder) => {
-                self.cx().find_const_ty_from_env(goal.param_env, placeholder)
+                self.cx().find_const_ty_from_env(&goal.param_env, placeholder)
             }
         };
 

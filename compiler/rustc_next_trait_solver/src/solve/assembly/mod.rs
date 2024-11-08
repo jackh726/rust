@@ -82,22 +82,28 @@ where
         goal: Goal<I, Self>,
         assumption: I::Clause,
     ) -> Result<Candidate<I>, NoSolution> {
-        Self::probe_and_match_goal_against_assumption(ecx, source, goal, assumption, |ecx| {
-            let cx = ecx.cx();
-            let ty::Dynamic(bounds, _, _) = goal.predicate.self_ty().kind() else {
-                panic!("expected object type in `probe_and_consider_object_bound_candidate`");
-            };
-            ecx.add_goals(
-                GoalSource::ImplWhereBound,
-                structural_traits::predicates_for_object_candidate(
-                    ecx,
-                    goal.param_env,
-                    goal.predicate.trait_ref(cx),
-                    bounds,
-                ),
-            );
-            ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
-        })
+        Self::probe_and_match_goal_against_assumption(
+            ecx,
+            source,
+            goal.clone(),
+            assumption,
+            |ecx| {
+                let cx = ecx.cx();
+                let ty::Dynamic(bounds, _, _) = goal.predicate.self_ty().kind() else {
+                    panic!("expected object type in `probe_and_consider_object_bound_candidate`");
+                };
+                ecx.add_goals(
+                    GoalSource::ImplWhereBound,
+                    structural_traits::predicates_for_object_candidate(
+                        ecx,
+                        goal.param_env,
+                        goal.predicate.trait_ref(cx),
+                        bounds,
+                    ),
+                );
+                ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
+            },
+        )
     }
 
     /// Assemble additional assumptions for an alias that are not included
@@ -105,7 +111,7 @@ where
     /// `explicit_implied_const_bounds` for an associated type.
     fn consider_additional_alias_assumptions(
         ecx: &mut EvalCtxt<'_, D>,
-        goal: Goal<I, Self>,
+        goal: &Goal<I, Self>,
         alias_ty: ty::AliasTy<I>,
     ) -> Vec<Candidate<I>>;
 
@@ -284,7 +290,7 @@ where
         goal: Goal<I, G>,
     ) -> Vec<Candidate<I>> {
         let Ok(normalized_self_ty) =
-            self.structurally_normalize_ty(goal.param_env, goal.predicate.self_ty())
+            self.structurally_normalize_ty(goal.param_env.clone(), goal.predicate.self_ty())
         else {
             // FIXME: We register a fake candidate when normalization fails so that
             // we can point at the reason for *why*. I'm tempted to say that this
@@ -316,31 +322,32 @@ where
             return self.forced_ambiguity(MaybeCause::Ambiguity).into_iter().collect();
         }
 
-        let goal: Goal<I, G> =
-            goal.with(self.cx(), goal.predicate.with_self_ty(self.cx(), normalized_self_ty));
+        let goal: Goal<I, G> = goal
+            .clone()
+            .with_predicate(self.cx(), |pred| pred.with_self_ty(self.cx(), normalized_self_ty));
         // Vars that show up in the rest of the goal substs may have been constrained by
         // normalizing the self type as well, since type variables are not uniquified.
         let goal = self.resolve_vars_if_possible(goal);
 
         let mut candidates = vec![];
 
-        if let TypingMode::Coherence = self.typing_mode(goal.param_env) {
-            if let Ok(candidate) = self.consider_coherence_unknowable_candidate(goal) {
+        if let TypingMode::Coherence = self.typing_mode(&goal.param_env) {
+            if let Ok(candidate) = self.consider_coherence_unknowable_candidate(goal.clone()) {
                 return vec![candidate];
             }
         }
 
-        self.assemble_impl_candidates(goal, &mut candidates);
+        self.assemble_impl_candidates(goal.clone(), &mut candidates);
 
-        self.assemble_builtin_impl_candidates(goal, &mut candidates);
+        self.assemble_builtin_impl_candidates(goal.clone(), &mut candidates);
 
-        self.assemble_alias_bound_candidates(goal, &mut candidates);
+        self.assemble_alias_bound_candidates(goal.clone(), &mut candidates);
 
-        self.assemble_object_bound_candidates(goal, &mut candidates);
+        self.assemble_object_bound_candidates(goal.clone(), &mut candidates);
 
-        self.assemble_param_env_candidates(goal, &mut candidates);
+        self.assemble_param_env_candidates(goal.clone(), &mut candidates);
 
-        match self.typing_mode(goal.param_env) {
+        match self.typing_mode(&goal.param_env) {
             TypingMode::Coherence => {}
             TypingMode::Analysis { .. } | TypingMode::PostAnalysis => {
                 self.discard_impls_shadowed_by_env(goal, &mut candidates);
@@ -383,7 +390,7 @@ where
                     return;
                 }
 
-                match G::consider_impl_candidate(self, goal, impl_def_id) {
+                match G::consider_impl_candidate(self, goal.clone(), impl_def_id) {
                     Ok(candidate) => candidates.push(candidate),
                     Err(NoSolution) => (),
                 }
@@ -399,6 +406,8 @@ where
     ) {
         let cx = self.cx();
         let trait_def_id = goal.predicate.trait_def_id(cx);
+
+        let goal_for_builtin_unsizing = goal.clone();
 
         // N.B. When assembling built-in candidates for lang items that are also
         // `auto` traits, then the auto trait candidate that is assembled in
@@ -491,7 +500,10 @@ where
         // There may be multiple unsize candidates for a trait with several supertraits:
         // `trait Foo: Bar<A> + Bar<B>` and `dyn Foo: Unsize<dyn Bar<_>>`
         if cx.is_lang_item(trait_def_id, TraitSolverLangItem::Unsize) {
-            candidates.extend(G::consider_structural_builtin_unsize_candidates(self, goal));
+            candidates.extend(G::consider_structural_builtin_unsize_candidates(
+                self,
+                goal_for_builtin_unsizing,
+            ));
         }
     }
 
@@ -501,11 +513,11 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        for (i, assumption) in goal.param_env.caller_bounds().into_iter().enumerate() {
+        for (i, assumption) in goal.param_env.clone().caller_bounds().into_iter().enumerate() {
             candidates.extend(G::probe_and_consider_implied_clause(
                 self,
                 CandidateSource::ParamEnv(i),
-                goal,
+                goal.clone(),
                 assumption,
                 [],
             ));
@@ -594,20 +606,20 @@ where
             candidates.extend(G::probe_and_consider_implied_clause(
                 self,
                 CandidateSource::AliasBound,
-                goal,
+                goal.clone(),
                 assumption,
                 [],
             ));
         }
 
-        candidates.extend(G::consider_additional_alias_assumptions(self, goal, alias_ty));
+        candidates.extend(G::consider_additional_alias_assumptions(self, &goal, alias_ty));
 
         if kind != ty::Projection {
             return;
         }
 
         // Recurse on the self type of the projection.
-        match self.structurally_normalize_ty(goal.param_env, alias_ty.self_ty()) {
+        match self.structurally_normalize_ty(goal.param_env.clone(), alias_ty.self_ty()) {
             Ok(next_self_ty) => {
                 self.assemble_alias_bound_candidates_recur(next_self_ty, goal, candidates)
             }
@@ -677,7 +689,7 @@ where
                     candidates.extend(G::probe_and_consider_object_bound_candidate(
                         self,
                         CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
-                        goal,
+                        goal.clone(),
                         bound.with_self_ty(cx, self_ty),
                     ));
                 }
@@ -693,7 +705,7 @@ where
                 candidates.extend(G::probe_and_consider_object_bound_candidate(
                     self,
                     CandidateSource::BuiltinImpl(BuiltinImplSource::Object(idx)),
-                    goal,
+                    goal.clone(),
                     assumption.upcast(cx),
                 ));
             }
@@ -714,7 +726,7 @@ where
         self.probe_trait_candidate(CandidateSource::CoherenceUnknowable).enter(|ecx| {
             let cx = ecx.cx();
             let trait_ref = goal.predicate.trait_ref(cx);
-            if ecx.trait_ref_is_knowable(goal.param_env, trait_ref)? {
+            if ecx.trait_ref_is_knowable(goal.param_env.clone(), trait_ref)? {
                 Err(NoSolution)
             } else {
                 // While the trait bound itself may be unknowable, we may be able to
@@ -727,7 +739,7 @@ where
                     GoalSource::Misc,
                     elaborate::elaborate(cx, [predicate])
                         .skip(1)
-                        .map(|predicate| goal.with(cx, predicate)),
+                        .map(|predicate| goal.clone().with(cx, predicate)),
                 );
                 ecx.evaluate_added_goals_and_make_canonical_response(Certainty::AMBIGUOUS)
             }
@@ -751,11 +763,11 @@ where
     ) {
         let cx = self.cx();
         let trait_goal: Goal<I, ty::TraitPredicate<I>> =
-            goal.with(cx, goal.predicate.trait_ref(cx));
+            goal.clone().with_predicate(cx, |pred| pred.trait_ref(cx));
 
         let mut trait_candidates_from_env = vec![];
         self.probe(|_| ProbeKind::ShadowedEnvProbing).enter(|ecx| {
-            ecx.assemble_param_env_candidates(trait_goal, &mut trait_candidates_from_env);
+            ecx.assemble_param_env_candidates(trait_goal.clone(), &mut trait_candidates_from_env);
             ecx.assemble_alias_bound_candidates(trait_goal, &mut trait_candidates_from_env);
         });
 

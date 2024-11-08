@@ -184,7 +184,7 @@ where
                         // type variables, so record an obligation.
                         self.goals.push(Goal::new(
                             self.cx(),
-                            self.param_env,
+                            self.param_env.clone(),
                             ty::Binder::dummy(ty::PredicateKind::Subtype(ty::SubtypePredicate {
                                 a_is_expected: true,
                                 a,
@@ -197,7 +197,7 @@ where
                         // type variables, so record an obligation.
                         self.goals.push(Goal::new(
                             self.cx(),
-                            self.param_env,
+                            self.param_env.clone(),
                             ty::Binder::dummy(ty::PredicateKind::Subtype(ty::SubtypePredicate {
                                 a_is_expected: false,
                                 a: b,
@@ -347,8 +347,8 @@ where
         Span::dummy()
     }
 
-    fn param_env(&self) -> I::ParamEnv {
-        self.param_env
+    fn param_env(&self) -> &I::ParamEnv {
+        &self.param_env
     }
 
     fn structurally_relate_aliases(&self) -> StructurallyRelateAliases {
@@ -360,7 +360,9 @@ where
         obligations: impl IntoIterator<Item: ty::Upcast<I, I::Predicate>>,
     ) {
         self.goals.extend(
-            obligations.into_iter().map(|pred| Goal::new(self.infcx.cx(), self.param_env, pred)),
+            obligations
+                .into_iter()
+                .map(|pred| Goal::new(self.infcx.cx(), self.param_env.clone(), pred)),
         );
     }
 

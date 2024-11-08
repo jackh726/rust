@@ -22,7 +22,7 @@ where
         let opaque_ty = goal.predicate.alias;
         let expected = goal.predicate.term.as_type().expect("no such thing as an opaque const");
 
-        match self.typing_mode(goal.param_env) {
+        match self.typing_mode(&goal.param_env) {
             TypingMode::Coherence => {
                 // An impossible opaque type bound is the only way this goal will fail
                 // e.g. assigning `impl Copy := NotCopy`
@@ -72,9 +72,9 @@ where
                                 candidate_key.args.iter(),
                                 opaque_type_key.args.iter(),
                             ) {
-                                ecx.eq(goal.param_env, a, b)?;
+                                ecx.eq(goal.param_env.clone(), a, b)?;
                             }
-                            ecx.eq(goal.param_env, candidate_ty, expected)?;
+                            ecx.eq(goal.param_env.clone(), candidate_ty, expected)?;
                             ecx.add_item_bounds_for_hidden_type(
                                 def_id.into(),
                                 candidate_key.args,
@@ -87,7 +87,7 @@ where
 
                 // Otherwise, define a new opaque type
                 // FIXME: should we use `inject_hidden_type_unchecked` here?
-                self.insert_hidden_type(opaque_type_key, goal.param_env, expected)?;
+                self.insert_hidden_type(opaque_type_key, goal.param_env.clone(), expected)?;
                 self.add_item_bounds_for_hidden_type(
                     def_id.into(),
                     opaque_ty.args,

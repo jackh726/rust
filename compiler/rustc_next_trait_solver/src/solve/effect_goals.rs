@@ -78,7 +78,7 @@ where
     /// the assumption.
     fn consider_additional_alias_assumptions(
         ecx: &mut EvalCtxt<'_, D>,
-        goal: Goal<I, Self>,
+        goal: &Goal<I, Self>,
         alias_ty: ty::AliasTy<I>,
     ) -> Vec<Candidate<I>> {
         let cx = ecx.cx();
@@ -97,7 +97,7 @@ where
             candidates.extend(Self::probe_and_match_goal_against_assumption(
                 ecx,
                 CandidateSource::AliasBound,
-                goal,
+                goal.clone(),
                 clause,
                 |ecx| {
                     // Const conditions must hold for the implied const bound to hold.
@@ -106,7 +106,7 @@ where
                         cx.const_conditions(alias_ty.def_id)
                             .iter_instantiated(cx, alias_ty.args)
                             .map(|trait_ref| {
-                                goal.with(
+                                goal.clone().with(
                                     cx,
                                     trait_ref.to_host_effect_clause(cx, goal.predicate.constness),
                                 )
@@ -152,11 +152,11 @@ where
             ecx.record_impl_args(impl_args);
             let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args);
 
-            ecx.eq(goal.param_env, goal.predicate.trait_ref, impl_trait_ref)?;
+            ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref, impl_trait_ref)?;
             let where_clause_bounds = cx
                 .predicates_of(impl_def_id)
                 .iter_instantiated(cx, impl_args)
-                .map(|pred| goal.with(cx, pred));
+                .map(|pred| goal.clone().with(cx, pred));
             ecx.add_goals(GoalSource::ImplWhereBound, where_clause_bounds);
 
             // For this impl to be `const`, we need to check its `~const` bounds too.
@@ -164,7 +164,7 @@ where
                 .const_conditions(impl_def_id)
                 .iter_instantiated(cx, impl_args)
                 .map(|bound_trait_ref| {
-                    goal.with(
+                    goal.clone().with(
                         cx,
                         bound_trait_ref.to_host_effect_clause(cx, goal.predicate.constness),
                     )
@@ -240,10 +240,11 @@ where
             .map(|trait_ref| {
                 (
                     GoalSource::ImplWhereBound,
-                    goal.with(cx, trait_ref.to_host_effect_clause(cx, goal.predicate.constness)),
+                    goal.clone()
+                        .with(cx, trait_ref.to_host_effect_clause(cx, goal.predicate.constness)),
                 )
             })
-            .chain([(GoalSource::ImplWhereBound, goal.with(cx, output_is_sized_pred))]);
+            .chain([(GoalSource::ImplWhereBound, goal.clone().with(cx, output_is_sized_pred))]);
 
         let pred = inputs_and_output
             .map_bound(|(inputs, _)| {
@@ -257,7 +258,7 @@ where
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
-            goal,
+            goal.clone(),
             pred,
             requirements,
         )
@@ -354,7 +355,7 @@ where
             ecx.add_goals(
                 GoalSource::Misc,
                 const_conditions.into_iter().map(|trait_ref| {
-                    goal.with(
+                    goal.clone().with(
                         cx,
                         ty::Binder::dummy(trait_ref)
                             .to_host_effect_clause(cx, goal.predicate.constness),

@@ -22,7 +22,7 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
 
     fn typing_mode(
         &self,
-        param_env_for_debug_assertion: ty::ParamEnv<'tcx>,
+        param_env_for_debug_assertion: &ty::ParamEnv<'tcx>,
     ) -> ty::TypingMode<'tcx> {
         self.typing_mode(param_env_for_debug_assertion)
     }

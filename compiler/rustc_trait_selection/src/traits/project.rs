@@ -975,7 +975,7 @@ fn assemble_candidates_from_impls<'cx, 'tcx>(
                     // and the obligation is monomorphic, otherwise passes such as
                     // transmute checking and polymorphic MIR optimizations could
                     // get a result which isn't correct for all monomorphizations.
-                    match selcx.infcx.typing_mode(obligation.param_env) {
+                    match selcx.infcx.typing_mode(&obligation.param_env) {
                         TypingMode::Coherence | TypingMode::Analysis { .. } => {
                             debug!(
                                 assoc_ty = ?selcx.tcx().def_path_str(node_item.item.def_id),

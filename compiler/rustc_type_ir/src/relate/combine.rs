@@ -18,7 +18,7 @@ where
 {
     fn span(&self) -> I::Span;
 
-    fn param_env(&self) -> I::ParamEnv;
+    fn param_env(&self) -> &I::ParamEnv;
 
     /// Whether aliases should be related structurally. This is pretty much
     /// always `No` unless you're equating in some specific locations of the
@@ -129,7 +129,7 @@ where
 
         (ty::Alias(ty::Opaque, _), _) | (_, ty::Alias(ty::Opaque, _)) => {
             assert!(!infcx.next_trait_solver());
-            match infcx.typing_mode(relation.param_env()) {
+            match infcx.typing_mode(&relation.param_env()) {
                 // During coherence, opaque types should be treated as *possibly*
                 // equal to any other type. This is an
                 // extremely heavy hammer, but can be relaxed in a forwards-compatible

@@ -41,7 +41,7 @@ where
 
     fn consider_additional_alias_assumptions(
         _ecx: &mut EvalCtxt<'_, D>,
-        _goal: Goal<I, Self>,
+        _goal: &Goal<I, Self>,
         _alias_ty: ty::AliasTy<I>,
     ) -> Vec<Candidate<I>> {
         vec![]
@@ -67,7 +67,7 @@ where
         let maximal_certainty = match (impl_polarity, goal.predicate.polarity) {
             // In intercrate mode, this is ambiguous. But outside of intercrate,
             // it's not a real impl.
-            (ty::ImplPolarity::Reservation, _) => match ecx.typing_mode(goal.param_env) {
+            (ty::ImplPolarity::Reservation, _) => match ecx.typing_mode(&goal.param_env) {
                 TypingMode::Coherence => Certainty::AMBIGUOUS,
                 TypingMode::Analysis { .. } | TypingMode::PostAnalysis => return Err(NoSolution),
             },
@@ -88,11 +88,11 @@ where
             ecx.record_impl_args(impl_args);
             let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args);
 
-            ecx.eq(goal.param_env, goal.predicate.trait_ref, impl_trait_ref)?;
+            ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref, impl_trait_ref)?;
             let where_clause_bounds = cx
                 .predicates_of(impl_def_id)
                 .iter_instantiated(cx, impl_args)
-                .map(|pred| goal.with(cx, pred));
+                .map(|pred| goal.clone().with(cx, pred));
             ecx.add_goals(GoalSource::ImplWhereBound, where_clause_bounds);
 
             // We currently elaborate all supertrait outlives obligations from impls.
@@ -104,7 +104,7 @@ where
                     clause.kind().skip_binder(),
                     ty::ClauseKind::TypeOutlives(..) | ty::ClauseKind::RegionOutlives(..)
                 ) {
-                    ecx.add_goal(GoalSource::Misc, goal.with(cx, clause));
+                    ecx.add_goal(GoalSource::Misc, goal.clone().with(cx, clause));
                 }
             }
 
@@ -141,7 +141,7 @@ where
                 ecx.probe_trait_candidate(source).enter(|ecx| {
                     let assumption_trait_pred = ecx.instantiate_binder_with_infer(trait_clause);
                     ecx.eq(
-                        goal.param_env,
+                        goal.param_env.clone(),
                         goal.predicate.trait_ref,
                         assumption_trait_pred.trait_ref,
                     )?;
@@ -163,7 +163,7 @@ where
             return Err(NoSolution);
         }
 
-        if let Some(result) = ecx.disqualify_auto_trait_candidate_due_to_possible_impl(goal) {
+        if let Some(result) = ecx.disqualify_auto_trait_candidate_due_to_possible_impl(&goal) {
             return result;
         }
 
@@ -174,7 +174,7 @@ where
         // ideally we want to avoid, since we can make progress on this goal
         // via an alias bound or a locally-inferred hidden type instead.
         if let ty::Alias(ty::Opaque, opaque_ty) = goal.predicate.self_ty().kind() {
-            match ecx.typing_mode(goal.param_env) {
+            match ecx.typing_mode(&goal.param_env) {
                 TypingMode::Coherence | TypingMode::PostAnalysis => {
                     unreachable!("rigid opaque outside of analysis: {goal:?}");
                 }
@@ -211,7 +211,7 @@ where
             let nested_obligations = cx
                 .predicates_of(goal.predicate.def_id())
                 .iter_instantiated(cx, goal.predicate.trait_ref.args)
-                .map(|p| goal.with(cx, p));
+                .map(|p| goal.clone().with(cx, p));
             // FIXME(-Znext-solver=coinductive): Should this be `GoalSource::ImplWhereBound`?
             ecx.add_goals(GoalSource::Misc, nested_obligations);
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
@@ -315,9 +315,9 @@ where
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
-            goal,
+            goal.clone(),
             pred,
-            [(GoalSource::ImplWhereBound, goal.with(cx, output_is_sized_pred))],
+            [(GoalSource::ImplWhereBound, goal.clone().with(cx, output_is_sized_pred))],
         )
     }
 
@@ -361,11 +361,11 @@ where
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
-            goal,
+            goal.clone(),
             pred,
-            [goal.with(cx, output_is_sized_pred)]
+            [goal.clone().with(cx, output_is_sized_pred)]
                 .into_iter()
-                .chain(nested_preds.into_iter().map(|pred| goal.with(cx, pred)))
+                .chain(nested_preds.into_iter().map(|pred| goal.clone().with(cx, pred)))
                 .map(|goal| (GoalSource::ImplWhereBound, goal)),
         )
     }
@@ -543,11 +543,12 @@ where
         }
 
         let coroutine = args.as_coroutine();
+        let goal_predicate_def_id = goal.predicate.def_id();
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
-            ty::TraitRef::new(cx, goal.predicate.def_id(), [self_ty, coroutine.resume_ty()])
+            ty::TraitRef::new(cx, goal_predicate_def_id, [self_ty, coroutine.resume_ty()])
                 .upcast(cx),
             // Technically, we need to check that the coroutine types are Sized,
             // but that's already proven by the coroutine being WF.
@@ -610,12 +611,12 @@ where
 
         ecx.probe_builtin_trait_candidate(BuiltinImplSource::Misc).enter(|ecx| {
             let assume = ecx.structurally_normalize_const(
-                goal.param_env,
+                goal.param_env.clone(),
                 goal.predicate.trait_ref.args.const_at(2),
             )?;
 
             let certainty = ecx.is_transmutable(
-                goal.param_env,
+                &goal.param_env,
                 goal.predicate.trait_ref.args.type_at(0),
                 goal.predicate.trait_ref.args.type_at(1),
                 assume,
@@ -649,13 +650,13 @@ where
             // We need to normalize the b_ty since it's matched structurally
             // in the other functions below.
             let Ok(b_ty) = ecx.structurally_normalize_ty(
-                goal.param_env,
+                goal.param_env.clone(),
                 goal.predicate.trait_ref.args.type_at(1),
             ) else {
                 return vec![];
             };
 
-            let goal = goal.with(ecx.cx(), (a_ty, b_ty));
+            let goal = goal.clone().with(ecx.cx(), (a_ty, b_ty));
             match (a_ty.kind(), b_ty.kind()) {
                 (ty::Infer(ty::TyVar(..)), ..) => panic!("unexpected infer {a_ty:?} {b_ty:?}"),
 
@@ -734,7 +735,7 @@ where
         let b_principal_def_id = b_data.principal_def_id();
         if a_data.principal_def_id() == b_principal_def_id || b_principal_def_id.is_none() {
             responses.extend(self.consider_builtin_upcast_to_principal(
-                goal,
+                &goal.param_env,
                 CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
                 a_data,
                 a_region,
@@ -747,7 +748,7 @@ where
                 elaborate::supertraits(self.cx(), a_principal.with_self_ty(cx, a_ty)).skip(1)
             {
                 responses.extend(self.consider_builtin_upcast_to_principal(
-                    goal,
+                    &goal.param_env,
                     CandidateSource::BuiltinImpl(BuiltinImplSource::TraitUpcasting),
                     a_data,
                     a_region,
@@ -782,27 +783,30 @@ where
             // (i.e. the principal, all of the associated types match, and any auto traits)
             ecx.add_goals(
                 GoalSource::ImplWhereBound,
-                b_data.iter().map(|pred| goal.with(cx, pred.with_self_ty(cx, a_ty))),
+                b_data.iter().map(|pred| goal.clone().with(cx, pred.with_self_ty(cx, a_ty))),
             );
 
             // The type must be `Sized` to be unsized.
             ecx.add_goal(
                 GoalSource::ImplWhereBound,
-                goal.with(
+                goal.clone().with(
                     cx,
                     ty::TraitRef::new(cx, cx.require_lang_item(TraitSolverLangItem::Sized), [a_ty]),
                 ),
             );
 
             // The type must outlive the lifetime of the `dyn` we're unsizing into.
-            ecx.add_goal(GoalSource::Misc, goal.with(cx, ty::OutlivesPredicate(a_ty, b_region)));
+            ecx.add_goal(
+                GoalSource::Misc,
+                goal.clone().with(cx, ty::OutlivesPredicate(a_ty, b_region)),
+            );
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         })
     }
 
     fn consider_builtin_upcast_to_principal(
         &mut self,
-        goal: Goal<I, (I::Ty, I::Ty)>,
+        param_env: &I::ParamEnv,
         source: CandidateSource<I>,
         a_data: I::BoundExistentialPredicates,
         a_region: I::Region,
@@ -810,8 +814,6 @@ where
         b_region: I::Region,
         upcast_principal: Option<ty::Binder<I, ty::ExistentialTraitRef<I>>>,
     ) -> Result<Candidate<I>, NoSolution> {
-        let param_env = goal.param_env;
-
         // We may upcast to auto traits that are either explicitly listed in
         // the object type's bounds, or implied by the principal trait ref's
         // supertraits.
@@ -839,7 +841,7 @@ where
                             ecx.enter_forall(target_projection, |ecx, target_projection| {
                                 let source_projection =
                                     ecx.instantiate_binder_with_infer(source_projection);
-                                ecx.eq(param_env, source_projection, target_projection)?;
+                                ecx.eq(param_env.clone(), source_projection, target_projection)?;
                                 ecx.try_evaluate_added_goals()
                             })
                         })
@@ -857,7 +859,7 @@ where
                         ecx.enter_forall(target_principal, |ecx, target_principal| {
                             let source_principal =
                                 ecx.instantiate_binder_with_infer(source_principal);
-                            ecx.eq(param_env, source_principal, target_principal)?;
+                            ecx.eq(param_env.clone(), source_principal, target_principal)?;
                             ecx.try_evaluate_added_goals()
                         })?;
                     }
@@ -883,7 +885,7 @@ where
                         ecx.enter_forall(target_projection, |ecx, target_projection| {
                             let source_projection =
                                 ecx.instantiate_binder_with_infer(source_projection);
-                            ecx.eq(param_env, source_projection, target_projection)?;
+                            ecx.eq(param_env.clone(), source_projection, target_projection)?;
                             ecx.try_evaluate_added_goals()
                         })?;
                     }
@@ -899,7 +901,7 @@ where
             // Also require that a_ty's lifetime outlives b_ty's lifetime.
             ecx.add_goal(
                 GoalSource::ImplWhereBound,
-                Goal::new(ecx.cx(), param_env, ty::OutlivesPredicate(a_region, b_region)),
+                Goal::new(ecx.cx(), param_env.clone(), ty::OutlivesPredicate(a_region, b_region)),
             );
 
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
@@ -920,7 +922,7 @@ where
         a_elem_ty: I::Ty,
         b_elem_ty: I::Ty,
     ) -> Result<Candidate<I>, NoSolution> {
-        self.eq(goal.param_env, a_elem_ty, b_elem_ty)?;
+        self.eq(goal.param_env.clone(), a_elem_ty, b_elem_ty)?;
         self.probe_builtin_trait_candidate(BuiltinImplSource::Misc)
             .enter(|ecx| ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes))
     }
@@ -970,7 +972,7 @@ where
 
         // Finally, we require that `TailA: Unsize<TailB>` for the tail field
         // types.
-        self.eq(goal.param_env, unsized_a_ty, b_ty)?;
+        self.eq(goal.param_env.clone(), unsized_a_ty, b_ty)?;
         self.add_goal(
             GoalSource::ImplWhereBound,
             goal.with(
@@ -1008,7 +1010,7 @@ where
 
         // Instantiate just the tail field of B., and require that they're equal.
         let unsized_a_ty = Ty::new_tup_from_iter(cx, a_rest_tys.iter().copied().chain([b_last_ty]));
-        self.eq(goal.param_env, unsized_a_ty, b_ty)?;
+        self.eq(goal.param_env.clone(), unsized_a_ty, b_ty)?;
 
         // Similar to ADTs, require that we can unsize the tail.
         self.add_goal(
@@ -1030,7 +1032,7 @@ where
     // the type's constituent types.
     fn disqualify_auto_trait_candidate_due_to_possible_impl(
         &mut self,
-        goal: Goal<I, TraitPredicate<I>>,
+        goal: &Goal<I, TraitPredicate<I>>,
     ) -> Option<Result<Candidate<I>, NoSolution>> {
         let self_ty = goal.predicate.self_ty();
         match self_ty.kind() {
@@ -1142,7 +1144,8 @@ where
                 .into_iter()
                 .map(|ty| {
                     ecx.enter_forall(ty, |ecx, ty| {
-                        goal.with(ecx.cx(), goal.predicate.with_self_ty(ecx.cx(), ty))
+                        goal.clone()
+                            .with_predicate(ecx.cx(), |pred| pred.with_self_ty(ecx.cx(), ty))
                     })
                 })
                 .collect::<Vec<_>>();

@@ -214,7 +214,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    pub(super) fn typing_mode(&self, param_env_for_debug_assertion: I::ParamEnv) -> TypingMode<I> {
+    pub(super) fn typing_mode(&self, param_env_for_debug_assertion: &I::ParamEnv) -> TypingMode<I> {
         self.delegate.typing_mode(param_env_for_debug_assertion)
     }
 
@@ -392,9 +392,9 @@ where
         _source: GoalSource,
         goal: Goal<I, I::Predicate>,
     ) -> Result<(NestedNormalizationGoals<I>, HasChanged, Certainty), NoSolution> {
-        let (orig_values, canonical_goal) = self.canonicalize_goal(goal);
+        let (orig_values, canonical_goal) = self.canonicalize_goal(goal.clone());
         let mut goal_evaluation =
-            self.inspect.new_goal_evaluation(goal, &orig_values, goal_evaluation_kind);
+            self.inspect.new_goal_evaluation(goal.clone(), &orig_values, goal_evaluation_kind);
         let canonical_response = EvalCtxt::evaluate_canonical_goal(
             self.cx(),
             self.search_graph,
@@ -417,8 +417,11 @@ where
             HasChanged::No
         };
 
-        let (normalization_nested_goals, certainty) =
-            self.instantiate_and_apply_query_response(goal.param_env, orig_values, response);
+        let (normalization_nested_goals, certainty) = self.instantiate_and_apply_query_response(
+            goal.param_env.clone(),
+            orig_values,
+            response,
+        );
         self.inspect.goal_evaluation(goal_evaluation);
 
         // FIXME: We previously had an assert here that checked that recomputing
@@ -435,7 +438,7 @@ where
     }
 
     fn compute_goal(&mut self, goal: Goal<I, I::Predicate>) -> QueryResult<I> {
-        let Goal { param_env, predicate } = goal;
+        let Goal { param_env, predicate } = goal.clone();
         let kind = predicate.kind();
         if let Some(kind) = kind.no_bound_vars() {
             match kind {
@@ -489,7 +492,7 @@ where
             }
         } else {
             self.enter_forall(kind, |ecx, kind| {
-                let goal = goal.with(ecx.cx(), ty::Binder::dummy(kind));
+                let goal = goal.clone().with(ecx.cx(), ty::Binder::dummy(kind));
                 ecx.add_goal(GoalSource::InstantiateHigherRanked, goal);
                 ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
             })
@@ -537,7 +540,7 @@ where
             // Replace the goal with an unconstrained infer var, so the
             // RHS does not affect projection candidate assembly.
             let unconstrained_rhs = self.next_term_infer_of_kind(goal.predicate.term);
-            let unconstrained_goal = goal.with(cx, ty::NormalizesTo {
+            let unconstrained_goal = goal.clone().with(cx, ty::NormalizesTo {
                 alias: goal.predicate.alias,
                 term: unconstrained_rhs,
             });
@@ -566,8 +569,8 @@ where
             // type contains an ambiguous alias referencing bound regions. We should
             // consider changing this to only use "shallow structural equality".
             self.eq_structurally_relating_aliases(
-                goal.param_env,
-                goal.predicate.term,
+                goal.param_env.clone(),
+                goal.predicate.term.clone(),
                 unconstrained_rhs,
             )?;
 
@@ -575,7 +578,7 @@ where
             // looking at the "has changed" return from evaluate_goal,
             // because we expect the `unconstrained_rhs` part of the predicate
             // to have changed -- that means we actually normalized successfully!
-            let with_resolved_vars = self.resolve_vars_if_possible(goal);
+            let with_resolved_vars = self.resolve_vars_if_possible(goal.clone());
             if goal.predicate.alias != with_resolved_vars.predicate.alias {
                 unchanged_certainty = None;
             }
@@ -591,7 +594,7 @@ where
 
         for (source, goal) in goals.goals {
             let (has_changed, certainty) =
-                self.evaluate_goal(GoalEvaluationKind::Nested, source, goal)?;
+                self.evaluate_goal(GoalEvaluationKind::Nested, source, goal.clone())?;
             if has_changed == HasChanged::Yes {
                 unchanged_certainty = None;
             }
@@ -620,16 +623,16 @@ where
     #[instrument(level = "trace", skip(self))]
     pub(super) fn add_normalizes_to_goal(&mut self, mut goal: Goal<I, ty::NormalizesTo<I>>) {
         goal.predicate =
-            goal.predicate.fold_with(&mut ReplaceAliasWithInfer::new(self, goal.param_env));
-        self.inspect.add_normalizes_to_goal(self.delegate, self.max_input_universe, goal);
+            goal.predicate.fold_with(&mut ReplaceAliasWithInfer::new(self, goal.param_env.clone()));
+        self.inspect.add_normalizes_to_goal(self.delegate, self.max_input_universe, goal.clone());
         self.nested_goals.normalizes_to_goals.push(goal);
     }
 
     #[instrument(level = "debug", skip(self))]
     pub(super) fn add_goal(&mut self, source: GoalSource, mut goal: Goal<I, I::Predicate>) {
         goal.predicate =
-            goal.predicate.fold_with(&mut ReplaceAliasWithInfer::new(self, goal.param_env));
-        self.inspect.add_goal(self.delegate, self.max_input_universe, source, goal);
+            goal.predicate.fold_with(&mut ReplaceAliasWithInfer::new(self, goal.param_env.clone()));
+        self.inspect.add_goal(self.delegate, self.max_input_universe, source, goal.clone());
         self.nested_goals.goals.push((source, goal));
     }
 
@@ -670,7 +673,7 @@ where
     /// This is the case if the `term` does not occur in any other part of the predicate
     /// and is able to name all other placeholder and inference variables.
     #[instrument(level = "trace", skip(self), ret)]
-    pub(super) fn term_is_fully_unconstrained(&self, goal: Goal<I, ty::NormalizesTo<I>>) -> bool {
+    pub(super) fn term_is_fully_unconstrained(&self, goal: &Goal<I, ty::NormalizesTo<I>>) -> bool {
         let universe_of_term = match goal.predicate.term.kind() {
             ty::TermKind::Ty(ty) => {
                 if let ty::Infer(ty::TyVar(vid)) = ty.kind() {
@@ -816,8 +819,11 @@ where
             let identity_args = self.fresh_args_for_item(alias.def_id);
             let rigid_ctor = ty::AliasTerm::new_from_args(cx, alias.def_id, identity_args);
             let ctor_term = rigid_ctor.to_term(cx);
-            let obligations =
-                self.delegate.eq_structurally_relating_aliases(param_env, term, ctor_term)?;
+            let obligations = self.delegate.eq_structurally_relating_aliases(
+                param_env.clone(),
+                term,
+                ctor_term,
+            )?;
             debug_assert!(obligations.is_empty());
             self.relate(param_env, alias, variance, rigid_ctor)
         } else {
@@ -934,7 +940,7 @@ where
         trait_ref: ty::TraitRef<I>,
     ) -> Result<bool, NoSolution> {
         let delegate = self.delegate;
-        let lazily_normalize_ty = |ty| self.structurally_normalize_ty(param_env, ty);
+        let lazily_normalize_ty = |ty| self.structurally_normalize_ty(param_env.clone(), ty);
         coherence::trait_ref_is_knowable(&**delegate, trait_ref, lazily_normalize_ty)
             .map(|is_knowable| is_knowable.is_ok())
     }
@@ -1011,7 +1017,7 @@ where
 
     pub(super) fn is_transmutable(
         &mut self,
-        param_env: I::ParamEnv,
+        param_env: &I::ParamEnv,
         dst: I::Ty,
         src: I::Ty,
         assume: I::Const,
@@ -1067,7 +1073,7 @@ where
                 );
                 self.ecx.add_goal(
                     GoalSource::Misc,
-                    Goal::new(self.cx(), self.param_env, normalizes_to),
+                    Goal::new(self.cx(), self.param_env.clone(), normalizes_to),
                 );
                 infer_ty
             }
@@ -1096,7 +1102,7 @@ where
                 );
                 self.ecx.add_goal(
                     GoalSource::Misc,
-                    Goal::new(self.cx(), self.param_env, normalizes_to),
+                    Goal::new(self.cx(), self.param_env.clone(), normalizes_to),
                 );
                 infer_ct
             }

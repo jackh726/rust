@@ -284,7 +284,7 @@ pub trait Interner:
 
     fn find_const_ty_from_env(
         self,
-        param_env: Self::ParamEnv,
+        param_env: &Self::ParamEnv,
         placeholder: Self::PlaceholderConst,
     ) -> Self::Ty;
 

@@ -722,11 +722,7 @@ impl<'a, I: Interner> ArgFolder<'a, I> {
         let index = p.index();
         panic!(
             "expected type for `{:?}` ({:?}/{}) but found {:?} when instantiating, args={:?}",
-            p,
-            ty,
-            index,
-            kind,
-            self.args,
+            p, ty, index, kind, self.args,
         )
     }
 
@@ -736,10 +732,7 @@ impl<'a, I: Interner> ArgFolder<'a, I> {
         let index = p.index();
         panic!(
             "type parameter `{:?}` ({:?}/{}) out of range when instantiating, args={:?}",
-            p,
-            ty,
-            index,
-            self.args,
+            p, ty, index, self.args,
         )
     }
 

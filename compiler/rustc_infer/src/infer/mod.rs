@@ -626,7 +626,7 @@ impl<'tcx> InferCtxt<'tcx> {
     #[inline(always)]
     pub fn typing_mode(
         &self,
-        param_env_for_debug_assertion: ty::ParamEnv<'tcx>,
+        param_env_for_debug_assertion: &ty::ParamEnv<'tcx>,
     ) -> TypingMode<'tcx> {
         if cfg!(debug_assertions) {
             match (param_env_for_debug_assertion.reveal(), self.typing_mode) {
@@ -1290,7 +1290,7 @@ impl<'tcx> InferCtxt<'tcx> {
     /// which contains the necessary information to use the trait system without
     /// using canonicalization or carrying this inference context around.
     pub fn typing_env(&self, param_env: ty::ParamEnv<'tcx>) -> ty::TypingEnv<'tcx> {
-        let typing_mode = match self.typing_mode(param_env) {
+        let typing_mode = match self.typing_mode(&param_env) {
             ty::TypingMode::Coherence => ty::TypingMode::Coherence,
             // FIXME(#132279): This erases the `defining_opaque_types` as it isn't possible
             // to handle them without proper canonicalization. This means we may cause cycle

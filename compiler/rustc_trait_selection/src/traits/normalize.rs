@@ -118,7 +118,7 @@ pub(super) fn needs_normalization<'tcx, T: TypeVisitable<TyCtxt<'tcx>>>(
 
     // Opaques are treated as rigid with `Reveal::UserFacing`,
     // so we can ignore those.
-    match infcx.typing_mode(param_env_for_debug_assertion) {
+    match infcx.typing_mode(&param_env_for_debug_assertion) {
         TypingMode::Coherence | TypingMode::Analysis { defining_opaque_types: _ } => {
             flags.remove(ty::TypeFlags::HAS_TY_OPAQUE)
         }
@@ -217,7 +217,7 @@ impl<'a, 'b, 'tcx> TypeFolder<TyCtxt<'tcx>> for AssocTypeNormalizer<'a, 'b, 'tcx
         match kind {
             ty::Opaque => {
                 // Only normalize `impl Trait` outside of type inference, usually in codegen.
-                match self.selcx.infcx.typing_mode(self.param_env) {
+                match self.selcx.infcx.typing_mode(&self.param_env) {
                     TypingMode::Coherence | TypingMode::Analysis { defining_opaque_types: _ } => {
                         ty.super_fold_with(self)
                     }

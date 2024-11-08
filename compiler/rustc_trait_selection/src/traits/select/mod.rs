@@ -1027,7 +1027,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
         previous_stack: TraitObligationStackList<'o, 'tcx>,
         mut obligation: PolyTraitObligation<'tcx>,
     ) -> Result<EvaluationResult, OverflowError> {
-        if !matches!(self.infcx.typing_mode(obligation.param_env), TypingMode::Coherence)
+        if !matches!(self.infcx.typing_mode(&obligation.param_env), TypingMode::Coherence)
             && obligation.is_global()
             && obligation.param_env.caller_bounds().iter().all(|bound| bound.has_param())
         {
@@ -1459,7 +1459,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
 
     fn is_knowable<'o>(&mut self, stack: &TraitObligationStack<'o, 'tcx>) -> Result<(), Conflict> {
         let obligation = &stack.obligation;
-        match self.infcx.typing_mode(obligation.param_env) {
+        match self.infcx.typing_mode(&obligation.param_env) {
             TypingMode::Coherence => {}
             TypingMode::Analysis { .. } | TypingMode::PostAnalysis => return Ok(()),
         }
@@ -1489,7 +1489,7 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             return false;
         }
 
-        match self.infcx.typing_mode(param_env) {
+        match self.infcx.typing_mode(&param_env) {
             // Avoid using the global cache during coherence and just rely
             // on the local cache. It is really just a simplification to
             // avoid us having to fear that coherence results "pollute"
@@ -2518,7 +2518,7 @@ impl<'tcx> SelectionContext<'_, 'tcx> {
         nested_obligations.extend(obligations);
 
         if impl_trait_header.polarity == ty::ImplPolarity::Reservation
-            && !matches!(self.infcx.typing_mode(obligation.param_env), TypingMode::Coherence)
+            && !matches!(self.infcx.typing_mode(&obligation.param_env), TypingMode::Coherence)
         {
             debug!("reservation impls only apply in intercrate mode");
             return Err(());

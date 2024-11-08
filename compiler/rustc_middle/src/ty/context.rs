@@ -616,7 +616,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
 
     fn find_const_ty_from_env(
         self,
-        param_env: ty::ParamEnv<'tcx>,
+        param_env: &ty::ParamEnv<'tcx>,
         placeholder: Self::PlaceholderConst,
     ) -> Ty<'tcx> {
         placeholder.find_const_ty_from_env(param_env)

@@ -29,12 +29,12 @@ where
         goal: Goal<I, NormalizesTo<I>>,
     ) -> QueryResult<I> {
         self.set_is_normalizes_to_goal();
-        debug_assert!(self.term_is_fully_unconstrained(goal));
+        debug_assert!(self.term_is_fully_unconstrained(&goal));
         let normalize_result = self
             .probe(|result: &QueryResult<I>| ProbeKind::TryNormalizeNonRigid {
                 result: result.clone(),
             })
-            .enter(|this| this.normalize_at_least_one_step(goal));
+            .enter(|this| this.normalize_at_least_one_step(goal.clone()));
 
         match normalize_result {
             Ok(res) => Ok(res),
@@ -42,7 +42,7 @@ where
                 .probe(|result: &QueryResult<I>| ProbeKind::RigidAlias { result: result.clone() })
                 .enter(|this| {
                     let Goal { param_env, predicate: NormalizesTo { alias, term } } = goal;
-                    this.add_rigid_constraints(param_env, alias)?;
+                    this.add_rigid_constraints(param_env.clone(), alias)?;
                     this.relate_rigid_alias_non_alias(param_env, alias, ty::Invariant, term)?;
                     this.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
                 }),
@@ -73,7 +73,7 @@ where
                 Ok(())
             }
             ty::AliasTermKind::OpaqueTy => {
-                match self.typing_mode(param_env) {
+                match self.typing_mode(&param_env) {
                     // Opaques are never rigid outside of analysis mode.
                     TypingMode::Coherence | TypingMode::PostAnalysis => Err(NoSolution),
                     // During analysis, opaques are only rigid if we may not define it.
@@ -169,12 +169,15 @@ where
                     let assumption_projection_pred =
                         ecx.instantiate_binder_with_infer(projection_pred);
                     ecx.eq(
-                        goal.param_env,
+                        goal.param_env.clone(),
                         goal.predicate.alias,
                         assumption_projection_pred.projection_term,
                     )?;
 
-                    ecx.instantiate_normalizes_to_term(goal, assumption_projection_pred.term);
+                    ecx.instantiate_normalizes_to_term(
+                        goal.clone(),
+                        assumption_projection_pred.term,
+                    );
 
                     // Add GAT where clauses from the trait's definition
                     // FIXME: We don't need these, since these are the type's own WF obligations.
@@ -182,7 +185,7 @@ where
                         GoalSource::Misc,
                         cx.own_predicates_of(goal.predicate.def_id())
                             .iter_instantiated(cx, goal.predicate.alias.args)
-                            .map(|pred| goal.with(cx, pred)),
+                            .map(|pred| goal.clone().with(cx, pred)),
                     );
 
                     then(ecx)
@@ -197,7 +200,7 @@ where
 
     fn consider_additional_alias_assumptions(
         _ecx: &mut EvalCtxt<'_, D>,
-        _goal: Goal<I, Self>,
+        _goal: &Goal<I, Self>,
         _alias_ty: ty::AliasTy<I>,
     ) -> Vec<Candidate<I>> {
         vec![]
@@ -233,12 +236,12 @@ where
             let impl_args = ecx.fresh_args_for_item(impl_def_id);
             let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args);
 
-            ecx.eq(goal.param_env, goal_trait_ref, impl_trait_ref)?;
+            ecx.eq(goal.param_env.clone(), goal_trait_ref, impl_trait_ref)?;
 
             let where_clause_bounds = cx
                 .predicates_of(impl_def_id)
                 .iter_instantiated(cx, impl_args)
-                .map(|pred| goal.with(cx, pred));
+                .map(|pred| goal.clone().with(cx, pred));
             ecx.add_goals(GoalSource::ImplWhereBound, where_clause_bounds);
 
             // Add GAT where clauses from the trait's definition.
@@ -247,7 +250,7 @@ where
                 GoalSource::Misc,
                 cx.own_predicates_of(goal.predicate.def_id())
                     .iter_instantiated(cx, goal.predicate.alias.args)
-                    .map(|pred| goal.with(cx, pred)),
+                    .map(|pred| goal.clone().with(cx, pred)),
             );
 
             // In case the associated item is hidden due to specialization, we have to
@@ -269,7 +272,7 @@ where
                     ty::AliasTermKind::ProjectionConst => Const::new_error(cx, guar).into(),
                     kind => panic!("expected projection, found {kind:?}"),
                 };
-                ecx.instantiate_normalizes_to_term(goal, error_term);
+                ecx.instantiate_normalizes_to_term(goal.clone(), error_term);
                 ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
             };
 
@@ -290,7 +293,7 @@ where
             // And then map these args to the args of the defining impl of `Assoc`, going
             // from `[u32, u64]` to `[u32, i32, u64]`.
             let target_args = ecx.translate_args(
-                goal,
+                goal.clone(),
                 impl_def_id,
                 impl_args,
                 impl_trait_ref,
@@ -409,7 +412,7 @@ where
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
-            goal,
+            goal.clone(),
             pred,
             [(GoalSource::ImplWhereBound, goal.with(cx, output_is_sized_pred))],
         )
@@ -496,11 +499,11 @@ where
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
-            goal,
+            goal.clone(),
             pred,
-            [goal.with(cx, output_is_sized_pred)]
+            [goal.clone().with(cx, output_is_sized_pred)]
                 .into_iter()
-                .chain(nested_preds.into_iter().map(|pred| goal.with(cx, pred)))
+                .chain(nested_preds.into_iter().map(|pred| goal.clone().with(cx, pred)))
                 .map(|goal| (GoalSource::ImplWhereBound, goal)),
         )
     }
@@ -608,7 +611,7 @@ where
                             I::GenericArg::from(goal.predicate.self_ty()),
                         ]);
                     // FIXME(-Znext-solver=coinductive): Should this be `GoalSource::ImplWhereBound`?
-                    ecx.add_goal(GoalSource::Misc, goal.with(cx, sized_predicate));
+                    ecx.add_goal(GoalSource::Misc, goal.clone().with(cx, sized_predicate));
                     Ty::new_unit(cx)
                 }
 
@@ -656,12 +659,13 @@ where
 
         let term = args.as_coroutine().return_ty().into();
 
+        let goal_predicate_def_id = goal.predicate.def_id();
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx(), goal.predicate.def_id(), [self_ty]),
+                projection_term: ty::AliasTerm::new(ecx.cx(), goal_predicate_def_id, [self_ty]),
                 term,
             }
             .upcast(cx),
@@ -688,12 +692,13 @@ where
 
         let term = args.as_coroutine().yield_ty().into();
 
+        let goal_predicate_def_id = goal.predicate.def_id();
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx(), goal.predicate.def_id(), [self_ty]),
+                projection_term: ty::AliasTerm::new(ecx.cx(), goal_predicate_def_id, [self_ty]),
                 term,
             }
             .upcast(cx),
@@ -740,7 +745,7 @@ where
                 .into()]),
             );
             let yield_ty = args.as_coroutine().yield_ty();
-            ecx.eq(goal.param_env, wrapped_expected_ty, yield_ty)?;
+            ecx.eq(goal.param_env.clone(), wrapped_expected_ty, yield_ty)?;
             ecx.instantiate_normalizes_to_term(goal, expected_ty.into());
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         })
@@ -772,12 +777,13 @@ where
             panic!("unexpected associated item `{:?}` for `{self_ty:?}`", goal.predicate.def_id())
         };
 
+        let goal_predicate_def_id = goal.predicate.def_id();
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx(), goal.predicate.def_id(), [
+                projection_term: ty::AliasTerm::new(ecx.cx(), goal_predicate_def_id, [
                     self_ty,
                     coroutine.resume_ty(),
                 ]),
@@ -943,14 +949,14 @@ where
             let target_trait_ref =
                 cx.impl_trait_ref(target_container_def_id).instantiate(cx, target_args);
             // Relate source impl to target impl by equating trait refs.
-            self.eq(goal.param_env, impl_trait_ref, target_trait_ref)?;
+            self.eq(goal.param_env.clone(), impl_trait_ref, target_trait_ref)?;
             // Also add predicates since they may be needed to constrain the
             // target impl's params.
             self.add_goals(
                 GoalSource::Misc,
                 cx.predicates_of(target_container_def_id)
                     .iter_instantiated(cx, target_args)
-                    .map(|pred| goal.with(cx, pred)),
+                    .map(|pred| goal.clone().with(cx, pred)),
             );
             goal.predicate.alias.args.rebase_onto(cx, impl_trait_ref.def_id, target_args)
         })

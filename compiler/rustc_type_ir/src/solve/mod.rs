@@ -79,7 +79,7 @@ pub struct NoSolution;
 /// Most of the time the `param_env` contains the `where`-bounds of the function
 /// we're currently typechecking while the `predicate` is some trait bound.
 #[derive_where(Clone; I: Interner, P: Clone)]
-#[derive_where(Copy; I: Interner, P: Copy)]
+#[derive_where(Copy; I: Interner, P: Copy, I::ParamEnv: Copy)]
 #[derive_where(Hash; I: Interner, P: Hash)]
 #[derive_where(PartialEq; I: Interner, P: PartialEq)]
 #[derive_where(Eq; I: Interner, P: Eq)]
@@ -99,6 +99,16 @@ impl<I: Interner, P> Goal<I, P> {
     /// Updates the goal to one with a different `predicate` but the same `param_env`.
     pub fn with<Q>(self, cx: I, predicate: impl Upcast<I, Q>) -> Goal<I, Q> {
         Goal { param_env: self.param_env, predicate: predicate.upcast(cx) }
+    }
+
+    /// Returns a new goal with a different `predicate` but the same `param_env`,
+    /// taking a function to create the new predicate from the current.
+    pub fn with_predicate<Q, U: Upcast<I, Q>>(
+        self,
+        cx: I,
+        predicate: impl FnOnce(P) -> U,
+    ) -> Goal<I, Q> {
+        Goal { param_env: self.param_env, predicate: predicate(self.predicate).upcast(cx) }
     }
 }
 

@@ -224,7 +224,7 @@ pub trait Safety<I: Interner<Safety = Self>>: Copy + Debug + Hash + Eq {
 }
 
 pub trait Region<I: Interner<Region = Self>>:
-    Copy
+    Clone
     + Debug
     + Hash
     + Eq
@@ -245,7 +245,7 @@ pub trait Region<I: Interner<Region = Self>>:
 }
 
 pub trait Const<I: Interner<Const = Self>>:
-    Copy
+    Clone
     + Debug
     + Hash
     + Eq
@@ -540,8 +540,8 @@ pub trait AdtDef<I: Interner>: Copy + Debug + Hash + Eq {
     fn destructor(self, interner: I) -> Option<AdtDestructorKind>;
 }
 
-pub trait ParamEnv<I: Interner>: Copy + Debug + Hash + Eq + TypeFoldable<I> {
-    fn reveal(self) -> Reveal;
+pub trait ParamEnv<I: Interner>: Clone + Debug + Hash + Eq + TypeFoldable<I> {
+    fn reveal(&self) -> Reveal;
 
     fn caller_bounds(self) -> impl IntoIterator<Item = I::Clause>;
 }
@@ -561,7 +561,7 @@ pub trait DefId<I: Interner>: Copy + Debug + Hash + Eq + TypeFoldable<I> {
 }
 
 pub trait BoundExistentialPredicates<I: Interner>:
-    Copy + Debug + Hash + Eq + Relate<I> + SliceLike<Item = ty::Binder<I, ty::ExistentialPredicate<I>>>
+    Clone + Debug + Hash + Eq + Relate<I> + SliceLike<Item = ty::Binder<I, ty::ExistentialPredicate<I>>>
 {
     fn principal_def_id(self) -> Option<I::DefId>;
 

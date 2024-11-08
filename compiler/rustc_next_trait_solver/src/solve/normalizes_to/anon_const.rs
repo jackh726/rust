@@ -15,7 +15,7 @@ where
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
         if let Some(normalized_const) = self.evaluate_const(
-            goal.param_env,
+            goal.param_env.clone(),
             ty::UnevaluatedConst::new(goal.predicate.alias.def_id, goal.predicate.alias.args),
         ) {
             self.instantiate_normalizes_to_term(goal, normalized_const.into());

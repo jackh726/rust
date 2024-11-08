@@ -151,7 +151,12 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
                 "expected at least one opaque type in `relate_opaques`, got {a} and {b}."
             ),
         };
-        self.register_goals(infcx.handle_opaque_type(a, b, self.span(), self.param_env())?);
+        self.register_goals(infcx.handle_opaque_type(
+            a,
+            b,
+            self.span(),
+            self.param_env().clone(),
+        )?);
         Ok(())
     }
 
@@ -521,8 +526,8 @@ impl<'b, 'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for NllTypeRelating<'_
         StructurallyRelateAliases::No
     }
 
-    fn param_env(&self) -> ty::ParamEnv<'tcx> {
-        self.type_checker.infcx.param_env
+    fn param_env(&self) -> &ty::ParamEnv<'tcx> {
+        &self.type_checker.infcx.param_env
     }
 
     fn register_predicates(
@@ -530,9 +535,9 @@ impl<'b, 'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for NllTypeRelating<'_
         obligations: impl IntoIterator<Item: ty::Upcast<TyCtxt<'tcx>, ty::Predicate<'tcx>>>,
     ) {
         let tcx = self.cx();
-        let param_env = self.param_env();
+        let param_env = self.param_env().clone();
         self.register_goals(
-            obligations.into_iter().map(|to_pred| Goal::new(tcx, param_env, to_pred)),
+            obligations.into_iter().map(|to_pred| Goal::new(tcx, param_env.clone(), to_pred)),
         );
     }
 

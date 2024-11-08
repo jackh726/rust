@@ -870,14 +870,20 @@ where
         }
     }
 
-    let mut folder =
-        ReplaceProjectionWith { ecx, param_env, mapping: replace_projection_with, nested: vec![] };
+    let mut folder = ReplaceProjectionWith {
+        ecx,
+        param_env: param_env.clone(),
+        mapping: replace_projection_with,
+        nested: vec![],
+    };
     let folded_requirements = requirements.fold_with(&mut folder);
 
     folder
         .nested
         .into_iter()
-        .chain(folded_requirements.into_iter().map(|clause| Goal::new(cx, param_env, clause)))
+        .chain(
+            folded_requirements.into_iter().map(|clause| Goal::new(cx, param_env.clone(), clause)),
+        )
         .collect()
 }
 
@@ -906,7 +912,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I>
                 self.nested.extend(
                     self.ecx
                         .eq_and_get_goals(
-                            self.param_env,
+                            self.param_env.clone(),
                             alias_ty,
                             proj.projection_term.expect_ty(self.ecx.cx()),
                         )

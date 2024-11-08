@@ -27,7 +27,7 @@ where
 
         // Equate impl header and add impl where clauses
         self.eq(
-            goal.param_env,
+            goal.param_env.clone(),
             inherent.self_ty(),
             cx.type_of(impl_def_id).instantiate(cx, impl_args),
         )?;
@@ -45,7 +45,7 @@ where
             GoalSource::Misc,
             cx.predicates_of(inherent.def_id)
                 .iter_instantiated(cx, inherent_args)
-                .map(|pred| goal.with(cx, pred)),
+                .map(|pred| goal.clone().with(cx, pred)),
         );
 
         let normalized = cx.type_of(inherent.def_id).instantiate(cx, inherent_args);
