@@ -546,7 +546,7 @@ pub trait ParamEnv<I: Interner>: Clone + Debug + Hash + Eq + TypeFoldable<I> {
     fn caller_bounds(self) -> impl IntoIterator<Item = I::Clause>;
 }
 
-pub trait Features<I: Interner>: Copy {
+pub trait Features<I: Interner>: Clone {
     fn generic_const_exprs(self) -> bool;
 
     fn coroutine_clone(self) -> bool;
