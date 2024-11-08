@@ -444,7 +444,7 @@ pub trait Predicate<I: Interner<Predicate = Self>>:
 }
 
 pub trait Clause<I: Interner<Clause = Self>>:
-    Copy
+    Clone
     + Debug
     + Hash
     + Eq

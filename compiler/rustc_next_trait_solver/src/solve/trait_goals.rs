@@ -101,10 +101,10 @@ where
             let goal_clause: I::Clause = goal.predicate.upcast(cx);
             for clause in elaborate::elaborate(cx, [goal_clause]) {
                 if matches!(
-                    clause.kind().skip_binder(),
+                    clause.clone().kind().skip_binder(),
                     ty::ClauseKind::TypeOutlives(..) | ty::ClauseKind::RegionOutlives(..)
                 ) {
-                    ecx.add_goal(GoalSource::Misc, goal.clone().with(cx, clause));
+                    ecx.add_goal(GoalSource::Misc, goal.clone().with(cx, clause.clone()));
                 }
             }
 
