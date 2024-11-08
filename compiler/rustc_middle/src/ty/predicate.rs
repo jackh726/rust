@@ -52,12 +52,12 @@ impl<'tcx> rustc_type_ir::inherent::Predicate<TyCtxt<'tcx>> for Predicate<'tcx> 
         self.as_clause()
     }
 
-    fn is_coinductive(self, interner: TyCtxt<'tcx>) -> bool {
-        self.is_coinductive(interner)
+    fn is_coinductive(&self, interner: TyCtxt<'tcx>) -> bool {
+        (*self).is_coinductive(interner)
     }
 
-    fn allow_normalization(self) -> bool {
-        self.allow_normalization()
+    fn allow_normalization(&self) -> bool {
+        (*self).allow_normalization()
     }
 }
 

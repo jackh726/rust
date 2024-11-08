@@ -414,7 +414,7 @@ pub trait GenericArgs<I: Interner<GenericArgs = Self>>:
 }
 
 pub trait Predicate<I: Interner<Predicate = Self>>:
-    Copy
+    Clone
     + Debug
     + Hash
     + Eq
@@ -437,10 +437,10 @@ pub trait Predicate<I: Interner<Predicate = Self>>:
 {
     fn as_clause(self) -> Option<I::Clause>;
 
-    fn is_coinductive(self, interner: I) -> bool;
+    fn is_coinductive(&self, interner: I) -> bool;
 
     // FIXME: Eventually uplift the impl out of rustc and make this defaulted.
-    fn allow_normalization(self) -> bool;
+    fn allow_normalization(&self) -> bool;
 }
 
 pub trait Clause<I: Interner<Clause = Self>>:

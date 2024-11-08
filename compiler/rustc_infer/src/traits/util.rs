@@ -65,8 +65,11 @@ impl<'tcx> Extend<ty::Predicate<'tcx>> for PredicateSet<'tcx> {
 /// For [`Obligation`], a sub-obligation is combined with the current obligation's
 /// param-env and cause code.
 impl<'tcx> Elaboratable<TyCtxt<'tcx>> for PredicateObligation<'tcx> {
-    fn predicate(&self) -> ty::Predicate<'tcx> {
-        self.predicate
+    fn predicate_kind(self) -> ty::Binder<'tcx, ty::PredicateKind<'tcx>> {
+        self.predicate.kind()
+    }
+    fn as_clause(self) -> Option<ty::Clause<'tcx>> {
+        self.predicate.as_clause()
     }
 
     fn child(&self, clause: ty::Clause<'tcx>) -> Self {

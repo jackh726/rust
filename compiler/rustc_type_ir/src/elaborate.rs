@@ -26,8 +26,9 @@ enum Filter {
 }
 
 /// Describes how to elaborate an obligation into a sub-obligation.
-pub trait Elaboratable<I: Interner> {
-    fn predicate(&self) -> I::Predicate;
+pub trait Elaboratable<I: Interner>: Clone {
+    fn predicate_kind(self) -> ty::Binder<I, ty::PredicateKind<I>>;
+    fn as_clause(self) -> Option<I::Clause>;
 
     // Makes a new `Self` but with a different clause that comes from elaboration.
     fn child(&self, clause: I::Clause) -> Self;
@@ -43,6 +44,7 @@ pub trait Elaboratable<I: Interner> {
     ) -> Self;
 }
 
+#[derive(Clone)]
 pub struct ClauseWithSupertraitSpan<I: Interner> {
     pub pred: I::Predicate,
     // Span of the original elaborated predicate.
@@ -56,8 +58,11 @@ impl<I: Interner> ClauseWithSupertraitSpan<I> {
     }
 }
 impl<I: Interner> Elaboratable<I> for ClauseWithSupertraitSpan<I> {
-    fn predicate(&self) -> <I as Interner>::Predicate {
-        self.pred
+    fn predicate_kind(self) -> crate::Binder<I, crate::PredicateKind<I>> {
+        self.pred.kind()
+    }
+    fn as_clause(self) -> Option<<I as Interner>::Clause> {
+        Predicate::as_clause(self.pred)
     }
 
     fn child(&self, clause: <I as Interner>::Clause) -> Self {
@@ -99,11 +104,9 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
         // This is necessary to prevent infinite recursion in some
         // cases. One common case is when people define
         // `trait Sized: Sized { }` rather than `trait Sized { }`.
-        self.stack.extend(
-            obligations.into_iter().filter(|o| {
-                self.visited.insert(self.cx.anonymize_bound_vars(o.predicate().kind()))
-            }),
-        );
+        self.stack.extend(obligations.into_iter().filter(|o| {
+            self.visited.insert(self.cx.anonymize_bound_vars(o.clone().predicate_kind()))
+        }));
     }
 
     /// Filter to only the supertraits of trait predicates, i.e. only the predicates
@@ -117,7 +120,7 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
         let cx = self.cx;
 
         // We only elaborate clauses.
-        let Some(clause) = elaboratable.predicate().as_clause() else {
+        let Some(clause) = elaboratable.clone().as_clause() else {
             return;
         };
 

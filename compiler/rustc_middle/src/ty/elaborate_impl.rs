@@ -4,8 +4,11 @@ use rustc_type_ir::elaborate::Elaboratable;
 use crate::ty::{self, TyCtxt};
 
 impl<'tcx> Elaboratable<TyCtxt<'tcx>> for ty::Clause<'tcx> {
-    fn predicate(&self) -> ty::Predicate<'tcx> {
-        self.as_predicate()
+    fn predicate_kind(self) -> ty::Binder<'tcx, ty::PredicateKind<'tcx>> {
+        self.as_predicate().kind()
+    }
+    fn as_clause(self) -> Option<ty::Clause<'tcx>> {
+        Some(self)
     }
 
     fn child(&self, clause: ty::Clause<'tcx>) -> Self {
@@ -24,8 +27,11 @@ impl<'tcx> Elaboratable<TyCtxt<'tcx>> for ty::Clause<'tcx> {
 }
 
 impl<'tcx> Elaboratable<TyCtxt<'tcx>> for ty::Predicate<'tcx> {
-    fn predicate(&self) -> ty::Predicate<'tcx> {
-        *self
+    fn predicate_kind(self) -> ty::Binder<'tcx, ty::PredicateKind<'tcx>> {
+        self.kind()
+    }
+    fn as_clause(self) -> Option<ty::Clause<'tcx>> {
+        self.as_clause()
     }
 
     fn child(&self, clause: ty::Clause<'tcx>) -> Self {
@@ -44,8 +50,11 @@ impl<'tcx> Elaboratable<TyCtxt<'tcx>> for ty::Predicate<'tcx> {
 }
 
 impl<'tcx> Elaboratable<TyCtxt<'tcx>> for (ty::Predicate<'tcx>, Span) {
-    fn predicate(&self) -> ty::Predicate<'tcx> {
-        self.0
+    fn predicate_kind(self) -> ty::Binder<'tcx, ty::PredicateKind<'tcx>> {
+        self.0.kind()
+    }
+    fn as_clause(self) -> Option<ty::Clause<'tcx>> {
+        self.0.as_clause()
     }
 
     fn child(&self, clause: ty::Clause<'tcx>) -> Self {
@@ -64,8 +73,11 @@ impl<'tcx> Elaboratable<TyCtxt<'tcx>> for (ty::Predicate<'tcx>, Span) {
 }
 
 impl<'tcx> Elaboratable<TyCtxt<'tcx>> for (ty::Clause<'tcx>, Span) {
-    fn predicate(&self) -> ty::Predicate<'tcx> {
-        self.0.as_predicate()
+    fn predicate_kind(self) -> ty::Binder<'tcx, ty::PredicateKind<'tcx>> {
+        self.0.as_predicate().kind()
+    }
+    fn as_clause(self) -> Option<ty::Clause<'tcx>> {
+        Some(self.0)
     }
 
     fn child(&self, clause: ty::Clause<'tcx>) -> Self {
