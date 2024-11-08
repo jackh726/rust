@@ -316,7 +316,7 @@ impl<I: Interner> CanonicalVarValues<I> {
     /// Creates dummy var values which should not be used in a
     /// canonical response.
     pub fn dummy() -> CanonicalVarValues<I> {
-        CanonicalVarValues { var_values: Default::default() }
+        CanonicalVarValues { var_values: I::GenericArgs::dummy() }
     }
 
     #[inline]

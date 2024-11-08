@@ -375,8 +375,10 @@ pub trait Term<I: Interner<Term = Self>>:
 }
 
 pub trait GenericArgs<I: Interner<GenericArgs = Self>>:
-    Debug + Hash + Eq + SliceLike<Item = I::GenericArg> + Default + Relate<I>
+    Debug + Hash + Eq + SliceLike<Item = I::GenericArg> + Relate<I>
 {
+    fn dummy() -> Self;
+
     fn rebase_onto(
         self,
         interner: I,

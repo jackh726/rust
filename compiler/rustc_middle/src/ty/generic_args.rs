@@ -43,6 +43,10 @@ pub struct GenericArg<'tcx> {
 impl<'tcx> rustc_type_ir::inherent::GenericArg<TyCtxt<'tcx>> for GenericArg<'tcx> {}
 
 impl<'tcx> rustc_type_ir::inherent::GenericArgs<TyCtxt<'tcx>> for ty::GenericArgsRef<'tcx> {
+    fn dummy() -> Self {
+        Default::default()
+    }
+
     fn rebase_onto(
         self,
         tcx: TyCtxt<'tcx>,
