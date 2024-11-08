@@ -6,9 +6,9 @@ use derive_where::derive_where;
 use rustc_type_ir::fold::TypeFoldable;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
-use rustc_type_ir::solve::inspect;
+use rustc_type_ir::solve::{Response, inspect};
 use rustc_type_ir::visit::TypeVisitableExt as _;
-use rustc_type_ir::{self as ty, Interner, TypingMode, Upcast as _, elaborate};
+use rustc_type_ir::{self as ty, Canonical, Interner, TypingMode, Upcast as _, elaborate};
 use tracing::{debug, instrument};
 
 use crate::delegate::SolverDelegate;
@@ -289,8 +289,11 @@ where
             // FIXME: We register a fake candidate when normalization fails so that
             // we can point at the reason for *why*. I'm tempted to say that this
             // is the wrong way to do this, though.
-            let result =
-                self.probe(|&result| inspect::ProbeKind::RigidAlias { result }).enter(|this| {
+            let result = self
+                .probe(|result: &Result<Canonical<I, Response<I>>, NoSolution>| {
+                    inspect::ProbeKind::RigidAlias { result: result.clone() }
+                })
+                .enter(|this| {
                     let normalized_ty = this.next_ty_infer();
                     let alias_relate_goal = Goal::new(
                         this.cx(),
@@ -792,7 +795,7 @@ where
     #[instrument(level = "debug", skip(self), ret)]
     pub(super) fn merge_candidates(&mut self, candidates: Vec<Candidate<I>>) -> QueryResult<I> {
         // First try merging all candidates. This is complete and fully sound.
-        let responses = candidates.iter().map(|c| c.result).collect::<Vec<_>>();
+        let responses = candidates.iter().map(|c| c.result.clone()).collect::<Vec<_>>();
         if let Some(result) = self.try_merge_responses(&responses) {
             return Ok(result);
         } else {

@@ -64,8 +64,8 @@ where
                 let existing = self.probe_existing_opaque_ty(opaque_type_key);
                 if let Some((candidate_key, candidate_ty)) = existing {
                     return self
-                        .probe(|result| inspect::ProbeKind::OpaqueTypeStorageLookup {
-                            result: *result,
+                        .probe(|result: &QueryResult<I>| {
+                            inspect::ProbeKind::OpaqueTypeStorageLookup { result: result.clone() }
                         })
                         .enter(|ecx| {
                             for (a, b) in std::iter::zip(

@@ -57,7 +57,7 @@ pub enum HasChanged {
 // FIXME(trait-system-refactor-initiative#117): we don't detect whether a response
 // ended up pulling down any universes.
 fn has_no_inference_or_external_constraints<I: Interner>(
-    response: ty::Canonical<I, Response<I>>,
+    response: &ty::Canonical<I, Response<I>>,
 ) -> bool {
     let ExternalConstraintsData {
         ref region_constraints,
@@ -229,18 +229,18 @@ where
 
         // FIXME(-Znext-solver): We should instead try to find a `Certainty::Yes` response with
         // a subset of the constraints that all the other responses have.
-        let one = responses[0];
-        if responses[1..].iter().all(|&resp| resp == one) {
-            return Some(one);
+        let one = &responses[0];
+        if responses[1..].iter().all(|resp| resp == one) {
+            return Some(one.clone());
         }
 
         responses
             .iter()
             .find(|response| {
                 response.value.certainty == Certainty::Yes
-                    && has_no_inference_or_external_constraints(**response)
+                    && has_no_inference_or_external_constraints(*response)
             })
-            .copied()
+            .cloned()
     }
 
     /// If we fail to merge responses we flounder and return overflow or ambiguity.

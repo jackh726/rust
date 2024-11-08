@@ -110,7 +110,7 @@ where
                 ecx: self,
                 probe_kind: move |result: &QueryResult<I>| inspect::ProbeKind::TraitCandidate {
                     source,
-                    result: *result,
+                    result: result.clone(),
                 },
                 _result: PhantomData,
             },

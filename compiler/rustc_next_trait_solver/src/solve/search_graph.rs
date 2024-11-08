@@ -80,7 +80,7 @@ where
     }
 
     fn is_ambiguous_result(result: &QueryResult<I>) -> bool {
-        result.is_ok_and(|response| {
+        result.as_ref().is_ok_and(|response| {
             has_no_inference_or_external_constraints(response)
                 && matches!(response.value.certainty, Certainty::Maybe(_))
         })
@@ -91,7 +91,7 @@ where
         for_input: &CanonicalInput<I>,
         from_result: &QueryResult<I>,
     ) -> QueryResult<I> {
-        let certainty = from_result.unwrap().value.certainty;
+        let certainty = from_result.as_ref().map(|q| q.value.certainty).unwrap();
         response_no_constraints(cx, for_input, certainty)
     }
 

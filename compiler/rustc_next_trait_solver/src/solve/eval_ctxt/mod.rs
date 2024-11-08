@@ -350,7 +350,7 @@ where
                         canonical_goal_evaluation,
                         |ecx, goal| {
                             let result = ecx.compute_goal(goal);
-                            ecx.inspect.query_result(result);
+                            ecx.inspect.query_result(result.clone());
                             result
                         },
                     )
@@ -358,7 +358,7 @@ where
             )
         });
 
-        canonical_goal_evaluation.query_result(result);
+        canonical_goal_evaluation.query_result(result.clone());
         goal_evaluation.canonical_goal_evaluation(canonical_goal_evaluation);
         result
     }

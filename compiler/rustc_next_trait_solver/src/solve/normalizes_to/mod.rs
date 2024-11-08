@@ -31,19 +31,21 @@ where
         self.set_is_normalizes_to_goal();
         debug_assert!(self.term_is_fully_unconstrained(goal));
         let normalize_result = self
-            .probe(|&result| ProbeKind::TryNormalizeNonRigid { result })
+            .probe(|result: &QueryResult<I>| ProbeKind::TryNormalizeNonRigid {
+                result: result.clone(),
+            })
             .enter(|this| this.normalize_at_least_one_step(goal));
 
         match normalize_result {
             Ok(res) => Ok(res),
-            Err(NoSolution) => {
-                self.probe(|&result| ProbeKind::RigidAlias { result }).enter(|this| {
+            Err(NoSolution) => self
+                .probe(|result: &QueryResult<I>| ProbeKind::RigidAlias { result: result.clone() })
+                .enter(|this| {
                     let Goal { param_env, predicate: NormalizesTo { alias, term } } = goal;
                     this.add_rigid_constraints(param_env, alias)?;
                     this.relate_rigid_alias_non_alias(param_env, alias, ty::Invariant, term)?;
                     this.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
-                })
-            }
+                }),
         }
     }
 

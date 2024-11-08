@@ -54,7 +54,7 @@ pub trait Interner:
         data: PredefinedOpaquesData<Self>,
     ) -> Self::PredefinedOpaques;
 
-    type DefiningOpaqueTypes: Copy
+    type DefiningOpaqueTypes: Clone
         + Debug
         + Hash
         + Default
@@ -62,7 +62,7 @@ pub trait Interner:
         + TypeVisitable<Self>
         + SliceLike<Item = Self::LocalDefId>;
 
-    type CanonicalVars: Copy
+    type CanonicalVars: Clone
         + Debug
         + Hash
         + Eq
@@ -70,7 +70,7 @@ pub trait Interner:
         + Default;
     fn mk_canonical_var_infos(self, infos: &[ty::CanonicalVarInfo<Self>]) -> Self::CanonicalVars;
 
-    type ExternalConstraints: Copy
+    type ExternalConstraints: Clone
         + Debug
         + Hash
         + Eq
