@@ -296,7 +296,7 @@ pub struct ParamTy {
 }
 
 impl rustc_type_ir::inherent::ParamLike for ParamTy {
-    fn index(self) -> u32 {
+    fn index(&self) -> u32 {
         self.index
     }
 }
@@ -330,7 +330,7 @@ pub struct ParamConst {
 }
 
 impl rustc_type_ir::inherent::ParamLike for ParamConst {
-    fn index(self) -> u32 {
+    fn index(&self) -> u32 {
         self.index
     }
 }

@@ -336,7 +336,7 @@ pub struct EarlyParamRegion {
 }
 
 impl rustc_type_ir::inherent::ParamLike for EarlyParamRegion {
-    fn index(self) -> u32 {
+    fn index(&self) -> u32 {
         self.index
     }
 }

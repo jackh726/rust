@@ -16,7 +16,7 @@ use crate::visit::{Flags, TypeSuperVisitable, TypeVisitable};
 use crate::{self as ty, CollectAndApply, Interner, UpcastFrom};
 
 pub trait Ty<I: Interner<Ty = Self>>:
-    Copy
+    Clone
     + Debug
     + Hash
     + Eq
@@ -515,7 +515,7 @@ pub trait BoundVarLike<I: Interner> {
 }
 
 pub trait ParamLike {
-    fn index(self) -> u32;
+    fn index(&self) -> u32;
 }
 
 pub trait AdtDef<I: Interner>: Copy + Debug + Hash + Eq {

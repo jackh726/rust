@@ -719,11 +719,12 @@ impl<'a, I: Interner> ArgFolder<'a, I> {
     #[cold]
     #[inline(never)]
     fn type_param_expected(&self, p: I::ParamTy, ty: I::Ty, kind: ty::GenericArgKind<I>) -> ! {
+        let index = p.index();
         panic!(
             "expected type for `{:?}` ({:?}/{}) but found {:?} when instantiating, args={:?}",
             p,
             ty,
-            p.index(),
+            index,
             kind,
             self.args,
         )
@@ -732,11 +733,12 @@ impl<'a, I: Interner> ArgFolder<'a, I> {
     #[cold]
     #[inline(never)]
     fn type_param_out_of_range(&self, p: I::ParamTy, ty: I::Ty) -> ! {
+        let index = p.index();
         panic!(
             "type parameter `{:?}` ({:?}/{}) out of range when instantiating, args={:?}",
             p,
             ty,
-            p.index(),
+            index,
             self.args,
         )
     }
