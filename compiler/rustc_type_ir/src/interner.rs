@@ -94,7 +94,7 @@ pub trait Interner:
     // Kinds of tys
     type Ty: Ty<Self>;
     type Tys: Tys<Self>;
-    type FnInputTys: Copy + Debug + Hash + Eq + SliceLike<Item = Self::Ty> + TypeVisitable<Self>;
+    type FnInputTys: Clone + Debug + Hash + Eq + SliceLike<Item = Self::Ty> + TypeVisitable<Self>;
     type ParamTy: Copy + Debug + Hash + Eq + ParamLike;
     type BoundTy: Copy + Debug + Hash + Eq + BoundVarLike<Self>;
     type PlaceholderTy: PlaceholderLike;

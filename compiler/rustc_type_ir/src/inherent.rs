@@ -201,7 +201,7 @@ pub trait Ty<I: Interner<Ty = Self>>:
 }
 
 pub trait Tys<I: Interner<Tys = Self>>:
-    Copy + Debug + Hash + Eq + SliceLike<Item = I::Ty> + TypeFoldable<I> + Default
+    Clone + Debug + Hash + Eq + SliceLike<Item = I::Ty> + TypeFoldable<I> + Default
 {
     fn inputs(self) -> I::FnInputTys;
 
