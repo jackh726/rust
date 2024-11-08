@@ -957,7 +957,7 @@ where
             return Err(NoSolution);
         }
 
-        let tail_field_ty = def.struct_tail_ty(cx).unwrap();
+        let tail_field_ty = def.clone().struct_tail_ty(cx).unwrap();
 
         let a_tail_ty = tail_field_ty.instantiate(cx, a_args);
         let b_tail_ty = tail_field_ty.instantiate(cx, b_args);

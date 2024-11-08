@@ -201,20 +201,20 @@ impl<'tcx> AdtDef<'tcx> {
 }
 
 impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
-    fn def_id(self) -> DefId {
+    fn def_id(&self) -> DefId {
         self.did()
     }
 
-    fn is_struct(self) -> bool {
-        self.is_struct()
+    fn is_struct(&self) -> bool {
+        (*self).is_struct()
     }
 
     fn struct_tail_ty(self, interner: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
         Some(interner.type_of(self.non_enum_variant().tail_opt()?.did))
     }
 
-    fn is_phantom_data(self) -> bool {
-        self.is_phantom_data()
+    fn is_phantom_data(&self) -> bool {
+        (*self).is_phantom_data()
     }
 
     fn all_field_tys(
@@ -230,8 +230,8 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
         self.sized_constraint(tcx)
     }
 
-    fn is_fundamental(self) -> bool {
-        self.is_fundamental()
+    fn is_fundamental(&self) -> bool {
+        (*self).is_fundamental()
     }
 
     fn destructor(self, tcx: TyCtxt<'tcx>) -> Option<AdtDestructorKind> {

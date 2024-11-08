@@ -714,11 +714,12 @@ pub(in crate::solve) fn const_conditions_for_destruct<I: Interner>(
         // *and* if there is a `Drop` impl, that `Drop` impl is also `~const`.
         ty::Adt(adt_def, args) => {
             let mut const_conditions: Vec<_> = adt_def
+                .clone()
                 .all_field_tys(cx)
                 .iter_instantiated(cx, args)
                 .map(|field_ty| ty::TraitRef::new(cx, destruct_def_id, [field_ty]))
                 .collect();
-            match adt_def.destructor(cx) {
+            match adt_def.clone().destructor(cx) {
                 // `Drop` impl exists, but it's not const. Type cannot be `~const Destruct`.
                 Some(AdtDestructorKind::NotConst) => return Err(NoSolution),
                 // `Drop` impl exists, and it's const. Require `Ty: ~const Drop` to hold.

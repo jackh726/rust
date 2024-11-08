@@ -518,24 +518,24 @@ pub trait ParamLike {
     fn index(&self) -> u32;
 }
 
-pub trait AdtDef<I: Interner>: Copy + Debug + Hash + Eq {
-    fn def_id(self) -> I::DefId;
+pub trait AdtDef<I: Interner>: Clone + Debug + Hash + Eq {
+    fn def_id(&self) -> I::DefId;
 
-    fn is_struct(self) -> bool;
+    fn is_struct(&self) -> bool;
 
     /// Returns the type of the struct tail.
     ///
     /// Expects the `AdtDef` to be a struct. If it is not, then this will panic.
     fn struct_tail_ty(self, interner: I) -> Option<ty::EarlyBinder<I, I::Ty>>;
 
-    fn is_phantom_data(self) -> bool;
+    fn is_phantom_data(&self) -> bool;
 
     // FIXME: perhaps use `all_fields` and expose `FieldDef`.
     fn all_field_tys(self, interner: I) -> ty::EarlyBinder<I, impl IntoIterator<Item = I::Ty>>;
 
     fn sized_constraint(self, interner: I) -> Option<ty::EarlyBinder<I, I::Ty>>;
 
-    fn is_fundamental(self) -> bool;
+    fn is_fundamental(&self) -> bool;
 
     fn destructor(self, interner: I) -> Option<AdtDestructorKind>;
 }
