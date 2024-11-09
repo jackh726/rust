@@ -109,7 +109,7 @@ pub fn simplify_type<I: Interner>(
     ty: I::Ty,
     treat_params: TreatParams,
 ) -> Option<SimplifiedType<I::DefId>> {
-    match ty.kind() {
+    match ty.clone().kind() {
         ty::Bool => Some(SimplifiedType::Bool),
         ty::Char => Some(SimplifiedType::Char),
         ty::Int(int_type) => Some(SimplifiedType::Int(int_type)),
@@ -220,7 +220,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
         impl_args: I::GenericArgs,
     ) -> bool {
         iter::zip(obligation_args.iter(), impl_args.iter()).all(|(obl, imp)| {
-            match (obl.kind(), imp.kind()) {
+            match (obl.clone().kind(), imp.clone().kind()) {
                 // We don't fast reject based on regions.
                 (ty::GenericArgKind::Lifetime(_), ty::GenericArgKind::Lifetime(_)) => true,
                 (ty::GenericArgKind::Type(obl), ty::GenericArgKind::Type(imp)) => {
@@ -235,7 +235,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
     }
 
     pub fn types_may_unify(self, lhs: I::Ty, rhs: I::Ty) -> bool {
-        match rhs.kind() {
+        match rhs.clone().kind() {
             // Start by checking whether the `rhs` type may unify with
             // pretty much everything. Just return `true` in that case.
             ty::Param(_) => {
@@ -274,7 +274,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
         };
 
         // For purely rigid types, use structural equivalence.
-        match lhs.kind() {
+        match lhs.clone().kind() {
             ty::Ref(_, lhs_ty, lhs_mutbl) => match rhs.kind() {
                 ty::Ref(_, rhs_ty, rhs_mutbl) => {
                     lhs_mutbl == rhs_mutbl && self.types_may_unify(lhs_ty, rhs_ty)
@@ -324,7 +324,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
 
             ty::Tuple(lhs) => match rhs.kind() {
                 ty::Tuple(rhs) => {
-                    lhs.len() == rhs.len()
+                    lhs.clone().len() == rhs.clone().len()
                         && iter::zip(lhs.iter(), rhs.iter())
                             .all(|(lhs, rhs)| self.types_may_unify(lhs, rhs))
                 }
@@ -346,7 +346,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
             },
 
             ty::Slice(lhs_ty) => {
-                matches!(rhs.kind(), ty::Slice(rhs_ty) if self.types_may_unify(lhs_ty, rhs_ty))
+                matches!(rhs.kind(), ty::Slice(rhs_ty) if self.types_may_unify(lhs_ty, rhs_ty.clone()))
             }
 
             ty::Dynamic(lhs_preds, ..) => {
@@ -354,17 +354,17 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
                 // compare their length. But considering that the relevant `Relate` impl
                 // actually sorts and deduplicates these, that doesn't work.
                 matches!(rhs.kind(), ty::Dynamic(rhs_preds, ..) if
-                    lhs_preds.principal_def_id() == rhs_preds.principal_def_id()
+                    lhs_preds.principal_def_id() == rhs_preds.clone().principal_def_id()
                 )
             }
 
             ty::FnPtr(lhs_sig_tys, lhs_hdr) => match rhs.kind() {
                 ty::FnPtr(rhs_sig_tys, rhs_hdr) => {
-                    let lhs_sig_tys = lhs_sig_tys.skip_binder().inputs_and_output;
-                    let rhs_sig_tys = rhs_sig_tys.skip_binder().inputs_and_output;
+                    let lhs_sig_tys = lhs_sig_tys.clone().skip_binder().inputs_and_output;
+                    let rhs_sig_tys = rhs_sig_tys.clone().skip_binder().inputs_and_output;
 
                     lhs_hdr == rhs_hdr
-                        && lhs_sig_tys.len() == rhs_sig_tys.len()
+                        && lhs_sig_tys.clone().len() == rhs_sig_tys.clone().len()
                         && iter::zip(lhs_sig_tys.iter(), rhs_sig_tys.iter())
                             .all(|(lhs, rhs)| self.types_may_unify(lhs, rhs))
                 }
@@ -410,7 +410,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
 
             ty::Pat(lhs_ty, _) => {
                 // FIXME(pattern_types): take pattern into account
-                matches!(rhs.kind(), ty::Pat(rhs_ty, _) if self.types_may_unify(lhs_ty, rhs_ty))
+                matches!(rhs.kind(), ty::Pat(rhs_ty, _) if self.types_may_unify(lhs_ty, rhs_ty.clone()))
             }
 
             ty::Error(..) => true,
@@ -418,7 +418,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
     }
 
     pub fn consts_may_unify(self, lhs: I::Const, rhs: I::Const) -> bool {
-        match rhs.kind() {
+        match rhs.clone().kind() {
             ty::ConstKind::Param(_) => {
                 if INSTANTIATE_RHS_WITH_INFER {
                     return true;
@@ -436,7 +436,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
             ty::ConstKind::Value(..) | ty::ConstKind::Placeholder(_) => {}
         };
 
-        match lhs.kind() {
+        match lhs.clone().kind() {
             ty::ConstKind::Value(_, lhs_val) => match rhs.kind() {
                 ty::ConstKind::Value(_, rhs_val) => lhs_val == rhs_val,
                 _ => false,
@@ -466,7 +466,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
     }
 
     fn var_and_ty_may_unify(self, var: ty::InferTy, ty: I::Ty) -> bool {
-        if !ty.is_known_rigid() {
+        if !ty.clone().is_known_rigid() {
             return true;
         }
 

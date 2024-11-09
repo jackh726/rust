@@ -34,21 +34,27 @@ where
     ) -> QueryResult<I> {
         let cx = self.cx();
         let Goal { param_env, predicate: (lhs, rhs, direction) } = goal.clone();
-        debug_assert!(lhs.to_alias_term().is_some() || rhs.to_alias_term().is_some());
+        debug_assert!(
+            lhs.clone().to_alias_term().is_some() || rhs.clone().to_alias_term().is_some()
+        );
 
         // Structurally normalize the lhs.
-        let lhs = if let Some(alias) = lhs.to_alias_term() {
+        let lhs = if let Some(alias) = lhs.clone().to_alias_term() {
             let term = self.next_term_infer_of_kind(lhs);
-            self.add_normalizes_to_goal(goal.clone().with(cx, ty::NormalizesTo { alias, term }));
+            self.add_normalizes_to_goal(
+                goal.clone().with(cx, ty::NormalizesTo { alias, term: term.clone() }),
+            );
             term
         } else {
             lhs
         };
 
         // Structurally normalize the rhs.
-        let rhs = if let Some(alias) = rhs.to_alias_term() {
+        let rhs = if let Some(alias) = rhs.clone().to_alias_term() {
             let term = self.next_term_infer_of_kind(rhs);
-            self.add_normalizes_to_goal(goal.clone().with(cx, ty::NormalizesTo { alias, term }));
+            self.add_normalizes_to_goal(
+                goal.clone().with(cx, ty::NormalizesTo { alias, term: term.clone() }),
+            );
             term
         } else {
             rhs
@@ -70,7 +76,7 @@ where
             ty::AliasRelationDirection::Equate => ty::Invariant,
             ty::AliasRelationDirection::Subtype => ty::Covariant,
         };
-        match (lhs.to_alias_term(), rhs.to_alias_term()) {
+        match (lhs.clone().to_alias_term(), rhs.clone().to_alias_term()) {
             (None, None) => {
                 self.relate(param_env, lhs, variance, rhs)?;
                 self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)

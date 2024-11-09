@@ -52,14 +52,15 @@ where
     I: Interner,
     E: Debug,
 {
-    if orphan_check_trait_ref(infcx, trait_ref, InCrate::Remote, &mut lazily_normalize_ty)?.is_ok()
+    if orphan_check_trait_ref(infcx, trait_ref.clone(), InCrate::Remote, &mut lazily_normalize_ty)?
+        .is_ok()
     {
         // A downstream or cousin crate is allowed to implement some
         // generic parameters of this trait-ref.
         return Ok(Err(Conflict::Downstream));
     }
 
-    if trait_ref_is_local_or_fundamental(infcx.cx(), trait_ref) {
+    if trait_ref_is_local_or_fundamental(infcx.cx(), trait_ref.clone()) {
         // This is a local or fundamental trait, so future-compatibility
         // is no concern. We know that downstream/cousin crates are not
         // allowed to implement a generic parameter of this trait ref,
@@ -319,13 +320,13 @@ where
 
     fn visit_ty(&mut self, ty: I::Ty) -> Self::Result {
         let ty = self.infcx.shallow_resolve(ty);
-        let ty = match (self.lazily_normalize_ty)(ty) {
+        let ty = match (self.lazily_normalize_ty)(ty.clone()) {
             Ok(norm_ty) if norm_ty.is_ty_var() => ty,
             Ok(norm_ty) => norm_ty,
             Err(err) => return ControlFlow::Break(OrphanCheckEarlyExit::NormalizationFailure(err)),
         };
 
-        let result = match ty.kind() {
+        let result = match ty.clone().kind() {
             ty::Bool
             | ty::Char
             | ty::Int(..)

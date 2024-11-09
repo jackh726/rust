@@ -30,18 +30,18 @@ pub(super) struct Candidate<I: Interner> {
 
 /// Methods used to assemble candidates for either trait or projection goals.
 pub(super) trait GoalKind<D, I = <D as SolverDelegate>::Interner>:
-    TypeFoldable<I> + Copy + Eq + std::fmt::Display
+    TypeFoldable<I> + Clone + Eq + std::fmt::Display
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    fn self_ty(self) -> I::Ty;
+    fn self_ty(&self) -> I::Ty;
 
     fn trait_ref(self, cx: I) -> ty::TraitRef<I>;
 
     fn with_self_ty(self, cx: I, self_ty: I::Ty) -> Self;
 
-    fn trait_def_id(self, cx: I) -> I::DefId;
+    fn trait_def_id(&self, cx: I) -> I::DefId;
 
     /// Try equating an assumption predicate against a goal's predicate. If it
     /// holds, then execute the `then` callback, which should do any additional
@@ -317,7 +317,7 @@ where
             return vec![];
         };
 
-        if normalized_self_ty.is_ty_var() {
+        if normalized_self_ty.clone().is_ty_var() {
             debug!("self type has been normalized to infer");
             return self.forced_ambiguity(MaybeCause::Ambiguity).into_iter().collect();
         }
@@ -380,7 +380,7 @@ where
     ) {
         let cx = self.cx();
         cx.for_each_relevant_impl(
-            goal.predicate.trait_def_id(cx),
+            goal.predicate.clone().trait_def_id(cx),
             goal.predicate.self_ty(),
             |impl_def_id| {
                 // For every `default impl`, there's always a non-default `impl`
@@ -405,7 +405,7 @@ where
         candidates: &mut Vec<Candidate<I>>,
     ) {
         let cx = self.cx();
-        let trait_def_id = goal.predicate.trait_def_id(cx);
+        let trait_def_id = goal.predicate.clone().trait_def_id(cx);
 
         let goal_for_builtin_unsizing = goal.clone();
 
@@ -550,7 +550,7 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        let (kind, alias_ty) = match self_ty.kind() {
+        let (kind, alias_ty) = match self_ty.clone().kind() {
             ty::Bool
             | ty::Char
             | ty::Int(_)
@@ -600,8 +600,10 @@ where
             }
         };
 
-        for assumption in
-            self.cx().item_bounds(alias_ty.def_id).iter_instantiated(self.cx(), alias_ty.args)
+        for assumption in self
+            .cx()
+            .item_bounds(alias_ty.def_id)
+            .iter_instantiated(self.cx(), alias_ty.args.clone())
         {
             candidates.extend(G::probe_and_consider_implied_clause(
                 self,
@@ -612,7 +614,7 @@ where
             ));
         }
 
-        candidates.extend(G::consider_additional_alias_assumptions(self, &goal, alias_ty));
+        candidates.extend(G::consider_additional_alias_assumptions(self, &goal, alias_ty.clone()));
 
         if kind != ty::Projection {
             return;
@@ -634,12 +636,12 @@ where
         candidates: &mut Vec<Candidate<I>>,
     ) {
         let cx = self.cx();
-        if !cx.trait_may_be_implemented_via_object(goal.predicate.trait_def_id(cx)) {
+        if !cx.trait_may_be_implemented_via_object(goal.predicate.clone().trait_def_id(cx)) {
             return;
         }
 
         let self_ty = goal.predicate.self_ty();
-        let bounds = match self_ty.kind() {
+        let bounds = match self_ty.clone().kind() {
             ty::Bool
             | ty::Char
             | ty::Int(_)
@@ -679,8 +681,8 @@ where
         // Consider all of the auto-trait and projection bounds, which don't
         // need to be recorded as a `BuiltinImplSource::Object` since they don't
         // really have a vtable base...
-        for bound in bounds.iter() {
-            match bound.skip_binder() {
+        for bound in bounds.clone().iter() {
+            match bound.clone().skip_binder() {
                 ty::ExistentialPredicate::Trait(_) => {
                     // Skip principal
                 }
@@ -690,7 +692,7 @@ where
                         self,
                         CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
                         goal.clone(),
-                        bound.with_self_ty(cx, self_ty),
+                        bound.clone().with_self_ty(cx, self_ty.clone()),
                     ));
                 }
             }
@@ -725,8 +727,8 @@ where
     ) -> Result<Candidate<I>, NoSolution> {
         self.probe_trait_candidate(CandidateSource::CoherenceUnknowable).enter(|ecx| {
             let cx = ecx.cx();
-            let trait_ref = goal.predicate.trait_ref(cx);
-            if ecx.trait_ref_is_knowable(goal.param_env.clone(), trait_ref)? {
+            let trait_ref = goal.predicate.clone().trait_ref(cx);
+            if ecx.trait_ref_is_knowable(goal.param_env.clone(), trait_ref.clone())? {
                 Err(NoSolution)
             } else {
                 // While the trait bound itself may be unknowable, we may be able to

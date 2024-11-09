@@ -44,7 +44,7 @@ where
                 }
 
                 // FIXME: This may have issues when the args contain aliases...
-                match uses_unique_placeholders_ignoring_regions(self.cx(), opaque_ty.args) {
+                match uses_unique_placeholders_ignoring_regions(self.cx(), opaque_ty.args.clone()) {
                     Err(NotUniqueParam::NotParam(param)) if param.is_non_region_infer() => {
                         return self.evaluate_added_goals_and_make_canonical_response(
                             Certainty::AMBIGUOUS,
@@ -56,12 +56,12 @@ where
                     Ok(()) => {}
                 }
                 // Prefer opaques registered already.
-                let opaque_type_key = ty::OpaqueTypeKey { def_id, args: opaque_ty.args };
+                let opaque_type_key = ty::OpaqueTypeKey { def_id, args: opaque_ty.args.clone() };
                 // FIXME: This also unifies the previous hidden type with the expected.
                 //
                 // If that fails, we insert `expected` as a new hidden type instead of
                 // eagerly emitting an error.
-                let existing = self.probe_existing_opaque_ty(opaque_type_key);
+                let existing = self.probe_existing_opaque_ty(opaque_type_key.clone());
                 if let Some((candidate_key, candidate_ty)) = existing {
                     return self
                         .probe(|result: &QueryResult<I>| {
@@ -69,12 +69,12 @@ where
                         })
                         .enter(|ecx| {
                             for (a, b) in std::iter::zip(
-                                candidate_key.args.iter(),
+                                candidate_key.args.clone().iter(),
                                 opaque_type_key.args.iter(),
                             ) {
                                 ecx.eq(goal.param_env.clone(), a, b)?;
                             }
-                            ecx.eq(goal.param_env.clone(), candidate_ty, expected)?;
+                            ecx.eq(goal.param_env.clone(), candidate_ty.clone(), expected)?;
                             ecx.add_item_bounds_for_hidden_type(
                                 def_id.into(),
                                 candidate_key.args,
@@ -87,7 +87,7 @@ where
 
                 // Otherwise, define a new opaque type
                 // FIXME: should we use `inject_hidden_type_unchecked` here?
-                self.insert_hidden_type(opaque_type_key, goal.param_env.clone(), expected)?;
+                self.insert_hidden_type(opaque_type_key, goal.param_env.clone(), expected.clone())?;
                 self.add_item_bounds_for_hidden_type(
                     def_id.into(),
                     opaque_ty.args,
@@ -119,7 +119,7 @@ fn uses_unique_placeholders_ignoring_regions<I: Interner>(
             // Ignore regions, since we can't resolve those in a canonicalized
             // query in the trait solver.
             ty::GenericArgKind::Lifetime(_) => {}
-            ty::GenericArgKind::Type(t) => match t.kind() {
+            ty::GenericArgKind::Type(t) => match t.clone().kind() {
                 ty::Placeholder(p) => {
                     if !seen.insert(p.var()) {
                         return Err(NotUniqueParam::DuplicateParam(t.into()));
@@ -127,7 +127,7 @@ fn uses_unique_placeholders_ignoring_regions<I: Interner>(
                 }
                 _ => return Err(NotUniqueParam::NotParam(t.into())),
             },
-            ty::GenericArgKind::Const(c) => match c.kind() {
+            ty::GenericArgKind::Const(c) => match c.clone().kind() {
                 ty::ConstKind::Placeholder(p) => {
                     if !seen.insert(p.var()) {
                         return Err(NotUniqueParam::DuplicateParam(c.into()));

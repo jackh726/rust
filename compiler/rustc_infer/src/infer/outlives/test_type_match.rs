@@ -203,7 +203,8 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstHigherRankedOutlives<'tcx>
         T: Relate<TyCtxt<'tcx>>,
     {
         self.pattern_depth.shift_in(1);
-        let result = Ok(pattern.rebind(self.relate(pattern.skip_binder(), value.skip_binder())?));
+        let result =
+            Ok(pattern.clone().rebind(self.relate(pattern.skip_binder(), value.skip_binder())?));
         self.pattern_depth.shift_out(1);
         result
     }

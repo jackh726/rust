@@ -72,7 +72,7 @@ impl<I: Interner> TypeVisitor<I> for OutlivesCollector<'_, I> {
     type Result = ();
 
     fn visit_ty(&mut self, ty: I::Ty) -> Self::Result {
-        if !self.visited.insert(ty) {
+        if !self.visited.insert(ty.clone()) {
             return;
         }
         // Descend through the types, looking for the various "base"
@@ -80,7 +80,7 @@ impl<I: Interner> TypeVisitor<I> for OutlivesCollector<'_, I> {
         // with `collect()` because of the need to sometimes skip subtrees
         // in the `subtys` iterator (e.g., when encountering a
         // projection).
-        match ty.kind() {
+        match ty.clone().kind() {
             ty::FnDef(_, args) => {
                 // HACK(eddyb) ignore lifetimes found shallowly in `args`.
                 // This is inconsistent with `ty::Adt` (including all args)
@@ -90,7 +90,7 @@ impl<I: Interner> TypeVisitor<I> for OutlivesCollector<'_, I> {
                 // See https://github.com/rust-lang/rust/issues/70917
                 // for further background and discussion.
                 for child in args.iter() {
-                    match child.kind() {
+                    match child.clone().kind() {
                         ty::GenericArgKind::Lifetime(_) => {}
                         ty::GenericArgKind::Type(_) | ty::GenericArgKind::Const(_) => {
                             child.visit_with(self);
@@ -108,7 +108,7 @@ impl<I: Interner> TypeVisitor<I> for OutlivesCollector<'_, I> {
             }
 
             ty::Coroutine(_, args) => {
-                args.as_coroutine().tupled_upvars_ty().visit_with(self);
+                args.clone().as_coroutine().tupled_upvars_ty().visit_with(self);
 
                 // Coroutines may not outlive a region unless the resume
                 // ty outlives a region. This is because the resume ty may
@@ -210,7 +210,7 @@ impl<I: Interner> TypeVisitor<I> for OutlivesCollector<'_, I> {
     }
 
     fn visit_region(&mut self, lt: I::Region) -> Self::Result {
-        if !lt.is_bound() {
+        if !lt.clone().is_bound() {
             self.out.push(Component::Region(lt));
         }
     }
@@ -235,7 +235,9 @@ pub fn compute_alias_components_recursive<I: Interner>(
     let mut visitor = OutlivesCollector { cx, out, visited: Default::default() };
 
     for (index, child) in alias_ty.args.iter().enumerate() {
-        if opt_variances.and_then(|variances| variances.get(index)) == Some(ty::Bivariant) {
+        if opt_variances.clone().and_then(|variances| variances.clone().get(index))
+            == Some(ty::Bivariant)
+        {
             continue;
         }
         child.visit_with(&mut visitor);

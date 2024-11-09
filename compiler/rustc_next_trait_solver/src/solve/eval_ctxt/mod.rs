@@ -283,7 +283,7 @@ where
         let mut ecx = EvalCtxt {
             delegate,
             variables: canonical_input.canonical.variables,
-            var_values,
+            var_values: var_values.clone(),
             is_normalizes_to_goal: false,
             predefined_opaques_in_body: input.predefined_opaques_in_body.clone(),
             max_input_universe: canonical_input.canonical.max_universe,
@@ -294,7 +294,7 @@ where
         };
 
         for (key, ty) in &input.predefined_opaques_in_body.opaque_types {
-            ecx.delegate.inject_new_hidden_type_unchecked(key.clone(), *ty);
+            ecx.delegate.inject_new_hidden_type_unchecked(key.clone(), ty.clone());
         }
 
         if !ecx.nested_goals.is_empty() {
@@ -440,7 +440,7 @@ where
     fn compute_goal(&mut self, goal: Goal<I, I::Predicate>) -> QueryResult<I> {
         let Goal { param_env, predicate } = goal.clone();
         let kind = predicate.kind();
-        if let Some(kind) = kind.no_bound_vars() {
+        if let Some(kind) = kind.clone().no_bound_vars() {
             match kind {
                 ty::PredicateKind::Clause(ty::ClauseKind::Trait(predicate)) => {
                     self.compute_trait_goal(Goal { param_env, predicate })
@@ -539,10 +539,10 @@ where
         for goal in goals.normalizes_to_goals {
             // Replace the goal with an unconstrained infer var, so the
             // RHS does not affect projection candidate assembly.
-            let unconstrained_rhs = self.next_term_infer_of_kind(goal.predicate.term);
+            let unconstrained_rhs = self.next_term_infer_of_kind(goal.predicate.term.clone());
             let unconstrained_goal = goal.clone().with(cx, ty::NormalizesTo {
-                alias: goal.predicate.alias,
-                term: unconstrained_rhs,
+                alias: goal.predicate.alias.clone(),
+                term: unconstrained_rhs.clone(),
             });
 
             let (NestedNormalizationGoals(nested_goals), _, certainty) = self.evaluate_goal_raw(
@@ -649,13 +649,13 @@ where
 
     pub(super) fn next_ty_infer(&mut self) -> I::Ty {
         let ty = self.delegate.next_ty_infer();
-        self.inspect.add_var_value(ty);
+        self.inspect.add_var_value(ty.clone());
         ty
     }
 
     pub(super) fn next_const_infer(&mut self) -> I::Const {
         let ct = self.delegate.next_const_infer();
-        self.inspect.add_var_value(ct);
+        self.inspect.add_var_value(ct.clone());
         ct
     }
 
@@ -674,7 +674,7 @@ where
     /// and is able to name all other placeholder and inference variables.
     #[instrument(level = "trace", skip(self), ret)]
     pub(super) fn term_is_fully_unconstrained(&self, goal: &Goal<I, ty::NormalizesTo<I>>) -> bool {
-        let universe_of_term = match goal.predicate.term.kind() {
+        let universe_of_term = match goal.predicate.term.clone().kind() {
             ty::TermKind::Ty(ty) => {
                 if let ty::Infer(ty::TyVar(vid)) = ty.kind() {
                     self.delegate.universe_of_ty(vid).unwrap()
@@ -717,9 +717,9 @@ where
                     return ControlFlow::Continue(());
                 }
 
-                match t.kind() {
+                match t.clone().kind() {
                     ty::Infer(ty::TyVar(vid)) => {
-                        if let ty::TermKind::Ty(term) = self.term.kind() {
+                        if let ty::TermKind::Ty(term) = self.term.clone().kind() {
                             if let ty::Infer(ty::TyVar(term_vid)) = term.kind() {
                                 if self.delegate.root_ty_var(vid)
                                     == self.delegate.root_ty_var(term_vid)
@@ -744,9 +744,9 @@ where
             }
 
             fn visit_const(&mut self, c: I::Const) -> Self::Result {
-                match c.kind() {
+                match c.clone().kind() {
                     ty::ConstKind::Infer(ty::InferConst::Var(vid)) => {
-                        if let ty::TermKind::Const(term) = self.term.kind() {
+                        if let ty::TermKind::Const(term) = self.term.clone().kind() {
                             if let ty::ConstKind::Infer(ty::InferConst::Var(term_vid)) = term.kind()
                             {
                                 if self.delegate.root_const_var(vid)
@@ -774,7 +774,7 @@ where
         let mut visitor = ContainsTermOrNotNameable {
             delegate: self.delegate,
             universe_of_term,
-            term: goal.predicate.term,
+            term: goal.predicate.term.clone(),
             cache: Default::default(),
         };
         goal.predicate.alias.visit_with(&mut visitor).is_continue()
@@ -818,7 +818,7 @@ where
             // variant to `StructurallyRelateAliases`.
             let identity_args = self.fresh_args_for_item(alias.def_id);
             let rigid_ctor = ty::AliasTerm::new_from_args(cx, alias.def_id, identity_args);
-            let ctor_term = rigid_ctor.to_term(cx);
+            let ctor_term = rigid_ctor.clone().to_term(cx);
             let obligations = self.delegate.eq_structurally_relating_aliases(
                 param_env.clone(),
                 term,
@@ -884,7 +884,7 @@ where
         Ok(self.delegate.relate(param_env, lhs, ty::Variance::Invariant, rhs)?)
     }
 
-    pub(super) fn instantiate_binder_with_infer<T: TypeFoldable<I> + Copy>(
+    pub(super) fn instantiate_binder_with_infer<T: TypeFoldable<I> + Clone>(
         &self,
         value: ty::Binder<I, T>,
     ) -> T {
@@ -893,7 +893,7 @@ where
 
     /// `enter_forall`, but takes `&mut self` and passes it back through the
     /// callback since it can't be aliased during the call.
-    pub(super) fn enter_forall<T: TypeFoldable<I> + Copy, U>(
+    pub(super) fn enter_forall<T: TypeFoldable<I> + Clone, U>(
         &mut self,
         value: ty::Binder<I, T>,
         f: impl FnOnce(&mut Self, T) -> U,
@@ -910,8 +910,8 @@ where
 
     pub(super) fn fresh_args_for_item(&mut self, def_id: I::DefId) -> I::GenericArgs {
         let args = self.delegate.fresh_args_for_item(def_id);
-        for arg in args.iter() {
-            self.inspect.add_var_value(arg);
+        for arg in args.clone().iter() {
+            self.inspect.add_var_value(arg.clone());
         }
         args
     }
@@ -995,7 +995,7 @@ where
                 |(candidate_key, _)| {
                     candidate_key.def_id == key.def_id
                         && DeepRejectCtxt::relate_rigid_rigid(self.cx())
-                            .args_may_unify(candidate_key.args, key.args)
+                            .args_may_unify(candidate_key.args.clone(), key.args.clone())
                 },
             );
         let first = matching.next();
@@ -1063,12 +1063,12 @@ where
     }
 
     fn fold_ty(&mut self, ty: I::Ty) -> I::Ty {
-        match ty.kind() {
+        match ty.clone().kind() {
             ty::Alias(..) if !ty.has_escaping_bound_vars() => {
                 let infer_ty = self.ecx.next_ty_infer();
                 let normalizes_to = ty::PredicateKind::AliasRelate(
                     ty.into(),
-                    infer_ty.into(),
+                    infer_ty.clone().into(),
                     ty::AliasRelationDirection::Equate,
                 );
                 self.ecx.add_goal(
@@ -1080,11 +1080,11 @@ where
             _ => {
                 if !ty.has_aliases() {
                     ty
-                } else if let Some(&entry) = self.cache.get(&ty) {
-                    return entry;
+                } else if let Some(entry) = self.cache.get(&ty) {
+                    return entry.clone();
                 } else {
-                    let res = ty.super_fold_with(self);
-                    assert!(self.cache.insert(ty, res).is_none());
+                    let res = ty.clone().super_fold_with(self);
+                    assert!(self.cache.insert(ty, res.clone()).is_none());
                     res
                 }
             }
@@ -1092,12 +1092,12 @@ where
     }
 
     fn fold_const(&mut self, ct: I::Const) -> I::Const {
-        match ct.kind() {
+        match ct.clone().kind() {
             ty::ConstKind::Unevaluated(..) if !ct.has_escaping_bound_vars() => {
                 let infer_ct = self.ecx.next_const_infer();
                 let normalizes_to = ty::PredicateKind::AliasRelate(
                     ct.into(),
-                    infer_ct.into(),
+                    infer_ct.clone().into(),
                     ty::AliasRelationDirection::Equate,
                 );
                 self.ecx.add_goal(

@@ -54,7 +54,7 @@ where
     debug_assert!(!a.has_escaping_bound_vars());
     debug_assert!(!b.has_escaping_bound_vars());
 
-    match (a.kind(), b.kind()) {
+    match (a.clone().kind(), b.clone().kind()) {
         (ty::Error(e), _) | (_, ty::Error(e)) => {
             infcx.set_tainted_by_errors(e);
             return Ok(Ty::new_error(infcx.cx(), e));
@@ -116,7 +116,7 @@ where
             match relation.structurally_relate_aliases() {
                 StructurallyRelateAliases::Yes => structurally_relate_tys(relation, a, b),
                 StructurallyRelateAliases::No => {
-                    relation.register_alias_relate_predicate(a, b);
+                    relation.register_alias_relate_predicate(a.clone(), b.clone());
                     Ok(a)
                 }
             }
@@ -170,7 +170,7 @@ where
     let a = infcx.shallow_resolve_const(a);
     let b = infcx.shallow_resolve_const(b);
 
-    match (a.kind(), b.kind()) {
+    match (a.clone().kind(), b.clone().kind()) {
         (
             ty::ConstKind::Infer(ty::InferConst::Var(a_vid)),
             ty::ConstKind::Infer(ty::InferConst::Var(b_vid)),
@@ -188,12 +188,12 @@ where
         }
 
         (ty::ConstKind::Infer(ty::InferConst::Var(vid)), _) => {
-            infcx.instantiate_const_var_raw(relation, true, vid, b)?;
+            infcx.instantiate_const_var_raw(relation, true, vid, b.clone())?;
             Ok(b)
         }
 
         (_, ty::ConstKind::Infer(ty::InferConst::Var(vid))) => {
-            infcx.instantiate_const_var_raw(relation, false, vid, a)?;
+            infcx.instantiate_const_var_raw(relation, false, vid, a.clone())?;
             Ok(a)
         }
 
@@ -204,12 +204,12 @@ where
                 StructurallyRelateAliases::No => {
                     relation.register_predicates([if infcx.next_trait_solver() {
                         ty::PredicateKind::AliasRelate(
-                            a.into(),
-                            b.into(),
+                            a.clone().into(),
+                            b.clone().into(),
                             ty::AliasRelationDirection::Equate,
                         )
                     } else {
-                        ty::PredicateKind::ConstEquate(a, b)
+                        ty::PredicateKind::ConstEquate(a, b.clone())
                     }]);
 
                     Ok(b)

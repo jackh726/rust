@@ -9,7 +9,8 @@ use crate::{self as ty, Interner};
 
 /// A clause is something that can appear in where bounds or be inferred
 /// by implied bounds.
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy, I::Region: Copy, I::Ty: Copy, I::Const: Copy, I::Term: Copy, I::GenericArg: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum ClauseKind<I: Interner> {
@@ -45,7 +46,8 @@ pub enum ClauseKind<I: Interner> {
     HostEffect(ty::HostEffectPredicate<I>),
 }
 
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy, I::Region: Copy, I::Ty: Copy, I::Const: Copy, I::Term: Copy, I::GenericArg: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum PredicateKind<I: Interner> {

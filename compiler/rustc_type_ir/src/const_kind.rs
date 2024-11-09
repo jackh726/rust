@@ -10,7 +10,8 @@ use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Gen
 use crate::{self as ty, DebruijnIndex, Interner};
 
 /// Represents a constant in Rust.
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Copy; I: Interner, I::Ty: Copy, I::GenericArgs: Copy)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum ConstKind<I: Interner> {
     /// A const generic parameter.
@@ -60,7 +61,8 @@ impl<I: Interner> fmt::Debug for ConstKind<I> {
 }
 
 /// An unevaluated (potentially generic) constant used in the type-system.
-#[derive_where(Clone, Copy, Debug, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Clone, Debug, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct UnevaluatedConst<I: Interner> {

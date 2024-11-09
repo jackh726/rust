@@ -241,7 +241,7 @@ pub enum BuiltinImplSource {
 }
 
 #[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
-#[derive_where(Copy; I: Interner, I::ExternalConstraints: Copy)]
+#[derive_where(Copy; I: Interner, I::ExternalConstraints: Copy, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(HashStable_NoContext))]
 pub struct Response<I: Interner> {

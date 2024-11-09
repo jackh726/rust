@@ -166,9 +166,9 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
         f: impl FnOnce(&mut Self, T) -> U,
     ) -> U
     where
-        T: ty::TypeFoldable<TyCtxt<'tcx>> + Copy,
+        T: ty::TypeFoldable<TyCtxt<'tcx>> + Clone,
     {
-        let value = if let Some(inner) = binder.no_bound_vars() {
+        let value = if let Some(inner) = binder.clone().no_bound_vars() {
             inner
         } else {
             let infcx = self.type_checker.infcx;
@@ -209,9 +209,9 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
     #[instrument(skip(self), level = "debug")]
     fn instantiate_binder_with_existentials<T>(&mut self, binder: ty::Binder<'tcx, T>) -> T
     where
-        T: ty::TypeFoldable<TyCtxt<'tcx>> + Copy,
+        T: ty::TypeFoldable<TyCtxt<'tcx>> + Clone,
     {
-        if let Some(inner) = binder.no_bound_vars() {
+        if let Some(inner) = binder.clone().no_bound_vars() {
             return inner;
         }
 
@@ -452,9 +452,9 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
 
         debug!(?self.ambient_variance);
 
-        if let (Some(a), Some(b)) = (a.no_bound_vars(), b.no_bound_vars()) {
+        if let (Some(a), Some(b)) = (a.clone().no_bound_vars(), b.clone().no_bound_vars()) {
             // Fast path for the common case.
-            self.relate(a, b)?;
+            self.relate(a.clone(), b)?;
             return Ok(ty::Binder::dummy(a));
         }
 
@@ -469,8 +469,8 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
                 // Note: the order here is important. Create the placeholders first, otherwise
                 // we assign the wrong universe to the existential!
                 self.enter_forall(b, |this, b| {
-                    let a = this.instantiate_binder_with_existentials(a);
-                    this.relate(a, b)
+                    let a = this.instantiate_binder_with_existentials(a.clone());
+                    this.relate(a.clone(), b)
                 })?;
             }
 
@@ -483,9 +483,9 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
 
                 // Note: the order here is important. Create the placeholders first, otherwise
                 // we assign the wrong universe to the existential!
-                self.enter_forall(a, |this, a| {
-                    let b = this.instantiate_binder_with_existentials(b);
-                    this.relate(a, b)
+                self.enter_forall(a.clone(), |this, a| {
+                    let b = this.instantiate_binder_with_existentials(b.clone());
+                    this.relate(a.clone(), b)
                 })?;
             }
 
@@ -498,15 +498,15 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
 
                 // Note: the order here is important. Create the placeholders first, otherwise
                 // we assign the wrong universe to the existential!
-                self.enter_forall(b, |this, b| {
-                    let a = this.instantiate_binder_with_existentials(a);
-                    this.relate(a, b)
+                self.enter_forall(b.clone(), |this, b| {
+                    let a = this.instantiate_binder_with_existentials(a.clone());
+                    this.relate(a.clone(), b.clone())
                 })?;
                 // Note: the order here is important. Create the placeholders first, otherwise
                 // we assign the wrong universe to the existential!
-                self.enter_forall(a, |this, a| {
-                    let b = this.instantiate_binder_with_existentials(b);
-                    this.relate(a, b)
+                self.enter_forall(a.clone(), |this, a| {
+                    let b = this.instantiate_binder_with_existentials(b.clone());
+                    this.relate(a.clone(), b)
                 })?;
             }
 

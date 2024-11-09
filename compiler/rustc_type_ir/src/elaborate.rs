@@ -124,8 +124,8 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
             return;
         };
 
-        let bound_clause = clause.kind();
-        match bound_clause.skip_binder() {
+        let bound_clause = clause.clone().kind();
+        match bound_clause.clone().skip_binder() {
             ty::ClauseKind::Trait(data) => {
                 // Negative trait bounds do not imply any supertrait bounds
                 if data.polarity != ty::PredicatePolarity::Positive {
@@ -135,9 +135,12 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
                 let map_to_child_clause =
                     |(index, (clause, span)): (usize, (I::Clause, I::Span))| {
                         elaboratable.child_with_derived_cause(
-                            clause.instantiate_supertrait(cx, bound_clause.rebind(data.trait_ref)),
+                            clause.instantiate_supertrait(
+                                cx,
+                                bound_clause.clone().rebind(data.trait_ref.clone()),
+                            ),
                             span,
-                            bound_clause.rebind(data),
+                            bound_clause.rebind(data.clone()),
                             index,
                         )
                     };
@@ -145,13 +148,13 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
                 // Get predicates implied by the trait, or only super predicates if we only care about self predicates.
                 match self.mode {
                     Filter::All => self.extend_deduped(
-                        cx.explicit_implied_predicates_of(data.def_id())
+                        cx.explicit_implied_predicates_of(data.clone().def_id())
                             .iter_identity()
                             .enumerate()
                             .map(map_to_child_clause),
                     ),
                     Filter::OnlySelf => self.extend_deduped(
-                        cx.explicit_super_predicates_of(data.def_id())
+                        cx.explicit_super_predicates_of(data.clone().def_id())
                             .iter_identity()
                             .enumerate()
                             .map(map_to_child_clause),
@@ -160,13 +163,18 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
             }
             // `T: ~const Trait` implies `T: ~const Supertrait`.
             ty::ClauseKind::HostEffect(data) => self.extend_deduped(
-                cx.explicit_implied_const_bounds(data.def_id()).iter_identity().map(|trait_ref| {
-                    elaboratable.child(
-                        trait_ref
-                            .to_host_effect_clause(cx, data.constness)
-                            .instantiate_supertrait(cx, bound_clause.rebind(data.trait_ref)),
-                    )
-                }),
+                cx.explicit_implied_const_bounds(data.clone().def_id()).iter_identity().map(
+                    |trait_ref| {
+                        elaboratable.child(
+                            trait_ref
+                                .to_host_effect_clause(cx, data.constness)
+                                .instantiate_supertrait(
+                                    cx,
+                                    bound_clause.rebind(data.trait_ref.clone()),
+                                ),
+                        )
+                    },
+                ),
             ),
             ty::ClauseKind::TypeOutlives(ty::OutlivesPredicate(ty_max, r_min)) => {
                 // We know that `T: 'a` for some type `T`. We can
@@ -183,7 +191,7 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
                 // consider this as evidence that `T: 'static`, but
                 // I'm a bit wary of such constructions and so for now
                 // I want to be conservative. --nmatsakis
-                if r_min.is_bound() {
+                if r_min.clone().is_bound() {
                     return;
                 }
 
@@ -192,7 +200,9 @@ impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
                 self.extend_deduped(
                     components
                         .into_iter()
-                        .filter_map(|component| elaborate_component_to_clause(cx, component, r_min))
+                        .filter_map(|component| {
+                            elaborate_component_to_clause(cx, component, r_min.clone())
+                        })
                         .map(|clause| elaboratable.child(bound_clause.rebind(clause).upcast(cx))),
                 );
             }
@@ -224,7 +234,7 @@ fn elaborate_component_to_clause<I: Interner>(
 ) -> Option<ty::ClauseKind<I>> {
     match component {
         Component::Region(r) => {
-            if r.is_bound() {
+            if r.clone().is_bound() {
                 None
             } else {
                 Some(ty::ClauseKind::RegionOutlives(ty::OutlivesPredicate(r, outlives_region)))
@@ -300,8 +310,8 @@ pub fn supertrait_def_ids<I: Interner>(
 
         for (predicate, _) in cx.explicit_super_predicates_of(trait_def_id).iter_identity() {
             if let ty::ClauseKind::Trait(data) = predicate.kind().skip_binder() {
-                if set.insert(data.def_id()) {
-                    stack.push(data.def_id());
+                if set.insert(data.clone().def_id()) {
+                    stack.push(data.clone().def_id());
                 }
             }
         }

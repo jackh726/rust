@@ -87,7 +87,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for LatticeOp<'_, 'tcx> {
                 self.obligations.extend(
                     self.infcx
                         .at(&self.trace.cause, self.param_env)
-                        .eq_trace(DefineOpaqueTypes::Yes, self.trace.clone(), a, b)?
+                        .eq_trace(DefineOpaqueTypes::Yes, self.trace.clone(), a.clone(), b)?
                         .into_obligations(),
                 );
                 Ok(a)
@@ -209,11 +209,18 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for LatticeOp<'_, 'tcx> {
         }
 
         debug!("binders(a={:?}, b={:?})", a, b);
-        if a.skip_binder().has_escaping_bound_vars() || b.skip_binder().has_escaping_bound_vars() {
+        if a.clone().skip_binder().has_escaping_bound_vars()
+            || b.clone().skip_binder().has_escaping_bound_vars()
+        {
             // When higher-ranked types are involved, computing the GLB/LUB is
             // very challenging, switch to invariance. This is obviously
             // overly conservative but works ok in practice.
-            self.relate_with_variance(ty::Invariant, ty::VarianceDiagInfo::default(), a, b)?;
+            self.relate_with_variance(
+                ty::Invariant,
+                ty::VarianceDiagInfo::default(),
+                a.clone(),
+                b,
+            )?;
             Ok(a)
         } else {
             Ok(ty::Binder::dummy(self.relate(a.skip_binder(), b.skip_binder())?))

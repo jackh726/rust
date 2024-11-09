@@ -109,7 +109,7 @@ where
 
     #[instrument(level = "trace", skip(self))]
     fn compute_subtype_goal(&mut self, goal: Goal<I, ty::SubtypePredicate<I>>) -> QueryResult<I> {
-        if goal.predicate.a.is_ty_var() && goal.predicate.b.is_ty_var() {
+        if goal.predicate.a.clone().is_ty_var() && goal.predicate.b.clone().is_ty_var() {
             self.evaluate_added_goals_and_make_canonical_response(Certainty::AMBIGUOUS)
         } else {
             self.sub(goal.param_env, goal.predicate.a, goal.predicate.b)?;
@@ -141,7 +141,7 @@ where
         &mut self,
         Goal { param_env, predicate: ct }: Goal<I, I::Const>,
     ) -> QueryResult<I> {
-        match ct.kind() {
+        match ct.clone().kind() {
             ty::ConstKind::Unevaluated(uv) => {
                 // We never return `NoSolution` here as `evaluate_const` emits an
                 // error itself when failing to evaluate, so emitting an additional fulfillment
@@ -182,7 +182,7 @@ where
     ) -> QueryResult<I> {
         let (ct, ty) = goal.predicate;
 
-        let ct_ty = match ct.kind() {
+        let ct_ty = match ct.clone().kind() {
             ty::ConstKind::Infer(_) => {
                 return self.evaluate_added_goals_and_make_canonical_response(Certainty::AMBIGUOUS);
             }
@@ -272,14 +272,14 @@ where
         param_env: I::ParamEnv,
         ty: I::Ty,
     ) -> Result<I::Ty, NoSolution> {
-        if let ty::Alias(..) = ty.kind() {
+        if let ty::Alias(..) = ty.clone().kind() {
             let normalized_ty = self.next_ty_infer();
             let alias_relate_goal = Goal::new(
                 self.cx(),
                 param_env,
                 ty::PredicateKind::AliasRelate(
                     ty.into(),
-                    normalized_ty.into(),
+                    normalized_ty.clone().into(),
                     ty::AliasRelationDirection::Equate,
                 ),
             );
@@ -303,14 +303,14 @@ where
         param_env: I::ParamEnv,
         ct: I::Const,
     ) -> Result<I::Const, NoSolution> {
-        if let ty::ConstKind::Unevaluated(..) = ct.kind() {
+        if let ty::ConstKind::Unevaluated(..) = ct.clone().kind() {
             let normalized_ct = self.next_const_infer();
             let alias_relate_goal = Goal::new(
                 self.cx(),
                 param_env,
                 ty::PredicateKind::AliasRelate(
                     ct.into(),
-                    normalized_ct.into(),
+                    normalized_ct.clone().into(),
                     ty::AliasRelationDirection::Equate,
                 ),
             );
@@ -331,7 +331,7 @@ fn response_no_constraints_raw<I: Interner>(
 ) -> CanonicalResponse<I> {
     ty::Canonical {
         max_universe,
-        variables,
+        variables: variables.clone(),
         value: Response {
             var_values: ty::CanonicalVarValues::make_identity(cx, variables),
             // FIXME: maybe we should store the "no response" version in cx, like

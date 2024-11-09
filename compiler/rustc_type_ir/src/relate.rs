@@ -33,7 +33,8 @@ pub enum StructurallyRelateAliases {
 /// a miscompilation or unsoundness.
 ///
 /// When in doubt, use `VarianceDiagInfo::default()`
-#[derive_where(Clone, Copy, PartialEq, Eq, Debug, Default; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Debug, Default; I: Interner)]
+#[derive_where(Copy; I: Interner, I::Ty: Copy)]
 pub enum VarianceDiagInfo<I: Interner> {
     /// No additional information - this is the default.
     /// We will not add any additional information to error messages.
@@ -116,7 +117,7 @@ pub trait TypeRelation<I: Interner>: Sized {
         T: Relate<I>;
 }
 
-pub trait Relate<I: Interner>: TypeFoldable<I> + PartialEq + Copy {
+pub trait Relate<I: Interner>: TypeFoldable<I> + PartialEq + Clone {
     fn relate<R: TypeRelation<I>>(relation: &mut R, a: Self, b: Self) -> RelateResult<I, Self>;
 }
 
@@ -145,16 +146,19 @@ pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I>>(
     let cx = relation.cx();
 
     let mut cached_ty = None;
-    let params = iter::zip(a_arg.iter(), b_arg.iter()).enumerate().map(|(i, (a, b))| {
-        let variance = variances.get(i).unwrap();
-        let variance_info = if variance == ty::Invariant && fetch_ty_for_diag {
-            let ty = *cached_ty.get_or_insert_with(|| cx.type_of(ty_def_id).instantiate(cx, a_arg));
-            VarianceDiagInfo::Invariant { ty, param_index: i.try_into().unwrap() }
-        } else {
-            VarianceDiagInfo::default()
-        };
-        relation.relate_with_variance(variance, variance_info, a, b)
-    });
+    let params =
+        iter::zip(a_arg.clone().iter(), b_arg.clone().iter()).enumerate().map(|(i, (a, b))| {
+            let variance = variances.clone().get(i).unwrap();
+            let variance_info = if variance == ty::Invariant && fetch_ty_for_diag {
+                let ty = cached_ty
+                    .get_or_insert_with(|| cx.type_of(ty_def_id).instantiate(cx, a_arg.clone()))
+                    .clone();
+                VarianceDiagInfo::Invariant { ty, param_index: i.try_into().unwrap() }
+            } else {
+                VarianceDiagInfo::default()
+            };
+            relation.relate_with_variance(variance, variance_info, a, b)
+        });
 
     cx.mk_args_from_iter(params)
 }
@@ -183,15 +187,15 @@ impl<I: Interner> Relate<I> for ty::FnSig<I> {
             return Err(TypeError::AbiMismatch(ExpectedFound::new(true, a.abi, b.abi)));
         };
 
-        let a_inputs = a.inputs();
-        let b_inputs = b.inputs();
-        if a_inputs.len() != b_inputs.len() {
+        let a_inputs = a.clone().inputs();
+        let b_inputs = b.clone().inputs();
+        if a_inputs.clone().len() != b_inputs.clone().len() {
             return Err(TypeError::ArgCount);
         }
 
         let inputs_and_output = iter::zip(a_inputs.iter(), b_inputs.iter())
             .map(|(a, b)| ((a, b), false))
-            .chain(iter::once(((a.output(), b.output()), true)))
+            .chain(iter::once(((a.clone().output(), b.output()), true)))
             .map(|((a, b), is_output)| {
                 if is_output {
                     relation.relate(a, b)
@@ -236,7 +240,7 @@ impl<I: Interner> Relate<I> for ty::AliasTy<I> {
                 ExpectedFound::new(true, a, b)
             }))
         } else {
-            let args = match a.kind(relation.cx()) {
+            let args = match a.clone().kind(relation.cx()) {
                 ty::Opaque => relate_args_with_variances(
                     relation,
                     a.def_id,
@@ -277,7 +281,7 @@ impl<I: Interner> Relate<I> for ty::AliasTerm<I> {
                 ExpectedFound::new(true, a, b)
             }))
         } else {
-            let args = match a.kind(relation.cx()) {
+            let args = match a.clone().kind(relation.cx()) {
                 ty::AliasTermKind::OpaqueTy => relate_args_with_variances(
                     relation,
                     a.def_id,
@@ -379,7 +383,7 @@ pub fn structurally_relate_tys<I: Interner, R: TypeRelation<I>>(
     b: I::Ty,
 ) -> RelateResult<I, I::Ty> {
     let cx = relation.cx();
-    match (a.kind(), b.kind()) {
+    match (a.clone().kind(), b.clone().kind()) {
         (ty::Infer(_), _) | (_, ty::Infer(_)) => {
             // The caller should handle these cases!
             panic!("var types encountered in structurally_relate_tys")
@@ -499,7 +503,7 @@ pub fn structurally_relate_tys<I: Interner, R: TypeRelation<I>>(
 
         (ty::Array(a_t, sz_a), ty::Array(b_t, sz_b)) => {
             let t = relation.relate(a_t, b_t)?;
-            match relation.relate(sz_a, sz_b) {
+            match relation.relate(sz_a.clone(), sz_b.clone()) {
                 Ok(sz) => Ok(Ty::new_array_with_const_len(cx, t, sz)),
                 Err(err) => {
                     // Check whether the lengths are both concrete/known values,
@@ -523,12 +527,12 @@ pub fn structurally_relate_tys<I: Interner, R: TypeRelation<I>>(
         }
 
         (ty::Tuple(as_), ty::Tuple(bs)) => {
-            if as_.len() == bs.len() {
+            if as_.clone().len() == bs.clone().len() {
                 Ok(Ty::new_tup_from_iter(
                     cx,
                     iter::zip(as_.iter(), bs.iter()).map(|(a, b)| relation.relate(a, b)),
                 )?)
-            } else if !(as_.is_empty() || bs.is_empty()) {
+            } else if !(as_.clone().is_empty() || bs.clone().is_empty()) {
                 Err(TypeError::TupleSize(ExpectedFound::new(true, as_.len(), bs.len())))
             } else {
                 Err(TypeError::Sorts(ExpectedFound::new(true, a, b)))
@@ -596,7 +600,7 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I>>(
     // Currently, the values that can be unified are primitive types,
     // and those that derive both `PartialEq` and `Eq`, corresponding
     // to structural-match types.
-    let is_match = match (a.kind(), b.kind()) {
+    let is_match = match (a.clone().kind(), b.clone().kind()) {
         (ty::ConstKind::Infer(_), _) | (_, ty::ConstKind::Infer(_)) => {
             // The caller should handle these cases!
             panic!("var types encountered in structurally_relate_consts: {:?} {:?}", a, b)
@@ -618,8 +622,8 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I>>(
         // be stabilized.
         (ty::ConstKind::Unevaluated(au), ty::ConstKind::Unevaluated(bu)) if au.def == bu.def => {
             if cfg!(debug_assertions) {
-                let a_ty = cx.type_of(au.def).instantiate(cx, au.args);
-                let b_ty = cx.type_of(bu.def).instantiate(cx, bu.args);
+                let a_ty = cx.type_of(au.def).instantiate(cx, au.args.clone());
+                let b_ty = cx.type_of(bu.def).instantiate(cx, bu.args.clone());
                 assert_eq!(a_ty, b_ty);
             }
 

@@ -243,7 +243,7 @@ impl<'tcx> InferCtxt<'tcx> {
         ambient_variance: ty::Variance,
         source_term: T,
     ) -> RelateResult<'tcx, Generalization<T>> {
-        assert!(!source_term.has_escaping_bound_vars());
+        assert!(!source_term.clone().has_escaping_bound_vars());
         let (for_universe, root_vid) = match target_vid.into() {
             ty::TermVid::Ty(ty_vid) => {
                 (self.probe_ty_var(ty_vid).unwrap_err(), ty::TermVid::Ty(self.root_var(ty_vid)))
@@ -262,14 +262,14 @@ impl<'tcx> InferCtxt<'tcx> {
             structurally_relate_aliases,
             root_vid,
             for_universe,
-            root_term: source_term.into(),
+            root_term: source_term.clone().into(),
             ambient_variance,
             in_alias: false,
             cache: Default::default(),
             has_unconstrained_ty_var: false,
         };
 
-        let value_may_be_infer = generalizer.relate(source_term, source_term)?;
+        let value_may_be_infer = generalizer.relate(source_term.clone(), source_term)?;
         let has_unconstrained_ty_var = generalizer.has_unconstrained_ty_var;
         Ok(Generalization { value_may_be_infer, has_unconstrained_ty_var })
     }
@@ -705,7 +705,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for Generalizer<'_, 'tcx> {
     where
         T: Relate<TyCtxt<'tcx>>,
     {
-        let result = self.relate(a.skip_binder(), a.skip_binder())?;
+        let result = self.relate(a.clone().skip_binder(), a.clone().skip_binder())?;
         Ok(a.rebind(result))
     }
 }

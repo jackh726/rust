@@ -15,7 +15,7 @@ where
         goal: Goal<I, ProjectionPredicate<I>>,
     ) -> QueryResult<I> {
         let cx = self.cx();
-        let projection_term = goal.predicate.projection_term.to_term(cx);
+        let projection_term = goal.predicate.projection_term.clone().to_term(cx);
         let goal = goal.clone().with(
             cx,
             ty::PredicateKind::AliasRelate(

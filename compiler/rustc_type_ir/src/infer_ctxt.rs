@@ -18,7 +18,8 @@ use crate::{self as ty, Interner};
 ///
 /// If neither of these functions are available, feel free to reach out to
 /// t-types for help.
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::DefiningOpaqueTypes: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum TypingMode<I: Interner> {
@@ -107,12 +108,12 @@ pub trait InferCtxtLike: Sized {
         def_id: <Self::Interner as Interner>::DefId,
     ) -> <Self::Interner as Interner>::GenericArgs;
 
-    fn instantiate_binder_with_infer<T: TypeFoldable<Self::Interner> + Copy>(
+    fn instantiate_binder_with_infer<T: TypeFoldable<Self::Interner>>(
         &self,
         value: ty::Binder<Self::Interner, T>,
     ) -> T;
 
-    fn enter_forall<T: TypeFoldable<Self::Interner> + Copy, U>(
+    fn enter_forall<T: TypeFoldable<Self::Interner>, U>(
         &self,
         value: ty::Binder<Self::Interner, T>,
         f: impl FnOnce(T) -> U,

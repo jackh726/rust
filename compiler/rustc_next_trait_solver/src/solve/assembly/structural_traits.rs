@@ -25,7 +25,7 @@ where
     I: Interner,
 {
     let cx = ecx.cx();
-    match ty.kind() {
+    match ty.clone().kind() {
         ty::Uint(_)
         | ty::Int(_)
         | ty::Bool
@@ -71,7 +71,7 @@ where
         ty::Coroutine(_, args) => {
             let coroutine_args = args.as_coroutine();
             Ok(vec![
-                ty::Binder::dummy(coroutine_args.tupled_upvars_ty()),
+                ty::Binder::dummy(coroutine_args.clone().tupled_upvars_ty()),
                 ty::Binder::dummy(coroutine_args.witness()),
             ])
         }
@@ -80,7 +80,7 @@ where
             .cx()
             .bound_coroutine_hidden_types(def_id)
             .into_iter()
-            .map(|bty| bty.instantiate(cx, args))
+            .map(|bty| bty.instantiate(cx, args.clone()))
             .collect()),
 
         // For `PhantomData<T>`, we pass `T`.
@@ -108,7 +108,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    match ty.kind() {
+    match ty.clone().kind() {
         // impl Sized for u*, i*, bool, f*, FnDef, FnPtr, *(const/mut) T, char, &mut? T, [T; N], dyn* Trait, !
         // impl Sized for Coroutine, CoroutineWitness, Closure, CoroutineClosure
         ty::Infer(ty::IntVar(_) | ty::FloatVar(_))
@@ -176,7 +176,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    match ty.kind() {
+    match ty.clone().kind() {
         // impl Copy/Clone for FnDef, FnPtr
         ty::FnDef(..) | ty::FnPtr(..) | ty::Error(_) => Ok(vec![]),
 
@@ -230,7 +230,7 @@ where
                 if ecx.cx().features().coroutine_clone() {
                     let coroutine = args.as_coroutine();
                     Ok(vec![
-                        ty::Binder::dummy(coroutine.tupled_upvars_ty()),
+                        ty::Binder::dummy(coroutine.clone().tupled_upvars_ty()),
                         ty::Binder::dummy(coroutine.witness()),
                     ])
                 } else {
@@ -244,7 +244,7 @@ where
             .cx()
             .bound_coroutine_hidden_types(def_id)
             .into_iter()
-            .map(|bty| bty.instantiate(ecx.cx(), args))
+            .map(|bty| bty.instantiate(ecx.cx(), args.clone()))
             .collect()),
     }
 }
@@ -255,15 +255,15 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
     self_ty: I::Ty,
     goal_kind: ty::ClosureKind,
 ) -> Result<Option<ty::Binder<I, (I::Ty, I::Ty)>>, NoSolution> {
-    match self_ty.kind() {
+    match self_ty.clone().kind() {
         // keep this in sync with assemble_fn_pointer_candidates until the old solver is removed.
         ty::FnDef(def_id, args) => {
             let sig = cx.fn_sig(def_id);
-            if sig.skip_binder().is_fn_trait_compatible() && !cx.has_target_features(def_id) {
-                Ok(Some(
-                    sig.instantiate(cx, args)
-                        .map_bound(|sig| (Ty::new_tup(cx, sig.inputs().as_slice()), sig.output())),
-                ))
+            if sig.clone().skip_binder().is_fn_trait_compatible() && !cx.has_target_features(def_id)
+            {
+                Ok(Some(sig.clone().instantiate(cx, args).map_bound(|sig| {
+                    (Ty::new_tup(cx, sig.clone().inputs().as_slice()), sig.output())
+                })))
             } else {
                 Err(NoSolution)
             }
@@ -272,16 +272,16 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
         ty::FnPtr(sig_tys, hdr) => {
             let sig = sig_tys.with(hdr);
             if sig.is_fn_trait_compatible() {
-                Ok(Some(
-                    sig.map_bound(|sig| (Ty::new_tup(cx, sig.inputs().as_slice()), sig.output())),
-                ))
+                Ok(Some(sig.clone().map_bound(|sig| {
+                    (Ty::new_tup(cx, sig.clone().inputs().as_slice()), sig.output())
+                })))
             } else {
                 Err(NoSolution)
             }
         }
         ty::Closure(_, args) => {
             let closure_args = args.as_closure();
-            match closure_args.kind_ty().to_opt_closure_kind() {
+            match closure_args.clone().kind_ty().to_opt_closure_kind() {
                 // If the closure's kind doesn't extend the goal kind,
                 // then the closure doesn't implement the trait.
                 Some(closure_kind) => {
@@ -298,7 +298,10 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
                 }
             }
             Ok(Some(
-                closure_args.sig().map_bound(|sig| (sig.inputs().get(0).unwrap(), sig.output())),
+                closure_args
+                    .clone()
+                    .sig()
+                    .map_bound(|sig| (sig.clone().inputs().get(0).unwrap(), sig.output())),
             ))
         }
 
@@ -308,12 +311,12 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
         // from the closure.
         ty::CoroutineClosure(def_id, args) => {
             let args = args.as_coroutine_closure();
-            let kind_ty = args.kind_ty();
-            let sig = args.coroutine_closure_sig().skip_binder();
+            let kind_ty = args.clone().kind_ty();
+            let sig = args.clone().coroutine_closure_sig().skip_binder();
 
             // FIXME: let_chains
             let kind = kind_ty.to_opt_closure_kind();
-            let coroutine_ty = if kind.is_some() && !args.tupled_upvars_ty().is_ty_var() {
+            let coroutine_ty = if kind.is_some() && !args.clone().tupled_upvars_ty().is_ty_var() {
                 let closure_kind = kind.unwrap();
                 if !closure_kind.extends(goal_kind) {
                     return Err(NoSolution);
@@ -323,7 +326,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
                 // always be called once. It additionally implements `Fn`/`FnMut`
                 // only if it has no upvars referencing the closure-env lifetime,
                 // and if the closure kind permits it.
-                if closure_kind != ty::ClosureKind::FnOnce && args.has_self_borrows() {
+                if closure_kind != ty::ClosureKind::FnOnce && args.clone().has_self_borrows() {
                     return Err(NoSolution);
                 }
 
@@ -333,8 +336,8 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
                     // No captures by ref, so this doesn't matter.
                     Region::new_static(cx),
                     def_id,
-                    args,
-                    sig,
+                    args.clone(),
+                    sig.clone(),
                 )
             } else {
                 // Closure kind is not yet determined, so we return ambiguity unless
@@ -348,8 +351,8 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
                     goal_kind, // No captures by ref, so this doesn't matter.
                     Region::new_static(cx),
                     def_id,
-                    args,
-                    sig,
+                    args.clone(),
+                    sig.clone(),
                 )
             };
 
@@ -389,7 +392,8 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<I: Intern
 
 /// Relevant types for an async callable, including its inputs, output,
 /// and the return type you get from awaiting the output.
-#[derive_where(Clone, Copy, Debug; I: Interner)]
+#[derive_where(Clone, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::Ty: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 pub(in crate::solve) struct AsyncCallableRelevantTypes<I: Interner> {
     pub tupled_inputs_ty: I::Ty,
@@ -412,21 +416,28 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<I: 
     goal_kind: ty::ClosureKind,
     env_region: I::Region,
 ) -> Result<(ty::Binder<I, AsyncCallableRelevantTypes<I>>, Vec<I::Predicate>), NoSolution> {
-    match self_ty.kind() {
+    match self_ty.clone().kind() {
         ty::CoroutineClosure(def_id, args) => {
             let args = args.as_coroutine_closure();
-            let kind_ty = args.kind_ty();
-            let sig = args.coroutine_closure_sig().skip_binder();
+            let kind_ty = args.clone().kind_ty();
+            let sig = args.clone().coroutine_closure_sig().skip_binder();
             let mut nested = vec![];
 
             // FIXME: let_chains
-            let kind = kind_ty.to_opt_closure_kind();
-            let coroutine_ty = if kind.is_some() && !args.tupled_upvars_ty().is_ty_var() {
+            let kind = kind_ty.clone().to_opt_closure_kind();
+            let coroutine_ty = if kind.is_some() && !args.clone().tupled_upvars_ty().is_ty_var() {
                 if !kind.unwrap().extends(goal_kind) {
                     return Err(NoSolution);
                 }
 
-                coroutine_closure_to_certain_coroutine(cx, goal_kind, env_region, def_id, args, sig)
+                coroutine_closure_to_certain_coroutine(
+                    cx,
+                    goal_kind,
+                    env_region,
+                    def_id,
+                    args.clone(),
+                    sig.clone(),
+                )
             } else {
                 // When we don't know the closure kind (and therefore also the closure's upvars,
                 // which are computed at the same time), we must delay the computation of the
@@ -445,7 +456,12 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<I: 
                 );
 
                 coroutine_closure_to_ambiguous_coroutine(
-                    cx, goal_kind, env_region, def_id, args, sig,
+                    cx,
+                    goal_kind,
+                    env_region,
+                    def_id,
+                    args.clone(),
+                    sig.clone(),
                 )
             };
 
@@ -478,21 +494,21 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<I: 
 
         ty::Closure(_, args) => {
             let args = args.as_closure();
-            let bound_sig = args.sig();
-            let sig = bound_sig.skip_binder();
+            let bound_sig = args.clone().sig();
+            let sig = bound_sig.clone().skip_binder();
             let future_trait_def_id = cx.require_lang_item(TraitSolverLangItem::Future);
             // `Closure`s only implement `AsyncFn*` when their return type
             // implements `Future`.
             let mut nested = vec![
                 bound_sig
-                    .rebind(ty::TraitRef::new(cx, future_trait_def_id, [sig.output()]))
+                    .rebind(ty::TraitRef::new(cx, future_trait_def_id, [sig.clone().output()]))
                     .upcast(cx),
             ];
 
             // Additionally, we need to check that the closure kind
             // is still compatible.
             let kind_ty = args.kind_ty();
-            if let Some(closure_kind) = kind_ty.to_opt_closure_kind() {
+            if let Some(closure_kind) = kind_ty.clone().to_opt_closure_kind() {
                 if !closure_kind.extends(goal_kind) {
                     return Err(NoSolution);
                 }
@@ -516,10 +532,11 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<I: 
             }
 
             let future_output_def_id = cx.require_lang_item(TraitSolverLangItem::FutureOutput);
-            let future_output_ty = Ty::new_projection(cx, future_output_def_id, [sig.output()]);
+            let future_output_ty =
+                Ty::new_projection(cx, future_output_def_id, [sig.clone().output()]);
             Ok((
                 bound_sig.rebind(AsyncCallableRelevantTypes {
-                    tupled_inputs_ty: sig.inputs().get(0).unwrap(),
+                    tupled_inputs_ty: sig.clone().inputs().get(0).unwrap(),
                     output_coroutine_ty: sig.output(),
                     coroutine_return_ty: future_output_ty,
                 }),
@@ -562,18 +579,21 @@ fn fn_item_to_async_callable<I: Interner>(
     cx: I,
     bound_sig: ty::Binder<I, ty::FnSig<I>>,
 ) -> Result<(ty::Binder<I, AsyncCallableRelevantTypes<I>>, Vec<I::Predicate>), NoSolution> {
-    let sig = bound_sig.skip_binder();
+    let sig = bound_sig.clone().skip_binder();
     let future_trait_def_id = cx.require_lang_item(TraitSolverLangItem::Future);
     // `FnDef` and `FnPtr` only implement `AsyncFn*` when their
     // return type implements `Future`.
     let nested = vec![
-        bound_sig.rebind(ty::TraitRef::new(cx, future_trait_def_id, [sig.output()])).upcast(cx),
+        bound_sig
+            .clone()
+            .rebind(ty::TraitRef::new(cx, future_trait_def_id, [sig.clone().output()]))
+            .upcast(cx),
     ];
     let future_output_def_id = cx.require_lang_item(TraitSolverLangItem::FutureOutput);
-    let future_output_ty = Ty::new_projection(cx, future_output_def_id, [sig.output()]);
+    let future_output_ty = Ty::new_projection(cx, future_output_def_id, [sig.clone().output()]);
     Ok((
         bound_sig.rebind(AsyncCallableRelevantTypes {
-            tupled_inputs_ty: Ty::new_tup(cx, sig.inputs().as_slice()),
+            tupled_inputs_ty: Ty::new_tup(cx, sig.clone().inputs().as_slice()),
             output_coroutine_ty: sig.output(),
             coroutine_return_ty: future_output_ty,
         }),
@@ -593,11 +613,11 @@ fn coroutine_closure_to_certain_coroutine<I: Interner>(
 ) -> I::Ty {
     sig.to_coroutine_given_kind_and_upvars(
         cx,
-        args.parent_args(),
+        args.clone().parent_args(),
         cx.coroutine_for_closure(def_id),
         goal_kind,
         goal_region,
-        args.tupled_upvars_ty(),
+        args.clone().tupled_upvars_ty(),
         args.coroutine_captures_by_ref_ty(),
     )
 }
@@ -617,12 +637,12 @@ fn coroutine_closure_to_ambiguous_coroutine<I: Interner>(
 ) -> I::Ty {
     let upvars_projection_def_id = cx.require_lang_item(TraitSolverLangItem::AsyncFnKindUpvars);
     let tupled_upvars_ty = Ty::new_projection(cx, upvars_projection_def_id, [
-        I::GenericArg::from(args.kind_ty()),
+        I::GenericArg::from(args.clone().kind_ty()),
         Ty::from_closure_kind(cx, goal_kind).into(),
         goal_region.into(),
-        sig.tupled_inputs_ty.into(),
-        args.tupled_upvars_ty().into(),
-        args.coroutine_captures_by_ref_ty().into(),
+        sig.tupled_inputs_ty.clone().into(),
+        args.clone().tupled_upvars_ty().into(),
+        args.clone().coroutine_captures_by_ref_ty().into(),
     ]);
     sig.to_coroutine(
         cx,
@@ -643,15 +663,17 @@ pub(in crate::solve) fn extract_fn_def_from_const_callable<I: Interner>(
     cx: I,
     self_ty: I::Ty,
 ) -> Result<(ty::Binder<I, (I::FnInputTys, I::Ty)>, I::DefId, I::GenericArgs), NoSolution> {
-    match self_ty.kind() {
+    match self_ty.clone().kind() {
         ty::FnDef(def_id, args) => {
             let sig = cx.fn_sig(def_id);
-            if sig.skip_binder().is_fn_trait_compatible()
+            if sig.clone().skip_binder().is_fn_trait_compatible()
                 && !cx.has_target_features(def_id)
                 && cx.fn_is_const(def_id)
             {
                 Ok((
-                    sig.instantiate(cx, args).map_bound(|sig| (sig.inputs(), sig.output())),
+                    sig.clone()
+                        .instantiate(cx, args.clone())
+                        .map_bound(|sig| (sig.clone().inputs(), sig.output())),
                     def_id,
                     args,
                 ))
@@ -709,7 +731,7 @@ pub(in crate::solve) fn const_conditions_for_destruct<I: Interner>(
 ) -> Result<Vec<ty::TraitRef<I>>, NoSolution> {
     let destruct_def_id = cx.require_lang_item(TraitSolverLangItem::Destruct);
 
-    match self_ty.kind() {
+    match self_ty.clone().kind() {
         // An ADT is `~const Destruct` only if all of the fields are,
         // *and* if there is a `Drop` impl, that `Drop` impl is also `~const`.
         ty::Adt(adt_def, args) => {
@@ -838,7 +860,7 @@ where
     requirements.extend(elaborate::elaborate(
         cx,
         cx.explicit_super_predicates_of(trait_ref.def_id)
-            .iter_instantiated(cx, trait_ref.args)
+            .iter_instantiated(cx, trait_ref.args.clone())
             .map(|(pred, _)| pred),
     ));
 
@@ -851,17 +873,19 @@ where
             continue;
         }
 
-        requirements
-            .extend(cx.item_bounds(associated_type_def_id).iter_instantiated(cx, trait_ref.args));
+        requirements.extend(
+            cx.item_bounds(associated_type_def_id).iter_instantiated(cx, trait_ref.args.clone()),
+        );
     }
 
     let mut replace_projection_with = HashMap::default();
     for bound in object_bounds.iter() {
-        if let ty::ExistentialPredicate::Projection(proj) = bound.skip_binder() {
+        if let ty::ExistentialPredicate::Projection(proj) = bound.clone().skip_binder() {
             let proj = proj.with_self_ty(cx, trait_ref.self_ty());
-            let old_ty = replace_projection_with.insert(proj.def_id(), bound.rebind(proj));
+            let old_ty =
+                replace_projection_with.insert(proj.def_id(), bound.clone().rebind(proj.clone()));
             assert_eq!(
-                old_ty,
+                old_ty.clone(),
                 None,
                 "{:?} has two generic parameters: {:?} and {:?}",
                 proj.projection_term,
@@ -903,12 +927,12 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I>
     }
 
     fn fold_ty(&mut self, ty: I::Ty) -> I::Ty {
-        if let ty::Alias(ty::Projection, alias_ty) = ty.kind() {
+        if let ty::Alias(ty::Projection, alias_ty) = ty.clone().kind() {
             if let Some(replacement) = self.mapping.get(&alias_ty.def_id) {
                 // We may have a case where our object type's projection bound is higher-ranked,
                 // but the where clauses we instantiated are not. We can solve this by instantiating
                 // the binder at the usage site.
-                let proj = self.ecx.instantiate_binder_with_infer(*replacement);
+                let proj = self.ecx.instantiate_binder_with_infer(replacement.clone());
                 // FIXME: Technically this equate could be fallible...
                 self.nested.extend(
                     self.ecx

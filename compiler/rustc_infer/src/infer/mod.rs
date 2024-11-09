@@ -1205,13 +1205,13 @@ impl<'tcx> InferCtxt<'tcx> {
         value: ty::Binder<'tcx, T>,
     ) -> T
     where
-        T: TypeFoldable<TyCtxt<'tcx>> + Copy,
+        T: TypeFoldable<TyCtxt<'tcx>> + Clone,
     {
-        if let Some(inner) = value.no_bound_vars() {
+        if let Some(inner) = value.clone().no_bound_vars() {
             return inner;
         }
 
-        let bound_vars = value.bound_vars();
+        let bound_vars = value.clone().bound_vars();
         let mut args = Vec::with_capacity(bound_vars.len());
 
         for bound_var_kind in bound_vars {

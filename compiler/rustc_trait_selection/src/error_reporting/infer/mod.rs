@@ -2067,7 +2067,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for SameTypeModuloInfer<'_, 'tcx> {
     where
         T: relate::Relate<TyCtxt<'tcx>>,
     {
-        Ok(a.rebind(self.relate(a.skip_binder(), b.skip_binder())?))
+        Ok(a.clone().rebind(self.relate(a.skip_binder(), b.skip_binder())?))
     }
 
     fn consts(

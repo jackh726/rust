@@ -277,8 +277,8 @@ pub type PolyExistentialPredicate<'tcx> = ty::Binder<'tcx, ExistentialPredicate<
 impl<'tcx> rustc_type_ir::inherent::BoundExistentialPredicates<TyCtxt<'tcx>>
     for &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>>
 {
-    fn principal_def_id(self) -> Option<DefId> {
-        self.principal_def_id()
+    fn principal_def_id(&self) -> Option<DefId> {
+        (*self).principal_def_id()
     }
 
     fn principal(self) -> Option<ty::PolyExistentialTraitRef<'tcx>> {

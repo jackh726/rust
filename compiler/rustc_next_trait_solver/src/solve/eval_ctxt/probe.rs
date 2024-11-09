@@ -32,8 +32,8 @@ where
         let max_input_universe = outer_ecx.max_input_universe;
         let mut nested_ecx = EvalCtxt {
             delegate,
-            variables: outer_ecx.variables,
-            var_values: outer_ecx.var_values,
+            variables: outer_ecx.variables.clone(),
+            var_values: outer_ecx.var_values.clone(),
             is_normalizes_to_goal: outer_ecx.is_normalizes_to_goal,
             predefined_opaques_in_body: outer_ecx.predefined_opaques_in_body.clone(),
             max_input_universe,

@@ -16,7 +16,10 @@ where
     ) -> QueryResult<I> {
         if let Some(normalized_const) = self.evaluate_const(
             goal.param_env.clone(),
-            ty::UnevaluatedConst::new(goal.predicate.alias.def_id, goal.predicate.alias.args),
+            ty::UnevaluatedConst::new(
+                goal.predicate.alias.def_id,
+                goal.predicate.alias.args.clone(),
+            ),
         ) {
             self.instantiate_normalizes_to_term(goal, normalized_const.into());
             self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)

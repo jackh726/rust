@@ -172,11 +172,11 @@ where
         let a = infcx.shallow_resolve(a);
         let b = infcx.shallow_resolve(b);
 
-        if self.cache.contains(&(self.ambient_variance, a, b)) {
+        if self.cache.contains(&(self.ambient_variance, a.clone(), b.clone())) {
             return Ok(a);
         }
 
-        match (a.kind(), b.kind()) {
+        match (a.clone().kind(), b.clone().kind()) {
             (ty::Infer(ty::TyVar(a_id)), ty::Infer(ty::TyVar(b_id))) => {
                 match self.ambient_variance {
                     ty::Covariant => {
@@ -187,8 +187,8 @@ where
                             self.param_env.clone(),
                             ty::Binder::dummy(ty::PredicateKind::Subtype(ty::SubtypePredicate {
                                 a_is_expected: true,
-                                a,
-                                b,
+                                a: a.clone(),
+                                b: b.clone(),
                             })),
                         ));
                     }
@@ -200,8 +200,8 @@ where
                             self.param_env.clone(),
                             ty::Binder::dummy(ty::PredicateKind::Subtype(ty::SubtypePredicate {
                                 a_is_expected: false,
-                                a: b,
-                                b: a,
+                                a: b.clone(),
+                                b: a.clone(),
                             })),
                         ));
                     }
@@ -215,7 +215,13 @@ where
             }
 
             (ty::Infer(ty::TyVar(a_vid)), _) => {
-                infcx.instantiate_ty_var_raw(self, true, a_vid, self.ambient_variance, b)?;
+                infcx.instantiate_ty_var_raw(
+                    self,
+                    true,
+                    a_vid,
+                    self.ambient_variance,
+                    b.clone(),
+                )?;
             }
             (_, ty::Infer(ty::TyVar(b_vid))) => {
                 infcx.instantiate_ty_var_raw(
@@ -223,22 +229,23 @@ where
                     false,
                     b_vid,
                     self.ambient_variance.xform(ty::Contravariant),
-                    a,
+                    a.clone(),
                 )?;
             }
 
             _ => {
-                super_combine_tys(self.infcx, self, a, b)?;
+                super_combine_tys(self.infcx, self, a.clone(), b.clone())?;
             }
         }
 
-        assert!(self.cache.insert((self.ambient_variance, a, b)));
+        assert!(self.cache.insert((self.ambient_variance, a.clone(), b.clone())));
 
         Ok(a)
     }
 
     #[instrument(skip(self), level = "trace")]
     fn regions(&mut self, a: I::Region, b: I::Region) -> RelateResult<I, I::Region> {
+        let a_ret = a.clone();
         match self.ambient_variance {
             // Subtype(&'a u8, &'b u8) => Outlives('a: 'b) => SubRegion('b, 'a)
             ty::Covariant => self.infcx.sub_regions(b, a),
@@ -250,7 +257,7 @@ where
             }
         }
 
-        Ok(a)
+        Ok(a_ret)
     }
 
     #[instrument(skip(self), level = "trace")]
@@ -272,8 +279,8 @@ where
         }
 
         // If they have no bound vars, relate normally.
-        if let Some(a_inner) = a.no_bound_vars() {
-            if let Some(b_inner) = b.no_bound_vars() {
+        if let Some(a_inner) = a.clone().no_bound_vars() {
+            if let Some(b_inner) = b.clone().no_bound_vars() {
                 self.relate(a_inner, b_inner)?;
                 return Ok(a);
             }
@@ -297,12 +304,12 @@ where
             // [rd]: https://rustc-dev-guide.rust-lang.org/borrow_check/region_inference/placeholders_and_universes.html
             ty::Covariant => {
                 self.infcx.enter_forall(b, |b| {
-                    let a = self.infcx.instantiate_binder_with_infer(a);
+                    let a = self.infcx.instantiate_binder_with_infer(a.clone());
                     self.relate(a, b)
                 })?;
             }
             ty::Contravariant => {
-                self.infcx.enter_forall(a, |a| {
+                self.infcx.enter_forall(a.clone(), |a| {
                     let b = self.infcx.instantiate_binder_with_infer(b);
                     self.relate(a, b)
                 })?;
@@ -319,13 +326,13 @@ where
             // `exists<..> A == for<..> B` and `exists<..> B == for<..> A`.
             // Check if `exists<..> A == for<..> B`
             ty::Invariant => {
-                self.infcx.enter_forall(b, |b| {
-                    let a = self.infcx.instantiate_binder_with_infer(a);
+                self.infcx.enter_forall(b.clone(), |b| {
+                    let a = self.infcx.instantiate_binder_with_infer(a.clone());
                     self.relate(a, b)
                 })?;
 
                 // Check if `exists<..> B == for<..> A`.
-                self.infcx.enter_forall(a, |a| {
+                self.infcx.enter_forall(a.clone(), |a| {
                     let b = self.infcx.instantiate_binder_with_infer(b);
                     self.relate(a, b)
                 })?;

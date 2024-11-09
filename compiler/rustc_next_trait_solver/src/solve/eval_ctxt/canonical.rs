@@ -34,13 +34,13 @@ trait ResponseT<I: Interner> {
 
 impl<I: Interner> ResponseT<I> for Response<I> {
     fn var_values(&self) -> CanonicalVarValues<I> {
-        self.var_values
+        self.var_values.clone()
     }
 }
 
 impl<I: Interner, T> ResponseT<I> for inspect::State<I, T> {
     fn var_values(&self) -> CanonicalVarValues<I> {
-        self.var_values
+        self.var_values.clone()
     }
 }
 
@@ -145,8 +145,9 @@ where
 
         let external_constraints =
             self.compute_external_query_constraints(certainty, normalization_nested_goals);
-        let (var_values, mut external_constraints) = (self.var_values, external_constraints)
-            .fold_with(&mut EagerResolver::new(self.delegate));
+        let (var_values, mut external_constraints) =
+            (self.var_values.clone(), external_constraints)
+                .fold_with(&mut EagerResolver::new(self.delegate));
         // Remove any trivial region constraints once we've resolved regions
         external_constraints
             .region_constraints
@@ -174,8 +175,12 @@ where
         // causing a coherence error in diesel, see #131969. We still bail with overflow
         // when later returning from the parent AliasRelate goal.
         if !self.is_normalizes_to_goal {
-            let num_non_region_vars =
-                canonical.variables.iter().filter(|c| !c.is_region() && c.is_existential()).count();
+            let num_non_region_vars = canonical
+                .variables
+                .clone()
+                .iter()
+                .filter(|c| !c.is_region() && c.is_existential())
+                .count();
             if num_non_region_vars > self.cx().recursion_limit() {
                 debug!(?num_non_region_vars, "too many inference variables -> overflow");
                 return Ok(self.make_ambiguous_response_no_constraints(MaybeCause::Overflow {
@@ -198,7 +203,7 @@ where
         response_no_constraints_raw(
             self.cx(),
             self.max_input_universe,
-            self.variables,
+            self.variables.clone(),
             Certainty::Maybe(maybe_cause),
         )
     }
@@ -315,26 +320,26 @@ where
                 ty::GenericArgKind::Type(t) => {
                     if let ty::Bound(debruijn, b) = t.kind() {
                         assert_eq!(debruijn, ty::INNERMOST);
-                        opt_values[b.var()] = Some(*original_value);
+                        opt_values[b.var()] = Some(original_value);
                     }
                 }
                 ty::GenericArgKind::Lifetime(r) => {
                     if let ty::ReBound(debruijn, br) = r.kind() {
                         assert_eq!(debruijn, ty::INNERMOST);
-                        opt_values[br.var()] = Some(*original_value);
+                        opt_values[br.var()] = Some(original_value);
                     }
                 }
                 ty::GenericArgKind::Const(c) => {
                     if let ty::ConstKind::Bound(debruijn, bv) = c.kind() {
                         assert_eq!(debruijn, ty::INNERMOST);
-                        opt_values[bv.var()] = Some(*original_value);
+                        opt_values[bv.var()] = Some(original_value);
                     }
                 }
             }
         }
 
         let var_values = delegate.cx().mk_args_from_iter(
-            response.variables.iter().enumerate().map(|(index, info)| {
+            response.variables.clone().iter().enumerate().map(|(index, info)| {
                 if info.universe() != ty::UniverseIndex::ROOT {
                     // A variable from inside a binder of the query. While ideally these shouldn't
                     // exist at all (see the FIXME at the start of this method), we have to deal with
@@ -351,14 +356,14 @@ where
                     // to "come from somewhere", so by equating them with the original values of the caller
                     // later on, we pull them down into their correct universe again.
                     if let Some(v) = opt_values[ty::BoundVar::from_usize(index)] {
-                        v
+                        v.clone()
                     } else {
                         delegate.instantiate_canonical_var_with_infer(info, |_| prev_universe)
                     }
                 } else {
                     // For placeholders which were already part of the input, we simply map this
                     // universal bound variable back the placeholder of the input.
-                    original_values[info.expect_placeholder_index()]
+                    original_values[info.expect_placeholder_index()].clone()
                 }
             }),
         );
@@ -387,9 +392,9 @@ where
     ) {
         assert_eq!(original_values.len(), var_values.len());
 
-        for (&orig, response) in iter::zip(original_values, var_values.var_values.iter()) {
+        for (orig, response) in iter::zip(original_values, var_values.var_values.clone().iter()) {
             let goals = delegate
-                .eq_structurally_relating_aliases(param_env.clone(), orig, response)
+                .eq_structurally_relating_aliases(param_env.clone(), orig.clone(), response)
                 .unwrap();
             assert!(goals.is_empty());
         }
@@ -399,18 +404,20 @@ where
         &mut self,
         outlives: &[ty::OutlivesPredicate<I, I::GenericArg>],
     ) {
-        for &ty::OutlivesPredicate(lhs, rhs) in outlives {
-            match lhs.kind() {
-                ty::GenericArgKind::Lifetime(lhs) => self.register_region_outlives(lhs, rhs),
-                ty::GenericArgKind::Type(lhs) => self.register_ty_outlives(lhs, rhs),
+        for ty::OutlivesPredicate(lhs, rhs) in outlives {
+            match lhs.clone().kind() {
+                ty::GenericArgKind::Lifetime(lhs) => {
+                    self.register_region_outlives(lhs, rhs.clone())
+                }
+                ty::GenericArgKind::Type(lhs) => self.register_ty_outlives(lhs, rhs.clone()),
                 ty::GenericArgKind::Const(_) => panic!("const outlives: {lhs:?}: {rhs:?}"),
             }
         }
     }
 
     fn register_new_opaque_types(&mut self, opaque_types: &[(ty::OpaqueTypeKey<I>, I::Ty)]) {
-        for &(key, ty) in opaque_types {
-            self.delegate.inject_new_hidden_type_unchecked(key, ty);
+        for (key, ty) in opaque_types {
+            self.delegate.inject_new_hidden_type_unchecked(key.clone(), ty.clone());
         }
     }
 }
@@ -457,10 +464,10 @@ where
     // In case any fresh inference variables have been created between `state`
     // and the previous instantiation, extend `orig_values` for it.
     assert!(orig_values.len() <= state.value.var_values.len());
-    for &arg in &state.value.var_values.var_values.as_slice()
+    for arg in &state.value.var_values.var_values.as_slice()
         [orig_values.len()..state.value.var_values.len()]
     {
-        let unconstrained = delegate.fresh_var_for_kind_with_span(arg, span);
+        let unconstrained = delegate.fresh_var_for_kind_with_span(arg.clone(), span);
         orig_values.push(unconstrained);
     }
 

@@ -20,7 +20,7 @@ where
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
         let cx = self.cx();
-        let inherent = goal.predicate.alias.expect_ty(cx);
+        let inherent = goal.predicate.alias.clone().expect_ty(cx);
 
         let impl_def_id = cx.parent(inherent.def_id);
         let impl_args = self.fresh_args_for_item(impl_def_id);
@@ -29,11 +29,11 @@ where
         self.eq(
             goal.param_env.clone(),
             inherent.self_ty(),
-            cx.type_of(impl_def_id).instantiate(cx, impl_args),
+            cx.type_of(impl_def_id).instantiate(cx, impl_args.clone()),
         )?;
 
         // Equate IAT with the RHS of the project goal
-        let inherent_args = inherent.rebase_inherent_args_onto_impl(impl_args, cx);
+        let inherent_args = inherent.clone().rebase_inherent_args_onto_impl(impl_args, cx);
 
         // Check both where clauses on the impl and IAT
         //
@@ -44,11 +44,12 @@ where
         self.add_goals(
             GoalSource::Misc,
             cx.predicates_of(inherent.def_id)
-                .iter_instantiated(cx, inherent_args)
+                .iter_instantiated(cx, inherent_args.clone())
                 .map(|pred| goal.clone().with(cx, pred)),
         );
 
-        let normalized = cx.type_of(inherent.def_id).instantiate(cx, inherent_args);
+        let normalized: <I as Interner>::Ty =
+            cx.type_of(inherent.def_id).instantiate(cx, inherent_args);
         self.instantiate_normalizes_to_term(goal, normalized.into());
         self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
     }

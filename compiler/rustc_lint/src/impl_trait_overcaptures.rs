@@ -521,7 +521,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for FunctionalVariances<'tcx> {
     ) -> RelateResult<'tcx, T> {
         let old_variance = self.ambient_variance;
         self.ambient_variance = self.ambient_variance.xform(variance);
-        self.relate(a, b).unwrap();
+        self.relate(a.clone(), b).unwrap();
         self.ambient_variance = old_variance;
         Ok(a)
     }
@@ -577,7 +577,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for FunctionalVariances<'tcx> {
     where
         T: Relate<TyCtxt<'tcx>>,
     {
-        self.relate(a.skip_binder(), b.skip_binder()).unwrap();
+        self.relate(a.clone().skip_binder(), b.skip_binder()).unwrap();
         Ok(a)
     }
 }

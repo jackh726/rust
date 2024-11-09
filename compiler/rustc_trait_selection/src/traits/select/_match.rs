@@ -112,6 +112,6 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstFreshVars<'tcx> {
     where
         T: Relate<TyCtxt<'tcx>>,
     {
-        Ok(a.rebind(self.relate(a.skip_binder(), b.skip_binder())?))
+        Ok(a.clone().rebind(self.relate(a.skip_binder(), b.skip_binder())?))
     }
 }

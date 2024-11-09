@@ -33,7 +33,7 @@ use crate::{Canonical, CanonicalVarValues, Interner};
 /// trees used mechanically has to be canonicalized as we otherwise leak
 /// inference variables from a nested `InferCtxt`.
 #[derive_where(Clone; I: Interner, T: Clone)]
-#[derive_where(Copy; I: Interner, T: Copy)]
+#[derive_where(Copy; I: Interner, T: Copy, I::GenericArgs: Copy)]
 #[derive_where(PartialEq; I: Interner, T: PartialEq)]
 #[derive_where(Eq; I: Interner, T: Eq)]
 #[derive_where(Hash; I: Interner, T: Hash)]

@@ -19,13 +19,13 @@ where
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
         let cx = self.cx();
-        let weak_ty = goal.predicate.alias;
+        let weak_ty = goal.predicate.alias.clone();
 
         // Check where clauses
         self.add_goals(
             GoalSource::Misc,
             cx.predicates_of(weak_ty.def_id)
-                .iter_instantiated(cx, weak_ty.args)
+                .iter_instantiated(cx, weak_ty.args.clone())
                 .map(|pred| goal.clone().with(cx, pred)),
         );
 

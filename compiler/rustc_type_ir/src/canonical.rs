@@ -15,7 +15,7 @@ use crate::{self as ty, Interner, TypingMode, UniverseIndex};
 #[derive_where(PartialEq; I: Interner, V: PartialEq)]
 #[derive_where(Eq; I: Interner, V: Eq)]
 #[derive_where(Debug; I: Interner, V: fmt::Debug)]
-#[derive_where(Copy; I: Interner, V: Copy)]
+#[derive_where(Copy; I: Interner, V: Copy, I::CanonicalVars: Copy, I::DefiningOpaqueTypes: Copy)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub struct CanonicalQueryInput<I: Interner, V> {
     pub canonical: Canonical<I, V>,
@@ -30,7 +30,7 @@ pub struct CanonicalQueryInput<I: Interner, V> {
 #[derive_where(PartialEq; I: Interner, V: PartialEq)]
 #[derive_where(Eq; I: Interner, V: Eq)]
 #[derive_where(Debug; I: Interner, V: fmt::Debug)]
-#[derive_where(Copy; I: Interner, V: Copy)]
+#[derive_where(Copy; I: Interner, V: Copy, I::CanonicalVars: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub struct Canonical<I: Interner, V> {
@@ -234,7 +234,8 @@ pub enum CanonicalTyVarKind {
 /// vectors with the original values that were replaced by canonical
 /// variables. You will need to supply it later to instantiate the
 /// canonicalized query response.
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 pub struct CanonicalVarValues<I: Interner> {
@@ -243,7 +244,7 @@ pub struct CanonicalVarValues<I: Interner> {
 
 impl<I: Interner> CanonicalVarValues<I> {
     pub fn is_identity(&self) -> bool {
-        self.var_values.iter().enumerate().all(|(bv, arg)| match arg.kind() {
+        self.var_values.clone().iter().enumerate().all(|(bv, arg)| match arg.kind() {
             ty::GenericArgKind::Lifetime(r) => {
                 matches!(r.kind(), ty::ReBound(ty::INNERMOST, br) if br.var().as_usize() == bv)
             }
@@ -258,7 +259,7 @@ impl<I: Interner> CanonicalVarValues<I> {
 
     pub fn is_identity_modulo_regions(&self) -> bool {
         let mut var = ty::BoundVar::ZERO;
-        for arg in self.var_values.iter() {
+        for arg in self.var_values.clone().iter() {
             match arg.kind() {
                 ty::GenericArgKind::Lifetime(r) => {
                     if matches!(r.kind(), ty::ReBound(ty::INNERMOST, br) if var == br.var()) {
@@ -321,7 +322,7 @@ impl<I: Interner> CanonicalVarValues<I> {
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.var_values.len()
+        self.var_values.clone().len()
     }
 }
 
@@ -330,7 +331,7 @@ impl<'a, I: Interner> IntoIterator for &'a CanonicalVarValues<I> {
     type IntoIter = <I::GenericArgs as SliceLike>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.var_values.iter()
+        self.var_values.clone().iter()
     }
 }
 

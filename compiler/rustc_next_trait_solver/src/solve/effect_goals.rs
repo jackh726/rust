@@ -19,7 +19,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    fn self_ty(self) -> I::Ty {
+    fn self_ty(&self) -> I::Ty {
         self.self_ty()
     }
 
@@ -31,7 +31,7 @@ where
         self.with_self_ty(cx, self_ty)
     }
 
-    fn trait_def_id(self, _: I) -> I::DefId {
+    fn trait_def_id(&self, _: I) -> I::DefId {
         self.def_id()
     }
 
@@ -47,8 +47,8 @@ where
                 && host_clause.constness().satisfies(goal.predicate.constness)
             {
                 if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx()).args_may_unify(
-                    goal.predicate.trait_ref.args,
-                    host_clause.skip_binder().trait_ref.args,
+                    goal.predicate.trait_ref.args.clone(),
+                    host_clause.clone().skip_binder().trait_ref.args,
                 ) {
                     return Err(NoSolution);
                 }
@@ -91,7 +91,7 @@ where
         for clause in elaborate::elaborate(
             cx,
             cx.explicit_implied_const_bounds(alias_ty.def_id)
-                .iter_instantiated(cx, alias_ty.args)
+                .iter_instantiated(cx, alias_ty.args.clone())
                 .map(|trait_ref| trait_ref.to_host_effect_clause(cx, goal.predicate.constness)),
         ) {
             candidates.extend(Self::probe_and_match_goal_against_assumption(
@@ -104,7 +104,7 @@ where
                     ecx.add_goals(
                         GoalSource::Misc,
                         cx.const_conditions(alias_ty.def_id)
-                            .iter_instantiated(cx, alias_ty.args)
+                            .iter_instantiated(cx, alias_ty.args.clone())
                             .map(|trait_ref| {
                                 goal.clone().with(
                                     cx,
@@ -128,9 +128,10 @@ where
         let cx = ecx.cx();
 
         let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
-        if !DeepRejectCtxt::relate_rigid_infer(ecx.cx())
-            .args_may_unify(goal.predicate.trait_ref.args, impl_trait_ref.skip_binder().args)
-        {
+        if !DeepRejectCtxt::relate_rigid_infer(ecx.cx()).args_may_unify(
+            goal.predicate.trait_ref.args.clone(),
+            impl_trait_ref.clone().skip_binder().args,
+        ) {
             return Err(NoSolution);
         }
 
@@ -149,13 +150,13 @@ where
 
         ecx.probe_trait_candidate(CandidateSource::Impl(impl_def_id)).enter(|ecx| {
             let impl_args = ecx.fresh_args_for_item(impl_def_id);
-            ecx.record_impl_args(impl_args);
-            let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args);
+            ecx.record_impl_args(impl_args.clone());
+            let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args.clone());
 
-            ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref, impl_trait_ref)?;
+            ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref.clone(), impl_trait_ref)?;
             let where_clause_bounds = cx
                 .predicates_of(impl_def_id)
-                .iter_instantiated(cx, impl_args)
+                .iter_instantiated(cx, impl_args.clone())
                 .map(|pred| goal.clone().with(cx, pred));
             ecx.add_goals(GoalSource::ImplWhereBound, where_clause_bounds);
 
@@ -231,7 +232,7 @@ where
 
         // A built-in `Fn` impl only holds if the output is sized.
         // (FIXME: technically we only need to check this if the type is a fn ptr...)
-        let output_is_sized_pred = inputs_and_output.map_bound(|(_, output)| {
+        let output_is_sized_pred = inputs_and_output.clone().map_bound(|(_, output)| {
             ty::TraitRef::new(cx, cx.require_lang_item(TraitSolverLangItem::Sized), [output])
         });
         let requirements = cx
@@ -247,6 +248,7 @@ where
             .chain([(GoalSource::ImplWhereBound, goal.clone().with(cx, output_is_sized_pred))]);
 
         let pred = inputs_and_output
+            .clone()
             .map_bound(|(inputs, _)| {
                 ty::TraitRef::new(cx, goal.predicate.def_id(), [
                     goal.predicate.self_ty(),

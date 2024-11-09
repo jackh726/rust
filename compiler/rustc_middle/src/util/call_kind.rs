@@ -25,7 +25,7 @@ pub enum CallDesugaringKind {
 }
 
 impl CallDesugaringKind {
-    pub fn trait_def_id(self, tcx: TyCtxt<'_>) -> DefId {
+    pub fn trait_def_id(&self, tcx: TyCtxt<'_>) -> DefId {
         match self {
             Self::ForLoopIntoIter => tcx.get_diagnostic_item(sym::IntoIterator).unwrap(),
             Self::QuestionBranch | Self::TryBlockFromOutput => {

@@ -328,7 +328,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> ProofTreeBuilder<D> {
         var_values: ty::CanonicalVarValues<I>,
     ) -> ProofTreeBuilder<D> {
         self.nested(|| WipCanonicalGoalEvaluationStep {
-            var_values: var_values.var_values.to_vec(),
+            var_values: var_values.clone().var_values.to_vec(),
             evaluation: WipProbe {
                 initial_num_var_values: var_values.len(),
                 steps: vec![],

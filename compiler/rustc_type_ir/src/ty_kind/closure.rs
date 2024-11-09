@@ -101,7 +101,8 @@ use crate::{self as ty, Interner};
 /// * `GR`: The "return type", which is the type of value returned upon
 ///   completion of the coroutine.
 /// * `GW`: The "coroutine witness".
-#[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 pub struct ClosureArgs<I: Interner> {
     /// Lifetime and type parameters from the enclosing function,
@@ -203,7 +204,8 @@ impl<I: Interner> ClosureArgs<I> {
     }
 }
 
-#[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 pub struct CoroutineClosureArgs<I: Interner> {
     pub args: I::GenericArgs,
@@ -265,7 +267,7 @@ impl<I: Interner> CoroutineClosureArgs<I> {
 
     #[inline]
     pub fn upvar_tys(self) -> I::Tys {
-        match self.tupled_upvars_ty().kind() {
+        match self.clone().tupled_upvars_ty().kind() {
             ty::Error(_) => Default::default(),
             ty::Tuple(..) => self.tupled_upvars_ty().tuple_fields(),
             ty::Infer(_) => panic!("upvar_tys called before capture types are inferred"),
@@ -291,21 +293,21 @@ impl<I: Interner> CoroutineClosureArgs<I> {
     }
 
     pub fn coroutine_closure_sig(self) -> ty::Binder<I, CoroutineClosureSignature<I>> {
-        let interior = self.coroutine_witness_ty();
-        let ty::FnPtr(sig_tys, hdr) = self.signature_parts_ty().kind() else { panic!() };
+        let interior = self.clone().coroutine_witness_ty();
+        let ty::FnPtr(sig_tys, hdr) = self.clone().signature_parts_ty().kind() else { panic!() };
         sig_tys.map_bound(|sig_tys| {
-            let [resume_ty, tupled_inputs_ty] = *sig_tys.inputs().as_slice() else {
+            let inputs = sig_tys.clone().inputs();
+            let [resume_ty, tupled_inputs_ty] = inputs.as_slice() else {
                 panic!();
             };
-            let [yield_ty, return_ty] = *sig_tys.output().tuple_fields().as_slice() else {
-                panic!()
-            };
+            let output = sig_tys.clone().output().tuple_fields();
+            let [yield_ty, return_ty] = output.as_slice() else { panic!() };
             CoroutineClosureSignature {
                 interior,
-                tupled_inputs_ty,
-                resume_ty,
-                yield_ty,
-                return_ty,
+                tupled_inputs_ty: tupled_inputs_ty.clone(),
+                resume_ty: resume_ty.clone(),
+                yield_ty: yield_ty.clone(),
+                return_ty: return_ty.clone(),
                 c_variadic: hdr.c_variadic,
                 safety: hdr.safety,
                 abi: hdr.abi,
@@ -322,7 +324,7 @@ impl<I: Interner> CoroutineClosureArgs<I> {
     }
 
     pub fn has_self_borrows(&self) -> bool {
-        match self.coroutine_captures_by_ref_ty().kind() {
+        match self.clone().coroutine_captures_by_ref_ty().kind() {
             ty::FnPtr(sig_tys, _) => sig_tys
                 .skip_binder()
                 .visit_with(&mut HasRegionsBoundAt { binder: ty::INNERMOST })
@@ -357,7 +359,8 @@ impl<I: Interner> TypeVisitor<I> for HasRegionsBoundAt {
     }
 }
 
-#[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::Ty)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 pub struct CoroutineClosureSignature<I: Interner> {
     pub interior: I::Ty,
@@ -429,7 +432,7 @@ impl<I: Interner> CoroutineClosureSignature<I> {
         let tupled_upvars_ty = Self::tupled_upvars_by_closure_kind(
             cx,
             goal_kind,
-            self.tupled_inputs_ty,
+            self.tupled_inputs_ty.clone(),
             closure_tupled_upvars_ty,
             coroutine_captures_by_ref_ty,
             env_region,
@@ -516,13 +519,13 @@ impl<I: Interner> TypeFolder<I> for FoldEscapingRegions<I> {
     }
 
     fn fold_region(&mut self, r: <I as Interner>::Region) -> <I as Interner>::Region {
-        if let ty::ReBound(debruijn, _) = r.kind() {
+        if let ty::ReBound(debruijn, _) = r.clone().kind() {
             assert!(
                 debruijn <= self.debruijn,
                 "cannot instantiate binder with escaping bound vars"
             );
             if self.debruijn == debruijn {
-                shift_region(self.interner, self.region, self.debruijn.as_u32())
+                shift_region(self.interner, self.region.clone(), self.debruijn.as_u32())
             } else {
                 r
             }
@@ -532,7 +535,8 @@ impl<I: Interner> TypeFolder<I> for FoldEscapingRegions<I> {
     }
 }
 
-#[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::Ty: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 pub struct GenSig<I: Interner> {
     pub resume_ty: I::Ty,
@@ -541,7 +545,8 @@ pub struct GenSig<I: Interner> {
 }
 
 /// Similar to `ClosureArgs`; see the above documentation for more.
-#[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Clone, PartialEq, Eq, Hash, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 pub struct CoroutineArgs<I: Interner> {
     pub args: I::GenericArgs,

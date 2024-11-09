@@ -108,7 +108,7 @@ fn response_no_constraints<I: Interner>(
     Ok(super::response_no_constraints_raw(
         cx,
         input.canonical.max_universe,
-        input.canonical.variables,
+        input.canonical.variables.clone(),
         certainty,
     ))
 }

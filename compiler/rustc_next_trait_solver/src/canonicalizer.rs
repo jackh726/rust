@@ -96,17 +96,17 @@ impl<'a, D: SolverDelegate<Interner = I>, I: Interner> Canonicalizer<'a, D, I> {
         let arg = arg.into();
         let idx = if self.variables.len() > 16 {
             if self.variable_lookup_table.is_empty() {
-                self.variable_lookup_table.extend(self.variables.iter().copied().zip(0..));
+                self.variable_lookup_table.extend(self.variables.iter().cloned().zip(0..));
             }
 
-            *self.variable_lookup_table.entry(arg).or_insert_with(|| {
+            *self.variable_lookup_table.entry(arg.clone()).or_insert_with(|| {
                 let var = self.variables.len();
                 self.variables.push(arg);
                 self.primitive_var_infos.push(canonical_var_info);
                 var
             })
         } else {
-            self.variables.iter().position(|&v| v == arg).unwrap_or_else(|| {
+            self.variables.iter().position(|v| v == &arg).unwrap_or_else(|| {
                 let var = self.variables.len();
                 self.variables.push(arg);
                 self.primitive_var_infos.push(canonical_var_info);
@@ -254,7 +254,7 @@ impl<'a, D: SolverDelegate<Interner = I>, I: Interner> Canonicalizer<'a, D, I> {
     }
 
     fn cached_fold_ty(&mut self, t: I::Ty) -> I::Ty {
-        let kind = match t.kind() {
+        let kind = match t.clone().kind() {
             ty::Infer(i) => match i {
                 ty::TyVar(vid) => {
                     assert_eq!(
@@ -354,7 +354,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I> for Canonicaliz
     }
 
     fn fold_region(&mut self, r: I::Region) -> I::Region {
-        let kind = match r.kind() {
+        let kind = match r.clone().kind() {
             ty::ReBound(..) => return r,
 
             // We may encounter `ReStatic` in item signatures or the hidden type
@@ -411,17 +411,17 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I> for Canonicaliz
     }
 
     fn fold_ty(&mut self, t: I::Ty) -> I::Ty {
-        if let Some(&ty) = self.cache.get(&(self.binder_index, t)) {
-            ty
+        if let Some(ty) = self.cache.get(&(self.binder_index, t.clone())) {
+            ty.clone()
         } else {
-            let res = self.cached_fold_ty(t);
-            assert!(self.cache.insert((self.binder_index, t), res).is_none());
+            let res = self.cached_fold_ty(t.clone());
+            assert!(self.cache.insert((self.binder_index, t), res.clone()).is_none());
             res
         }
     }
 
     fn fold_const(&mut self, c: I::Const) -> I::Const {
-        let kind = match c.kind() {
+        let kind = match c.clone().kind() {
             ty::ConstKind::Infer(i) => match i {
                 ty::InferConst::Var(vid) => {
                     assert_eq!(

@@ -102,7 +102,7 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         self.fresh_args_for_item(DUMMY_SP, def_id)
     }
 
-    fn instantiate_binder_with_infer<T: TypeFoldable<TyCtxt<'tcx>> + Copy>(
+    fn instantiate_binder_with_infer<T: TypeFoldable<TyCtxt<'tcx>> + Clone>(
         &self,
         value: ty::Binder<'tcx, T>,
     ) -> T {
@@ -113,7 +113,7 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
         )
     }
 
-    fn enter_forall<T: TypeFoldable<TyCtxt<'tcx>> + Copy, U>(
+    fn enter_forall<T: TypeFoldable<TyCtxt<'tcx>> + Clone, U>(
         &self,
         value: ty::Binder<'tcx, T>,
         f: impl FnOnce(T) -> U,

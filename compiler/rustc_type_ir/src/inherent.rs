@@ -120,24 +120,24 @@ pub trait Ty<I: Interner<Ty = Self>>:
 
     fn from_coroutine_closure_kind(interner: I, kind: ty::ClosureKind) -> Self;
 
-    fn is_ty_var(self) -> bool {
-        matches!(self.kind(), ty::Infer(ty::TyVar(_)))
+    fn is_ty_var(&self) -> bool {
+        matches!(self.clone().kind(), ty::Infer(ty::TyVar(_)))
     }
 
-    fn is_floating_point(self) -> bool {
-        matches!(self.kind(), ty::Float(_) | ty::Infer(ty::FloatVar(_)))
+    fn is_floating_point(&self) -> bool {
+        matches!(self.clone().kind(), ty::Float(_) | ty::Infer(ty::FloatVar(_)))
     }
 
-    fn is_integral(self) -> bool {
-        matches!(self.kind(), ty::Infer(ty::IntVar(_)) | ty::Int(_) | ty::Uint(_))
+    fn is_integral(&self) -> bool {
+        matches!(self.clone().kind(), ty::Infer(ty::IntVar(_)) | ty::Int(_) | ty::Uint(_))
     }
 
-    fn is_fn_ptr(self) -> bool {
-        matches!(self.kind(), ty::FnPtr(..))
+    fn is_fn_ptr(&self) -> bool {
+        matches!(self.clone().kind(), ty::FnPtr(..))
     }
 
     fn fn_sig(self, interner: I) -> ty::Binder<I, ty::FnSig<I>> {
-        match self.kind() {
+        match self.clone().kind() {
             ty::FnPtr(sig_tys, hdr) => sig_tys.with(hdr),
             ty::FnDef(def_id, args) => interner.fn_sig(def_id).instantiate(interner, args),
             ty::Error(_) => {
@@ -302,7 +302,7 @@ pub trait GenericArg<I: Interner<GenericArg = Self>>:
     + From<I::Const>
 {
     fn as_type(&self) -> Option<I::Ty> {
-        if let ty::GenericArgKind::Type(ty) = self.kind() { Some(ty) } else { None }
+        if let ty::GenericArgKind::Type(ty) = self.clone().kind() { Some(ty) } else { None }
     }
 
     fn expect_ty(&self) -> I::Ty {
@@ -310,7 +310,7 @@ pub trait GenericArg<I: Interner<GenericArg = Self>>:
     }
 
     fn as_const(&self) -> Option<I::Const> {
-        if let ty::GenericArgKind::Const(c) = self.kind() { Some(c) } else { None }
+        if let ty::GenericArgKind::Const(c) = self.clone().kind() { Some(c) } else { None }
     }
 
     fn expect_const(&self) -> I::Const {
@@ -318,15 +318,15 @@ pub trait GenericArg<I: Interner<GenericArg = Self>>:
     }
 
     fn as_region(&self) -> Option<I::Region> {
-        if let ty::GenericArgKind::Lifetime(c) = self.kind() { Some(c) } else { None }
+        if let ty::GenericArgKind::Lifetime(c) = self.clone().kind() { Some(c) } else { None }
     }
 
     fn expect_region(&self) -> I::Region {
         self.as_region().expect("expected a const")
     }
 
-    fn is_non_region_infer(self) -> bool {
-        match self.kind() {
+    fn is_non_region_infer(&self) -> bool {
+        match self.clone().kind() {
             ty::GenericArgKind::Lifetime(_) => false,
             ty::GenericArgKind::Type(ty) => ty.is_ty_var(),
             ty::GenericArgKind::Const(ct) => ct.is_ct_var(),
@@ -338,7 +338,7 @@ pub trait Term<I: Interner<Term = Self>>:
     Debug + Hash + Eq + IntoKind<Kind = ty::TermKind<I>> + TypeFoldable<I> + Relate<I>
 {
     fn as_type(&self) -> Option<I::Ty> {
-        if let ty::TermKind::Ty(ty) = self.kind() { Some(ty) } else { None }
+        if let ty::TermKind::Ty(ty) = self.clone().kind() { Some(ty) } else { None }
     }
 
     fn expect_ty(&self) -> I::Ty {
@@ -346,15 +346,15 @@ pub trait Term<I: Interner<Term = Self>>:
     }
 
     fn as_const(&self) -> Option<I::Const> {
-        if let ty::TermKind::Const(c) = self.kind() { Some(c) } else { None }
+        if let ty::TermKind::Const(c) = self.clone().kind() { Some(c) } else { None }
     }
 
     fn expect_const(&self) -> I::Const {
         self.as_const().expect("expected a const, but found a type")
     }
 
-    fn is_infer(self) -> bool {
-        match self.kind() {
+    fn is_infer(&self) -> bool {
+        match self.clone().kind() {
             ty::TermKind::Ty(ty) => ty.is_ty_var(),
             ty::TermKind::Const(ct) => ct.is_ct_var(),
         }
@@ -565,7 +565,7 @@ pub trait DefId<I: Interner>: Copy + Debug + Hash + Eq + TypeFoldable<I> {
 pub trait BoundExistentialPredicates<I: Interner>:
     Clone + Debug + Hash + Eq + Relate<I> + SliceLike<Item = ty::Binder<I, ty::ExistentialPredicate<I>>>
 {
-    fn principal_def_id(self) -> Option<I::DefId>;
+    fn principal_def_id(&self) -> Option<I::DefId>;
 
     fn principal(self) -> Option<ty::Binder<I, ty::ExistentialTraitRef<I>>>;
 
@@ -580,8 +580,8 @@ pub trait Span<I: Interner>: Copy + Debug + Hash + Eq + TypeFoldable<I> {
     fn dummy() -> Self;
 }
 
-pub trait SliceLike: Sized + Copy {
-    type Item: Copy;
+pub trait SliceLike: Sized + Clone {
+    type Item: Clone;
     type IntoIter: Iterator<Item = Self::Item>;
 
     fn iter(self) -> Self::IntoIter;
@@ -589,10 +589,10 @@ pub trait SliceLike: Sized + Copy {
     fn as_slice(&self) -> &[Self::Item];
 
     fn get(self, idx: usize) -> Option<Self::Item> {
-        self.as_slice().get(idx).copied()
+        self.as_slice().get(idx).cloned()
     }
 
-    fn len(self) -> usize {
+    fn len(&self) -> usize {
         self.as_slice().len()
     }
 
@@ -612,7 +612,7 @@ pub trait SliceLike: Sized + Copy {
     }
 
     fn last(self) -> Option<Self::Item> {
-        self.as_slice().last().copied()
+        self.as_slice().last().cloned()
     }
 
     fn split_last(&self) -> Option<(&Self::Item, &[Self::Item])> {
@@ -620,12 +620,12 @@ pub trait SliceLike: Sized + Copy {
     }
 }
 
-impl<'a, T: Copy> SliceLike for &'a [T] {
+impl<'a, T: Clone> SliceLike for &'a [T] {
     type Item = T;
-    type IntoIter = std::iter::Copied<std::slice::Iter<'a, T>>;
+    type IntoIter = std::iter::Cloned<std::slice::Iter<'a, T>>;
 
     fn iter(self) -> Self::IntoIter {
-        self.iter().copied()
+        self.iter().cloned()
     }
 
     fn as_slice(&self) -> &[Self::Item] {
@@ -633,12 +633,12 @@ impl<'a, T: Copy> SliceLike for &'a [T] {
     }
 }
 
-impl<'a, T: Copy, const N: usize> SliceLike for &'a [T; N] {
+impl<'a, T: Clone, const N: usize> SliceLike for &'a [T; N] {
     type Item = T;
-    type IntoIter = std::iter::Copied<std::slice::Iter<'a, T>>;
+    type IntoIter = std::iter::Cloned<std::slice::Iter<'a, T>>;
 
     fn iter(self) -> Self::IntoIter {
-        self.into_iter().copied()
+        self.into_iter().cloned()
     }
 
     fn as_slice(&self) -> &[Self::Item] {
@@ -651,7 +651,7 @@ impl<'a, S: SliceLike> SliceLike for &'a S {
     type IntoIter = S::IntoIter;
 
     fn iter(self) -> Self::IntoIter {
-        (*self).iter()
+        self.clone().iter()
     }
 
     fn as_slice(&self) -> &[Self::Item] {

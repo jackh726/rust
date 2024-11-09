@@ -27,7 +27,7 @@ use crate::{self as ty, Interner};
 ///
 /// `Decodable` and `Encodable` are implemented for `Binder<T>` using the `impl_binder_encode_decode!` macro.
 #[derive_where(Clone; I: Interner, T: Clone)]
-#[derive_where(Copy; I: Interner, T: Copy)]
+#[derive_where(Copy; I: Interner, T: Copy, I::BoundVarKinds: Copy)]
 #[derive_where(Hash; I: Interner, T: Hash)]
 #[derive_where(PartialEq; I: Interner, T: PartialEq)]
 #[derive_where(Eq; I: Interner, T: Eq)]
@@ -112,7 +112,7 @@ where
 
     pub fn bind_with_vars(value: T, bound_vars: I::BoundVarKinds) -> Binder<I, T> {
         if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(bound_vars);
+            let mut validator = ValidateBoundVars::new(bound_vars.clone());
             value.visit_with(&mut validator);
         }
         Binder { value, bound_vars }
@@ -168,18 +168,18 @@ impl<I: Interner, T> Binder<I, T> {
     }
 
     pub fn bound_vars(&self) -> I::BoundVarKinds {
-        self.bound_vars
+        self.bound_vars.clone()
     }
 
     pub fn as_ref(&self) -> Binder<I, &T> {
-        Binder { value: &self.value, bound_vars: self.bound_vars }
+        Binder { value: &self.value, bound_vars: self.bound_vars.clone() }
     }
 
     pub fn as_deref(&self) -> Binder<I, &T::Target>
     where
         T: Deref,
     {
-        Binder { value: &self.value, bound_vars: self.bound_vars }
+        Binder { value: &self.value, bound_vars: self.bound_vars.clone() }
     }
 
     pub fn map_bound_ref<F, U: TypeVisitable<I>>(&self, f: F) -> Binder<I, U>
@@ -196,7 +196,7 @@ impl<I: Interner, T> Binder<I, T> {
         let Binder { value, bound_vars } = self;
         let value = f(value);
         if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(bound_vars);
+            let mut validator = ValidateBoundVars::new(bound_vars.clone());
             value.visit_with(&mut validator);
         }
         Binder { value, bound_vars }
@@ -209,7 +209,7 @@ impl<I: Interner, T> Binder<I, T> {
         let Binder { value, bound_vars } = self;
         let value = f(value)?;
         if cfg!(debug_assertions) {
-            let mut validator = ValidateBoundVars::new(bound_vars);
+            let mut validator = ValidateBoundVars::new(bound_vars.clone());
             value.visit_with(&mut validator);
         }
         Ok(Binder { value, bound_vars })
@@ -228,7 +228,7 @@ impl<I: Interner, T> Binder<I, T> {
     where
         U: TypeVisitable<I>,
     {
-        Binder::bind_with_vars(value, self.bound_vars)
+        Binder::bind_with_vars(value, self.bound_vars.clone())
     }
 
     /// Unwraps and returns the value within, but only if it contains
@@ -260,7 +260,7 @@ impl<I: Interner, T> Binder<I, Option<T>> {
 impl<I: Interner, T: IntoIterator> Binder<I, T> {
     pub fn iter(self) -> impl Iterator<Item = Binder<I, T::Item>> {
         let Binder { value, bound_vars } = self;
-        value.into_iter().map(move |value| Binder { value, bound_vars })
+        value.into_iter().map(move |value| Binder { value, bound_vars: bound_vars.clone() })
     }
 }
 
@@ -294,17 +294,17 @@ impl<I: Interner> TypeVisitor<I> for ValidateBoundVars<I> {
 
     fn visit_ty(&mut self, t: I::Ty) -> Self::Result {
         if t.outer_exclusive_binder() < self.binder_index
-            || !self.visited.insert((self.binder_index, t))
+            || !self.visited.insert((self.binder_index, t.clone()))
         {
             return ControlFlow::Break(());
         }
-        match t.kind() {
+        match t.clone().kind() {
             ty::Bound(debruijn, bound_ty) if debruijn == self.binder_index => {
                 let idx = bound_ty.var().as_usize();
-                if self.bound_vars.len() <= idx {
+                if self.bound_vars.clone().len() <= idx {
                     panic!("Not enough bound vars: {:?} not found in {:?}", t, self.bound_vars);
                 }
-                bound_ty.assert_eq(self.bound_vars.get(idx).unwrap());
+                bound_ty.assert_eq(self.bound_vars.clone().get(idx).unwrap());
             }
             _ => {}
         };
@@ -313,13 +313,13 @@ impl<I: Interner> TypeVisitor<I> for ValidateBoundVars<I> {
     }
 
     fn visit_region(&mut self, r: I::Region) -> Self::Result {
-        match r.kind() {
+        match r.clone().kind() {
             ty::ReBound(index, br) if index == self.binder_index => {
                 let idx = br.var().as_usize();
-                if self.bound_vars.len() <= idx {
+                if self.bound_vars.clone().len() <= idx {
                     panic!("Not enough bound vars: {:?} not found in {:?}", r, self.bound_vars);
                 }
-                br.assert_eq(self.bound_vars.get(idx).unwrap());
+                br.assert_eq(self.bound_vars.clone().get(idx).unwrap());
             }
 
             _ => (),
@@ -450,7 +450,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         Some(
             EarlyBinder { value: self.it.next()?, _tcx: PhantomData }
-                .instantiate(self.cx, self.args),
+                .instantiate(self.cx, self.args.clone()),
         )
     }
 
@@ -468,7 +468,7 @@ where
     fn next_back(&mut self) -> Option<Self::Item> {
         Some(
             EarlyBinder { value: self.it.next_back()?, _tcx: PhantomData }
-                .instantiate(self.cx, self.args),
+                .instantiate(self.cx, self.args.clone()),
         )
     }
 }
@@ -510,13 +510,13 @@ pub struct IterInstantiatedCopied<'a, I: Interner, Iter: IntoIterator> {
 impl<I: Interner, Iter: IntoIterator> Iterator for IterInstantiatedCopied<'_, I, Iter>
 where
     Iter::Item: Deref,
-    <Iter::Item as Deref>::Target: Copy + TypeFoldable<I>,
+    <Iter::Item as Deref>::Target: Clone + TypeFoldable<I>,
 {
     type Item = <Iter::Item as Deref>::Target;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.it.next().map(|value| {
-            EarlyBinder { value: *value, _tcx: PhantomData }.instantiate(self.cx, self.args)
+            EarlyBinder { value: value.clone(), _tcx: PhantomData }.instantiate(self.cx, self.args)
         })
     }
 
@@ -529,11 +529,11 @@ impl<I: Interner, Iter: IntoIterator> DoubleEndedIterator for IterInstantiatedCo
 where
     Iter::IntoIter: DoubleEndedIterator,
     Iter::Item: Deref,
-    <Iter::Item as Deref>::Target: Copy + TypeFoldable<I>,
+    <Iter::Item as Deref>::Target: Clone + TypeFoldable<I>,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.it.next_back().map(|value| {
-            EarlyBinder { value: *value, _tcx: PhantomData }.instantiate(self.cx, self.args)
+            EarlyBinder { value: value.clone(), _tcx: PhantomData }.instantiate(self.cx, self.args)
         })
     }
 }
@@ -542,7 +542,7 @@ impl<I: Interner, Iter: IntoIterator> ExactSizeIterator for IterInstantiatedCopi
 where
     Iter::IntoIter: ExactSizeIterator,
     Iter::Item: Deref,
-    <Iter::Item as Deref>::Target: Copy + TypeFoldable<I>,
+    <Iter::Item as Deref>::Target: Clone + TypeFoldable<I>,
 {
 }
 
@@ -664,9 +664,9 @@ impl<'a, I: Interner> TypeFolder<I> for ArgFolder<'a, I> {
         // bound in *fn types*. Region instantiation of the bound
         // regions that appear in a function signature is done using
         // the specialized routine `ty::replace_late_regions()`.
-        match r.kind() {
+        match r.clone().kind() {
             ty::ReEarlyParam(data) => {
-                let rk = self.args.get(data.index() as usize).map(|k| k.kind());
+                let rk = self.args.get(data.index() as usize).map(|k| k.clone().kind());
                 match rk {
                     Some(ty::GenericArgKind::Lifetime(lt)) => self.shift_region_through_binders(lt),
                     Some(other) => self.region_param_expected(data, r, other),
@@ -688,14 +688,14 @@ impl<'a, I: Interner> TypeFolder<I> for ArgFolder<'a, I> {
             return t;
         }
 
-        match t.kind() {
+        match t.clone().kind() {
             ty::Param(p) => self.ty_for_param(p, t),
             _ => t.super_fold_with(self),
         }
     }
 
     fn fold_const(&mut self, c: I::Const) -> I::Const {
-        if let ty::ConstKind::Param(p) = c.kind() {
+        if let ty::ConstKind::Param(p) = c.clone().kind() {
             self.const_for_param(p, c)
         } else {
             c.super_fold_with(self)
@@ -706,7 +706,7 @@ impl<'a, I: Interner> TypeFolder<I> for ArgFolder<'a, I> {
 impl<'a, I: Interner> ArgFolder<'a, I> {
     fn ty_for_param(&self, p: I::ParamTy, source_ty: I::Ty) -> I::Ty {
         // Look up the type in the args. It really should be in there.
-        let opt_ty = self.args.get(p.index() as usize).map(|k| k.kind());
+        let opt_ty = self.args.get(p.index() as usize).map(|k| k.clone().kind());
         let ty = match opt_ty {
             Some(ty::GenericArgKind::Type(ty)) => ty,
             Some(kind) => self.type_param_expected(p, source_ty, kind),
@@ -738,7 +738,7 @@ impl<'a, I: Interner> ArgFolder<'a, I> {
 
     fn const_for_param(&self, p: I::ParamConst, source_ct: I::Const) -> I::Const {
         // Look up the const in the args. It really should be in there.
-        let opt_ct = self.args.get(p.index() as usize).map(|k| k.kind());
+        let opt_ct = self.args.get(p.index() as usize).map(|k| k.clone().kind());
         let ct = match opt_ct {
             Some(ty::GenericArgKind::Const(ct)) => ct,
             Some(kind) => self.const_param_expected(p, source_ct, kind),
