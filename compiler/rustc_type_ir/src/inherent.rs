@@ -520,24 +520,24 @@ pub trait ParamLike {
     fn index(&self) -> u32;
 }
 
-pub trait AdtDef: Clone + Debug + Hash + Eq {
-    type Interner: Interner;
+pub trait AdtDef<I: Interner>: Clone + Debug + Hash + Eq {
+    type Ir: RustIr<Interner = I>;
 
-    fn def_id(&self) -> <Self::Interner as Interner>::DefId;
+    fn def_id(&self) -> I::DefId;
 
     fn is_struct(&self) -> bool;
 
     /// Returns the type of the struct tail.
     ///
     /// Expects the `AdtDef` to be a struct. If it is not, then this will panic.
-    fn struct_tail_ty<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> Option<ty::EarlyBinder<Self::Interner, <Self::Interner as Interner>::Ty>>;
+    fn struct_tail_ty(self, ir: Self::Ir) -> Option<ty::EarlyBinder<I, I::Ty>>;
 
     fn is_phantom_data(&self) -> bool;
 
     // FIXME: perhaps use `all_fields` and expose `FieldDef`.
-    fn all_field_tys<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> ty::EarlyBinder<Self::Interner, impl IntoIterator<Item = <Self::Interner as Interner>::Ty>>;
+    fn all_field_tys(self, ir: Self::Ir) -> ty::EarlyBinder<I, impl IntoIterator<Item = I::Ty>>;
 
-    fn sized_constraint<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> Option<ty::EarlyBinder<Self::Interner, <Self::Interner as Interner>::Ty>>;
+    fn sized_constraint(self, ir: Self::Ir) -> Option<ty::EarlyBinder<I, I::Ty>>;
 
     fn is_fundamental(&self) -> bool;
 

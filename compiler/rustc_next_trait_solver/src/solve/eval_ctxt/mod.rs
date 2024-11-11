@@ -168,6 +168,7 @@ impl<D, I> SolverDelegateEvalExt for D
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     #[instrument(level = "debug", skip(self))]
     fn evaluate_root_goal(
@@ -213,6 +214,7 @@ impl<'a, D, I> EvalCtxt<'a, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     pub(super) fn typing_mode(&self, param_env_for_debug_assertion: &I::ParamEnv) -> TypingMode<I> {
         self.delegate.typing_mode(param_env_for_debug_assertion)
@@ -1058,6 +1060,7 @@ impl<D, I> TypeFolder<I> for ReplaceAliasWithInfer<'_, '_, D, I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     fn cx(&self) -> I {
         self.ecx.cx().interner()

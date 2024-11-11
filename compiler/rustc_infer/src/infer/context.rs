@@ -11,6 +11,7 @@ use super::{BoundRegionConversionTime, InferCtxt, SubregionOrigin};
 
 impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
     type Interner = TyCtxt<'tcx>;
+    type Ir = TyCtxt<'tcx>;
 
     fn cx(&self) -> TyCtxt<'tcx> {
         self.tcx

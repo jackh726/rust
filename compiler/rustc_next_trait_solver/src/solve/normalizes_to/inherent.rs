@@ -5,6 +5,7 @@
 //! 2. equate the self type, and
 //! 3. instantiate and register where clauses.
 
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::{self as ty, Interner, RustIr};
 
 use crate::delegate::SolverDelegate;
@@ -14,6 +15,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     pub(super) fn normalize_inherent_associated_type(
         &mut self,

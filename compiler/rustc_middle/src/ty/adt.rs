@@ -201,8 +201,8 @@ impl<'tcx> AdtDef<'tcx> {
     }
 }
 
-impl<'tcx> rustc_type_ir::inherent::AdtDef for AdtDef<'tcx> {
-    type Interner = TyCtxt<'tcx>;
+impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
+    type Ir = TyCtxt<'tcx>;
 
     fn def_id(&self) -> DefId {
         self.did()
@@ -212,7 +212,7 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef for AdtDef<'tcx> {
         (*self).is_struct()
     }
 
-    fn struct_tail_ty<Ir: RustIr<Interner = Self::Interner>>(self, cx: Ir) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
+    fn struct_tail_ty(self, cx: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
         Some(cx.interner().type_of(self.non_enum_variant().tail_opt()?.did))
     }
 
@@ -220,16 +220,16 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef for AdtDef<'tcx> {
         (*self).is_phantom_data()
     }
 
-    fn all_field_tys<Ir: RustIr<Interner = Self::Interner>>(
+    fn all_field_tys(
         self,
-        tcx: Ir,
+        tcx: TyCtxt<'tcx>,
     ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = Ty<'tcx>>> {
         ty::EarlyBinder::bind(
             self.all_fields().map(move |field| tcx.type_of(field.did).skip_binder()),
         )
     }
 
-    fn sized_constraint<Ir: RustIr<Interner = Self::Interner>>(self, tcx: Ir) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
+    fn sized_constraint(self, tcx: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
         self.sized_constraint(tcx)
     }
 

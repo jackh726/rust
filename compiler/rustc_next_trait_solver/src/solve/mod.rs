@@ -74,6 +74,7 @@ impl<'a, D, I> EvalCtxt<'a, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     #[instrument(level = "trace", skip(self))]
     fn compute_type_outlives_goal(
@@ -214,6 +215,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     /// Try to merge multiple possible ways to prove a goal, if that is not possible returns `None`.
     ///

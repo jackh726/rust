@@ -143,7 +143,7 @@ pub trait Interner:
 
     fn type_of(self, def_id: Self::DefId) -> ty::EarlyBinder<Self, Self::Ty>;
 
-    type AdtDef: AdtDef<Interner = Self>;
+    type AdtDef: AdtDef<Self>;
     fn adt_def(self, adt_def_id: Self::DefId) -> Self::AdtDef;
 
     fn alias_ty_kind(self, alias: ty::AliasTy<Self>) -> ty::AliasTyKind;
@@ -423,7 +423,7 @@ impl<I: Interner> search_graph::Cx for I {
 }
 
 pub trait RustIr: Sized + Copy {
-    type Interner: Interner;
+    type Interner: Interner<AdtDef: AdtDef<Self::Interner, Ir = Self>>;
 
     fn interner(self) -> Self::Interner;
 }

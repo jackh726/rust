@@ -507,7 +507,9 @@ struct FunctionalVariances<'tcx> {
     generics: &'tcx ty::Generics,
 }
 
-impl<'tcx> TypeRelation<TyCtxt<'tcx>> for FunctionalVariances<'tcx> {
+impl<'tcx> TypeRelation for FunctionalVariances<'tcx> {
+    type I = TyCtxt<'tcx>;
+    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.tcx
     }

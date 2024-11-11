@@ -22,6 +22,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     #[instrument(level = "trace", skip(self), ret)]
     pub(super) fn compute_normalizes_to_goal(
@@ -132,6 +133,7 @@ impl<D, I> assembly::GoalKind<D> for NormalizesTo<I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
@@ -929,6 +931,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     fn translate_args(
         &mut self,

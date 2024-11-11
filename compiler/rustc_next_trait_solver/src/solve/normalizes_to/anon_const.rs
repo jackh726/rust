@@ -1,3 +1,4 @@
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::{self as ty, Interner};
 use tracing::instrument;
 
@@ -8,6 +9,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     #[instrument(level = "trace", skip(self), ret)]
     pub(super) fn normalize_anon_const(

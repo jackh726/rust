@@ -13,6 +13,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     pub(super) fn normalize_opaque_type(
         &mut self,

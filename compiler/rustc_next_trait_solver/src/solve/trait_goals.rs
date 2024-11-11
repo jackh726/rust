@@ -22,6 +22,7 @@ impl<D, I> assembly::GoalKind<D> for TraitPredicate<I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
@@ -713,6 +714,7 @@ where
     D: SolverDelegate<Ir = Ir, Interner = I>,
     Ir: RustIr<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = Ir>,
 {
     /// Trait upcasting allows for coercions between trait objects:
     /// ```ignore (builtin impl example)

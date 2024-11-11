@@ -4,6 +4,7 @@
 //! Since a weak alias is never ambiguous, this just computes the `type_of` of
 //! the alias and registers the where-clauses of the type alias.
 
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::{self as ty, Interner, RustIr};
 
 use crate::delegate::SolverDelegate;
@@ -13,6 +14,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     pub(super) fn normalize_weak_type(
         &mut self,

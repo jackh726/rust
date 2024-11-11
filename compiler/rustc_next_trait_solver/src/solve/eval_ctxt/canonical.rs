@@ -48,6 +48,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     /// Canonicalizes the goal remembering the original values
     /// for each bound variable.
@@ -461,6 +462,7 @@ pub fn instantiate_canonical_state<D, I, T: TypeFoldable<I>>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     // In case any fresh inference variables have been created between `state`
     // and the previous instantiation, extend `orig_values` for it.

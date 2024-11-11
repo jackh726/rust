@@ -23,6 +23,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_auto_trait<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     let cx = ecx.cx().interner();
     match ty.clone().kind() {
@@ -108,6 +109,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_sized_trait<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     match ty.clone().kind() {
         // impl Sized for u*, i*, bool, f*, FnDef, FnPtr, *(const/mut) T, char, &mut? T, [T; N], dyn* Trait, !
@@ -176,6 +178,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_copy_clone_trait<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     match ty.clone().kind() {
         // impl Copy/Clone for FnDef, FnPtr
@@ -849,6 +852,7 @@ pub(in crate::solve) fn predicates_for_object_candidate<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     let cx = ecx.cx().interner();
     let mut requirements = vec![];
@@ -923,6 +927,8 @@ struct ReplaceProjectionWith<'a, D: SolverDelegate<Interner = I>, I: Interner> {
 
 impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I>
     for ReplaceProjectionWith<'_, D, I>
+where 
+<I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     fn cx(&self) -> I {
         self.ecx.cx().interner()

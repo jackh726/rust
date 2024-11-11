@@ -34,6 +34,7 @@ pub(super) trait GoalKind<D, I = <D as SolverDelegate>::Interner>:
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     fn self_ty(&self) -> I::Ty;
 
@@ -285,6 +286,7 @@ where
     D: SolverDelegate<Ir = Ir, Interner = I>,
     I: Interner,
     Ir: RustIr<Interner = I>,
+    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
 {
     pub(super) fn assemble_and_evaluate_candidates<G: GoalKind<D>>(
         &mut self,
