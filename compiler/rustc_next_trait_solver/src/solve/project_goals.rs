@@ -9,7 +9,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self), ret)]
     pub(super) fn compute_projection_goal(

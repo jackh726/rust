@@ -2,9 +2,9 @@
 //! `T: const Trait` or `T: ~const Trait`.
 
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
-use rustc_type_ir::{inherent::*, RustIr};
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
-use rustc_type_ir::{self as ty, Interner, elaborate};
+use rustc_type_ir::{self as ty, Interner, RustIr, elaborate};
 use tracing::instrument;
 
 use super::assembly::{Candidate, structural_traits};
@@ -18,7 +18,7 @@ impl<D, I> assembly::GoalKind<D> for ty::HostEffectPredicate<I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
@@ -85,7 +85,7 @@ where
         let cx = ecx.cx().interner();
         let mut candidates = vec![];
 
-        if !ecx.cx().alias_has_const_conditions(alias_ty.def_id) {
+        if !cx.alias_has_const_conditions(alias_ty.def_id) {
             return vec![];
         }
 
@@ -225,11 +225,11 @@ where
         goal: Goal<I, Self>,
         _kind: rustc_type_ir::ClosureKind,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
 
         let self_ty = goal.predicate.self_ty();
         let (inputs_and_output, def_id, args) =
-            structural_traits::extract_fn_def_from_const_callable(cx, self_ty)?;
+            structural_traits::extract_fn_def_from_const_callable(ecx.cx(), self_ty)?;
 
         // A built-in `Fn` impl only holds if the output is sized.
         // (FIXME: technically we only need to check this if the type is a fn ptr...)
@@ -359,9 +359,9 @@ where
                 GoalSource::Misc,
                 const_conditions.into_iter().map(|trait_ref| {
                     goal.clone().with(
-                        cx,
+                        cx.interner(),
                         ty::Binder::dummy(trait_ref)
-                            .to_host_effect_clause(cx, goal.predicate.constness),
+                            .to_host_effect_clause(cx.interner(), goal.predicate.constness),
                     )
                 }),
             );
@@ -388,7 +388,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self))]
     pub(super) fn compute_host_effect_goal(

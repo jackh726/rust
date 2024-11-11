@@ -48,7 +48,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     /// Canonicalizes the goal remembering the original values
     /// for each bound variable.
@@ -162,7 +162,10 @@ where
             Response {
                 var_values,
                 certainty,
-                external_constraints: self.cx().interner().mk_external_constraints(external_constraints),
+                external_constraints: self
+                    .cx()
+                    .interner()
+                    .mk_external_constraints(external_constraints),
             },
         );
 
@@ -439,7 +442,8 @@ where
     I: Interner,
     T: TypeFoldable<I>,
 {
-    let var_values = CanonicalVarValues { var_values: delegate.cx().interner().mk_args(var_values) };
+    let var_values =
+        CanonicalVarValues { var_values: delegate.cx().interner().mk_args(var_values) };
     let state = inspect::State { var_values, data };
     let state = state.fold_with(&mut EagerResolver::new(delegate));
     Canonicalizer::canonicalize(
@@ -462,7 +466,7 @@ pub fn instantiate_canonical_state<D, I, T: TypeFoldable<I>>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     // In case any fresh inference variables have been created between `state`
     // and the previous instantiation, extend `orig_values` for it.

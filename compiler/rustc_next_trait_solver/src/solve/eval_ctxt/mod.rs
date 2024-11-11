@@ -6,11 +6,11 @@ use rustc_macros::{HashStable_NoContext, TyDecodable, TyEncodable};
 use rustc_type_ir::data_structures::{HashMap, HashSet, ensure_sufficient_stack};
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
-use rustc_type_ir::{inherent::*, RustIr};
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::relate::Relate;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::visit::{TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor};
-use rustc_type_ir::{self as ty, CanonicalVarValues, InferCtxtLike, Interner, TypingMode};
+use rustc_type_ir::{self as ty, CanonicalVarValues, InferCtxtLike, Interner, RustIr, TypingMode};
 use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
 use tracing::{instrument, trace};
 
@@ -168,7 +168,7 @@ impl<D, I> SolverDelegateEvalExt for D
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     #[instrument(level = "debug", skip(self))]
     fn evaluate_root_goal(
@@ -176,9 +176,12 @@ where
         goal: Goal<I, I::Predicate>,
         generate_proof_tree: GenerateProofTree,
     ) -> (Result<(HasChanged, Certainty), NoSolution>, Option<inspect::GoalEvaluation<I>>) {
-        EvalCtxt::enter_root(self, self.cx().interner().recursion_limit(), generate_proof_tree, |ecx| {
-            ecx.evaluate_goal(GoalEvaluationKind::Root, GoalSource::Misc, goal)
-        })
+        EvalCtxt::enter_root(
+            self,
+            self.cx().interner().recursion_limit(),
+            generate_proof_tree,
+            |ecx| ecx.evaluate_goal(GoalEvaluationKind::Root, GoalSource::Misc, goal),
+        )
     }
 
     fn root_goal_may_hold_with_depth(
@@ -204,9 +207,12 @@ where
         Result<(NestedNormalizationGoals<I>, HasChanged, Certainty), NoSolution>,
         Option<inspect::GoalEvaluation<I>>,
     ) {
-        EvalCtxt::enter_root(self, self.cx().interner().recursion_limit(), generate_proof_tree, |ecx| {
-            ecx.evaluate_goal_raw(GoalEvaluationKind::Root, GoalSource::Misc, goal)
-        })
+        EvalCtxt::enter_root(
+            self,
+            self.cx().interner().recursion_limit(),
+            generate_proof_tree,
+            |ecx| ecx.evaluate_goal_raw(GoalEvaluationKind::Root, GoalSource::Misc, goal),
+        )
     }
 }
 
@@ -214,7 +220,7 @@ impl<'a, D, I> EvalCtxt<'a, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     pub(super) fn typing_mode(&self, param_env_for_debug_assertion: &I::ParamEnv) -> TypingMode<I> {
         self.delegate.typing_mode(param_env_for_debug_assertion)
@@ -1060,7 +1066,7 @@ impl<D, I> TypeFolder<I> for ReplaceAliasWithInfer<'_, '_, D, I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn cx(&self) -> I {
         self.ecx.cx().interner()

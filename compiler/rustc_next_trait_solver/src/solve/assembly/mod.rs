@@ -4,11 +4,11 @@ pub(super) mod structural_traits;
 
 use derive_where::derive_where;
 use rustc_type_ir::fold::TypeFoldable;
-use rustc_type_ir::{inherent::*, RustIr};
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 use rustc_type_ir::solve::{Response, inspect};
 use rustc_type_ir::visit::TypeVisitableExt as _;
-use rustc_type_ir::{self as ty, Canonical, Interner, TypingMode, Upcast as _, elaborate};
+use rustc_type_ir::{self as ty, Canonical, Interner, RustIr, TypingMode, Upcast as _, elaborate};
 use tracing::{debug, instrument};
 
 use crate::delegate::SolverDelegate;
@@ -34,7 +34,7 @@ pub(super) trait GoalKind<D, I = <D as SolverDelegate>::Interner>:
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty;
 
@@ -286,7 +286,7 @@ where
     D: SolverDelegate<Ir = Ir, Interner = I>,
     I: Interner,
     Ir: RustIr<Interner = I>,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     pub(super) fn assemble_and_evaluate_candidates<G: GoalKind<D>>(
         &mut self,
@@ -325,9 +325,9 @@ where
             return self.forced_ambiguity(MaybeCause::Ambiguity).into_iter().collect();
         }
 
-        let goal: Goal<I, G> = goal
-            .clone()
-            .with_predicate(self.cx().interner(), |pred| pred.with_self_ty(self.cx().interner(), normalized_self_ty));
+        let goal: Goal<I, G> = goal.clone().with_predicate(self.cx().interner(), |pred| {
+            pred.with_self_ty(self.cx().interner(), normalized_self_ty)
+        });
         // Vars that show up in the rest of the goal substs may have been constrained by
         // normalizing the self type as well, since type variables are not uniquified.
         let goal = self.resolve_vars_if_possible(goal);
@@ -598,7 +598,9 @@ where
 
             ty::Alias(kind @ (ty::Projection | ty::Opaque), alias_ty) => (kind, alias_ty),
             ty::Alias(ty::Inherent | ty::Weak, _) => {
-                self.cx().interner().delay_bug(format!("could not normalize {self_ty:?}, it is not WF"));
+                self.cx()
+                    .interner()
+                    .delay_bug(format!("could not normalize {self_ty:?}, it is not WF"));
                 return;
             }
         };

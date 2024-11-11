@@ -4,8 +4,8 @@ use rustc_type_ir::{self as ty, InferCtxtLike, Interner};
 use tracing::{debug, instrument};
 
 use self::combine::{PredicateEmittingRelation, super_combine_consts, super_combine_tys};
-use crate::data_structures::DelayedSet;
 use crate::RustIr;
+use crate::data_structures::DelayedSet;
 
 pub trait RelateExt: InferCtxtLike {
     fn relate<T: Relate<Self::Interner>>(
@@ -94,7 +94,8 @@ pub struct SolverRelating<'infcx, Infcx, Ir: RustIr> {
     /// constrain `?1` to `u32`. When using the cache entry from the
     /// first time we've related these types, this only happens when
     /// later proving the `Subtype(?0, ?1)` goal from the first relation.
-    cache: DelayedSet<(ty::Variance, <Ir::Interner as Interner>::Ty, <Ir::Interner as Interner>::Ty)>,
+    cache:
+        DelayedSet<(ty::Variance, <Ir::Interner as Interner>::Ty, <Ir::Interner as Interner>::Ty)>,
 }
 
 impl<'infcx, Infcx, Ir> SolverRelating<'infcx, Infcx, Ir>
@@ -167,7 +168,11 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    fn tys(&mut self, a: <Ir::Interner as Interner>::Ty, b: <Ir::Interner as Interner>::Ty) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Ty> {
+    fn tys(
+        &mut self,
+        a: <Ir::Interner as Interner>::Ty,
+        b: <Ir::Interner as Interner>::Ty,
+    ) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Ty> {
         let cx = self.cx().interner();
 
         if a == b {
@@ -250,7 +255,11 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    fn regions(&mut self, a: <Ir::Interner as Interner>::Region, b: <Ir::Interner as Interner>::Region) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Region> {
+    fn regions(
+        &mut self,
+        a: <Ir::Interner as Interner>::Region,
+        b: <Ir::Interner as Interner>::Region,
+    ) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Region> {
         let a_ret = a.clone();
         match self.ambient_variance {
             // Subtype(&'a u8, &'b u8) => Outlives('a: 'b) => SubRegion('b, 'a)
@@ -267,7 +276,11 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    fn consts(&mut self, a: <Ir::Interner as Interner>::Const, b: <Ir::Interner as Interner>::Const) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Const> {
+    fn consts(
+        &mut self,
+        a: <Ir::Interner as Interner>::Const,
+        b: <Ir::Interner as Interner>::Const,
+    ) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Const> {
         super_combine_consts(self.infcx, self, a, b)
     }
 
@@ -370,7 +383,9 @@ where
 
     fn register_predicates(
         &mut self,
-        obligations: impl IntoIterator<Item: ty::Upcast<Ir::Interner, <Ir::Interner as Interner>::Predicate>>,
+        obligations: impl IntoIterator<
+            Item: ty::Upcast<Ir::Interner, <Ir::Interner as Interner>::Predicate>,
+        >,
     ) {
         self.goals.extend(
             obligations
@@ -379,11 +394,18 @@ where
         );
     }
 
-    fn register_goals(&mut self, obligations: impl IntoIterator<Item = Goal<Ir::Interner, <Ir::Interner as Interner>::Predicate>>) {
+    fn register_goals(
+        &mut self,
+        obligations: impl IntoIterator<Item = Goal<Ir::Interner, <Ir::Interner as Interner>::Predicate>>,
+    ) {
         self.goals.extend(obligations);
     }
 
-    fn register_alias_relate_predicate(&mut self, a: <Ir::Interner as Interner>::Ty, b: <Ir::Interner as Interner>::Ty) {
+    fn register_alias_relate_predicate(
+        &mut self,
+        a: <Ir::Interner as Interner>::Ty,
+        b: <Ir::Interner as Interner>::Ty,
+    ) {
         self.register_predicates([ty::Binder::dummy(match self.ambient_variance {
             ty::Covariant => ty::PredicateKind::AliasRelate(
                 a.into(),

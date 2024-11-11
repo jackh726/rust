@@ -4,7 +4,7 @@
 
 use rustc_index::bit_set::GrowableBitSet;
 use rustc_type_ir::inherent::*;
-use rustc_type_ir::{self as ty, Interner, TypingMode, RustIr};
+use rustc_type_ir::{self as ty, Interner, RustIr, TypingMode};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::{Certainty, EvalCtxt, Goal, NoSolution, QueryResult, inspect};
@@ -13,7 +13,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     pub(super) fn normalize_opaque_type(
         &mut self,
@@ -45,7 +45,10 @@ where
                 }
 
                 // FIXME: This may have issues when the args contain aliases...
-                match uses_unique_placeholders_ignoring_regions(self.cx().interner(), opaque_ty.args.clone()) {
+                match uses_unique_placeholders_ignoring_regions(
+                    self.cx().interner(),
+                    opaque_ty.args.clone(),
+                ) {
                     Err(NotUniqueParam::NotParam(param)) if param.is_non_region_infer() => {
                         return self.evaluate_added_goals_and_make_canonical_response(
                             Certainty::AMBIGUOUS,

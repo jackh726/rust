@@ -6,8 +6,8 @@ use tracing::{instrument, trace};
 
 use crate::error::{ExpectedFound, TypeError};
 use crate::fold::TypeFoldable;
-use crate::{inherent::*, RustIr};
-use crate::{self as ty, Interner};
+use crate::inherent::*;
+use crate::{self as ty, Interner, RustIr};
 
 pub mod combine;
 pub mod solver_relating;
@@ -104,11 +104,23 @@ pub trait TypeRelation: Sized {
     // additional hooks for other types in the future if needed
     // without making older code, which called `relate`, obsolete.
 
-    fn tys(&mut self, a: <Self::I as Interner>::Ty, b: <Self::I as Interner>::Ty) -> RelateResult<Self::I, <Self::I as Interner>::Ty>;
+    fn tys(
+        &mut self,
+        a: <Self::I as Interner>::Ty,
+        b: <Self::I as Interner>::Ty,
+    ) -> RelateResult<Self::I, <Self::I as Interner>::Ty>;
 
-    fn regions(&mut self, a: <Self::I as Interner>::Region, b: <Self::I as Interner>::Region) -> RelateResult<Self::I, <Self::I as Interner>::Region>;
+    fn regions(
+        &mut self,
+        a: <Self::I as Interner>::Region,
+        b: <Self::I as Interner>::Region,
+    ) -> RelateResult<Self::I, <Self::I as Interner>::Region>;
 
-    fn consts(&mut self, a: <Self::I as Interner>::Const, b: <Self::I as Interner>::Const) -> RelateResult<Self::I, <Self::I as Interner>::Const>;
+    fn consts(
+        &mut self,
+        a: <Self::I as Interner>::Const,
+        b: <Self::I as Interner>::Const,
+    ) -> RelateResult<Self::I, <Self::I as Interner>::Const>;
 
     fn binders<T>(
         &mut self,
@@ -132,9 +144,9 @@ pub fn relate_args_invariantly<I: Interner, R: TypeRelation<I = I>>(
     a_arg: I::GenericArgs,
     b_arg: I::GenericArgs,
 ) -> RelateResult<I, I::GenericArgs> {
-    relation.cx().interner().mk_args_from_iter(iter::zip(a_arg.iter(), b_arg.iter()).map(|(a, b)| {
-        relation.relate_with_variance(ty::Invariant, VarianceDiagInfo::default(), a, b)
-    }))
+    relation.cx().interner().mk_args_from_iter(iter::zip(a_arg.iter(), b_arg.iter()).map(
+        |(a, b)| relation.relate_with_variance(ty::Invariant, VarianceDiagInfo::default(), a, b),
+    ))
 }
 
 pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(

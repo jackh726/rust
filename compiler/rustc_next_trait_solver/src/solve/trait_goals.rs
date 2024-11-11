@@ -3,10 +3,12 @@
 use rustc_ast_ir::Movability;
 use rustc_type_ir::data_structures::IndexSet;
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
-use rustc_type_ir::{inherent::*, RustIr};
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 use rustc_type_ir::visit::TypeVisitableExt as _;
-use rustc_type_ir::{self as ty, Interner, TraitPredicate, TypingMode, Upcast as _, elaborate};
+use rustc_type_ir::{
+    self as ty, Interner, RustIr, TraitPredicate, TypingMode, Upcast as _, elaborate,
+};
 use tracing::{instrument, trace};
 
 use crate::delegate::SolverDelegate;
@@ -22,7 +24,7 @@ impl<D, I> assembly::GoalKind<D> for TraitPredicate<I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
@@ -714,7 +716,7 @@ where
     D: SolverDelegate<Ir = Ir, Interner = I>,
     Ir: RustIr<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, Ir>,
 {
     /// Trait upcasting allows for coercions between trait objects:
     /// ```ignore (builtin impl example)
@@ -752,7 +754,8 @@ where
             ));
         } else if let Some(a_principal) = a_data.clone().principal() {
             for new_a_principal in
-                elaborate::supertraits(self.cx().interner(), a_principal.with_self_ty(cx, a_ty)).skip(1)
+                elaborate::supertraits(self.cx().interner(), a_principal.with_self_ty(cx, a_ty))
+                    .skip(1)
             {
                 responses.extend(self.consider_builtin_upcast_to_principal(
                     &goal.param_env,
@@ -923,7 +926,11 @@ where
             // Also require that a_ty's lifetime outlives b_ty's lifetime.
             ecx.add_goal(
                 GoalSource::ImplWhereBound,
-                Goal::new(ecx.cx().interner(), param_env.clone(), ty::OutlivesPredicate(a_region, b_region)),
+                Goal::new(
+                    ecx.cx().interner(),
+                    param_env.clone(),
+                    ty::OutlivesPredicate(a_region, b_region),
+                ),
             );
 
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
@@ -1171,8 +1178,9 @@ where
                 .into_iter()
                 .map(|ty| {
                     ecx.enter_forall(ty, |ecx, ty| {
-                        goal.clone()
-                            .with_predicate(ecx.cx().interner(), |pred| pred.with_self_ty(ecx.cx().interner(), ty))
+                        goal.clone().with_predicate(ecx.cx().interner(), |pred| {
+                            pred.with_self_ty(ecx.cx().interner(), ty)
+                        })
                     })
                 })
                 .collect::<Vec<_>>();

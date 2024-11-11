@@ -6,7 +6,7 @@ mod weak_types;
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
-use rustc_type_ir::{self as ty, Interner, NormalizesTo, TypingMode, Upcast as _, RustIr};
+use rustc_type_ir::{self as ty, Interner, NormalizesTo, RustIr, TypingMode, Upcast as _};
 use tracing::instrument;
 
 use crate::delegate::SolverDelegate;
@@ -22,7 +22,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self), ret)]
     pub(super) fn compute_normalizes_to_goal(
@@ -133,7 +133,7 @@ impl<D, I> assembly::GoalKind<D> for NormalizesTo<I>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
@@ -669,7 +669,9 @@ where
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [self_ty]),
+                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [
+                    self_ty,
+                ]),
                 term,
             }
             .upcast(cx),
@@ -702,7 +704,9 @@ where
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [self_ty]),
+                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [
+                    self_ty,
+                ]),
                 term,
             }
             .upcast(cx),
@@ -931,7 +935,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn translate_args(
         &mut self,

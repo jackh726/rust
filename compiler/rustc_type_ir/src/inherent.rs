@@ -521,27 +521,24 @@ pub trait ParamLike {
 }
 
 pub trait AdtDef<I: Interner>: Clone + Debug + Hash + Eq {
-    type Ir: RustIr<Interner = I>;
-
     fn def_id(&self) -> I::DefId;
-
     fn is_struct(&self) -> bool;
+    fn is_phantom_data(&self) -> bool;
+    fn is_fundamental(&self) -> bool;
+}
 
+pub trait IrAdtDef<I: Interner, Ir: RustIr<Interner = I>>: AdtDef<I> {
     /// Returns the type of the struct tail.
     ///
     /// Expects the `AdtDef` to be a struct. If it is not, then this will panic.
-    fn struct_tail_ty(self, ir: Self::Ir) -> Option<ty::EarlyBinder<I, I::Ty>>;
-
-    fn is_phantom_data(&self) -> bool;
+    fn struct_tail_ty(self, ir: Ir) -> Option<ty::EarlyBinder<I, I::Ty>>;
 
     // FIXME: perhaps use `all_fields` and expose `FieldDef`.
-    fn all_field_tys(self, ir: Self::Ir) -> ty::EarlyBinder<I, impl IntoIterator<Item = I::Ty>>;
+    fn all_field_tys(self, ir: Ir) -> ty::EarlyBinder<I, impl IntoIterator<Item = I::Ty>>;
 
-    fn sized_constraint(self, ir: Self::Ir) -> Option<ty::EarlyBinder<I, I::Ty>>;
+    fn sized_constraint(self, ir: Ir) -> Option<ty::EarlyBinder<I, I::Ty>>;
 
-    fn is_fundamental(&self) -> bool;
-
-    fn destructor<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> Option<AdtDestructorKind>;
+    fn destructor(self, ir: Ir) -> Option<AdtDestructorKind>;
 }
 
 pub trait ParamEnv<I: Interner>: Clone + Debug + Hash + Eq + TypeFoldable<I> {

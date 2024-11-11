@@ -5,9 +5,9 @@ use derive_where::derive_where;
 use rustc_ast_ir::{Movability, Mutability};
 use rustc_type_ir::data_structures::HashMap;
 use rustc_type_ir::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
-use rustc_type_ir::{inherent::*, RustIr};
+use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
-use rustc_type_ir::{self as ty, Interner, Upcast as _, elaborate};
+use rustc_type_ir::{self as ty, Interner, RustIr, Upcast as _, elaborate};
 use rustc_type_ir_macros::{TypeFoldable_Generic, TypeVisitable_Generic};
 use tracing::instrument;
 
@@ -23,7 +23,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_auto_trait<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     let cx = ecx.cx().interner();
     match ty.clone().kind() {
@@ -88,9 +88,11 @@ where
         // For `PhantomData<T>`, we pass `T`.
         ty::Adt(def, args) if def.is_phantom_data() => Ok(vec![ty::Binder::dummy(args.type_at(0))]),
 
-        ty::Adt(def, args) => {
-            Ok(def.all_field_tys(ecx.cx()).iter_instantiated(cx, args).map(ty::Binder::dummy).collect())
-        }
+        ty::Adt(def, args) => Ok(def
+            .all_field_tys(ecx.cx())
+            .iter_instantiated(cx, args)
+            .map(ty::Binder::dummy)
+            .collect()),
 
         ty::Alias(ty::Opaque, ty::AliasTy { def_id, args, .. }) => {
             // We can resolve the `impl Trait` to its concrete type,
@@ -109,7 +111,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_sized_trait<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     match ty.clone().kind() {
         // impl Sized for u*, i*, bool, f*, FnDef, FnPtr, *(const/mut) T, char, &mut? T, [T; N], dyn* Trait, !
@@ -178,7 +180,7 @@ pub(in crate::solve) fn instantiate_constituent_tys_for_copy_clone_trait<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     match ty.clone().kind() {
         // impl Copy/Clone for FnDef, FnPtr
@@ -664,10 +666,14 @@ fn coroutine_closure_to_ambiguous_coroutine<I: Interner>(
 ///
 /// Doing so on all calls to `extract_tupled_inputs_and_output_from_callable`
 /// would be wasteful.
-pub(in crate::solve) fn extract_fn_def_from_const_callable<I: Interner>(
-    cx: I,
+pub(in crate::solve) fn extract_fn_def_from_const_callable<
+    Ir: RustIr<Interner = I>,
+    I: Interner,
+>(
+    cx: Ir,
     self_ty: I::Ty,
 ) -> Result<(ty::Binder<I, (I::FnInputTys, I::Ty)>, I::DefId, I::GenericArgs), NoSolution> {
+    let cx = cx.interner();
     match self_ty.clone().kind() {
         ty::FnDef(def_id, args) => {
             let sig = cx.fn_sig(def_id);
@@ -730,10 +736,11 @@ pub(in crate::solve) fn extract_fn_def_from_const_callable<I: Interner>(
     }
 }
 
-pub(in crate::solve) fn const_conditions_for_destruct<I: Interner>(
-    cx: I,
-    self_ty: I::Ty,
-) -> Result<Vec<ty::TraitRef<I>>, NoSolution> {
+pub(in crate::solve) fn const_conditions_for_destruct<Ir: RustIr>(
+    ecx: Ir,
+    self_ty: <Ir::Interner as Interner>::Ty,
+) -> Result<Vec<ty::TraitRef<Ir::Interner>>, NoSolution> {
+    let cx = ecx.interner();
     let destruct_def_id = cx.require_lang_item(TraitSolverLangItem::Destruct);
 
     match self_ty.clone().kind() {
@@ -742,11 +749,11 @@ pub(in crate::solve) fn const_conditions_for_destruct<I: Interner>(
         ty::Adt(adt_def, args) => {
             let mut const_conditions: Vec<_> = adt_def
                 .clone()
-                .all_field_tys(cx)
+                .all_field_tys(ecx)
                 .iter_instantiated(cx, args)
                 .map(|field_ty| ty::TraitRef::new(cx, destruct_def_id, [field_ty]))
                 .collect();
-            match adt_def.clone().destructor(cx) {
+            match adt_def.clone().destructor(ecx) {
                 // `Drop` impl exists, but it's not const. Type cannot be `~const Destruct`.
                 Some(AdtDestructorKind::NotConst) => return Err(NoSolution),
                 // `Drop` impl exists, and it's const. Require `Ty: ~const Drop` to hold.
@@ -852,7 +859,7 @@ pub(in crate::solve) fn predicates_for_object_candidate<D, I>(
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     let cx = ecx.cx().interner();
     let mut requirements = vec![];
@@ -925,10 +932,9 @@ struct ReplaceProjectionWith<'a, D: SolverDelegate<Interner = I>, I: Interner> {
     nested: Vec<Goal<I, I::Predicate>>,
 }
 
-impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I>
-    for ReplaceProjectionWith<'_, D, I>
-where 
-<I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I> for ReplaceProjectionWith<'_, D, I>
+where
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     fn cx(&self) -> I {
         self.ecx.cx().interner()

@@ -29,8 +29,7 @@ pub trait Interner:
     + IrPrint<ty::NormalizesTo<Self>>
     + IrPrint<ty::SubtypePredicate<Self>>
     + IrPrint<ty::CoercePredicate<Self>>
-    + IrPrint<ty::FnSig<Self>>
-//where <Self::AdtDef as AdtDef>::Ir: RustIr<Interner = Self>
+    + IrPrint<ty::FnSig<Self>> //where <Self::AdtDef as AdtDef>::Ir: RustIr<Interner = Self>
 {
     type DefId: DefId<Self>;
     type LocalDefId: Copy + Debug + Hash + Eq + Into<Self::DefId> + TypeFoldable<Self>;
@@ -423,7 +422,7 @@ impl<I: Interner> search_graph::Cx for I {
 }
 
 pub trait RustIr: Sized + Copy {
-    type Interner: Interner<AdtDef: AdtDef<Self::Interner, Ir = Self>>;
+    type Interner: Interner<AdtDef: IrAdtDef<Self::Interner, Self>>;
 
     fn interner(self) -> Self::Interner;
 }

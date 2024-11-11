@@ -21,9 +21,9 @@ mod project_goals;
 mod search_graph;
 mod trait_goals;
 
-use rustc_type_ir::{inherent::*, RustIr};
+use rustc_type_ir::inherent::*;
 pub use rustc_type_ir::solve::*;
-use rustc_type_ir::{self as ty, Interner};
+use rustc_type_ir::{self as ty, Interner, RustIr};
 use tracing::instrument;
 
 pub use self::eval_ctxt::{EvalCtxt, GenerateProofTree, SolverDelegateEvalExt};
@@ -74,7 +74,7 @@ impl<'a, D, I> EvalCtxt<'a, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self))]
     fn compute_type_outlives_goal(
@@ -215,7 +215,7 @@ impl<D, I> EvalCtxt<'_, D>
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
-    <I as Interner>::AdtDef: AdtDef<I, Ir = D::Ir>,
+    <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
 {
     /// Try to merge multiple possible ways to prove a goal, if that is not possible returns `None`.
     ///

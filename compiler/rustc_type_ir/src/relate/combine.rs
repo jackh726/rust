@@ -5,10 +5,10 @@ use super::{
     structurally_relate_consts, structurally_relate_tys,
 };
 use crate::error::TypeError;
-use crate::{inherent::*, RustIr};
+use crate::inherent::*;
 use crate::solve::Goal;
 use crate::visit::TypeVisitableExt as _;
-use crate::{self as ty, InferCtxtLike, Interner, TypingMode, Upcast};
+use crate::{self as ty, InferCtxtLike, Interner, RustIr, TypingMode, Upcast};
 
 pub trait PredicateEmittingRelation<Infcx, I = <Infcx as InferCtxtLike>::Interner>:
     TypeRelation<I = I>
@@ -199,7 +199,8 @@ where
         }
 
         (ty::ConstKind::Unevaluated(..), _) | (_, ty::ConstKind::Unevaluated(..))
-            if infcx.cx().interner().features().generic_const_exprs() || infcx.next_trait_solver() =>
+            if infcx.cx().interner().features().generic_const_exprs()
+                || infcx.next_trait_solver() =>
         {
             match relation.structurally_relate_aliases() {
                 StructurallyRelateAliases::No => {

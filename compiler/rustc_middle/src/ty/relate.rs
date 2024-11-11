@@ -1,7 +1,7 @@
 use std::iter;
 
-pub use rustc_type_ir::relate::*;
 use rustc_type_ir::RustIr;
+pub use rustc_type_ir::relate::*;
 
 use crate::ty::error::{ExpectedFound, TypeError};
 use crate::ty::predicate::ExistentialPredicateStableCmpExt as _;
@@ -68,7 +68,11 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Pattern<'tcx> {
                 if inc_a != inc_b {
                     todo!()
                 }
-                Ok(relation.cx().interner().mk_pat(ty::PatternKind::Range { start, end, include_end: inc_a }))
+                Ok(relation.cx().interner().mk_pat(ty::PatternKind::Range {
+                    start,
+                    end,
+                    include_end: inc_a,
+                }))
             }
         }
     }

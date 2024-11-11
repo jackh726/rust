@@ -92,7 +92,10 @@ where
 {
     /// `probe_kind` is only called when proof tree building is enabled so it can be
     /// as expensive as necessary to output the desired information.
-    pub(in crate::solve) fn probe<F, T>(&mut self, probe_kind: F) -> ProbeCtxt<'_, 'a, D, Ir, I, F, T>
+    pub(in crate::solve) fn probe<F, T>(
+        &mut self,
+        probe_kind: F,
+    ) -> ProbeCtxt<'_, 'a, D, Ir, I, F, T>
     where
         F: FnOnce(&T) -> inspect::ProbeKind<I>,
     {
@@ -102,14 +105,16 @@ where
     pub(in crate::solve) fn probe_builtin_trait_candidate(
         &mut self,
         source: BuiltinImplSource,
-    ) -> TraitProbeCtxt<'_, 'a, D, Ir, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>> {
+    ) -> TraitProbeCtxt<'_, 'a, D, Ir, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>>
+    {
         self.probe_trait_candidate(CandidateSource::BuiltinImpl(source))
     }
 
     pub(in crate::solve) fn probe_trait_candidate(
         &mut self,
         source: CandidateSource<I>,
-    ) -> TraitProbeCtxt<'_, 'a, D, Ir, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>> {
+    ) -> TraitProbeCtxt<'_, 'a, D, Ir, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>>
+    {
         TraitProbeCtxt {
             cx: ProbeCtxt {
                 ecx: self,

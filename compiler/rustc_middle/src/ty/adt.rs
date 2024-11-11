@@ -18,8 +18,8 @@ use rustc_macros::{HashStable, TyDecodable, TyEncodable};
 use rustc_query_system::ich::StableHashingContext;
 use rustc_session::DataTypeKind;
 use rustc_span::symbol::sym;
-use rustc_type_ir::solve::AdtDestructorKind;
 use rustc_type_ir::RustIr;
+use rustc_type_ir::solve::AdtDestructorKind;
 use tracing::{debug, info, trace};
 
 use super::{
@@ -202,8 +202,6 @@ impl<'tcx> AdtDef<'tcx> {
 }
 
 impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
-    type Ir = TyCtxt<'tcx>;
-
     fn def_id(&self) -> DefId {
         self.did()
     }
@@ -212,12 +210,17 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
         (*self).is_struct()
     }
 
-    fn struct_tail_ty(self, cx: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
-        Some(cx.interner().type_of(self.non_enum_variant().tail_opt()?.did))
-    }
-
     fn is_phantom_data(&self) -> bool {
         (*self).is_phantom_data()
+    }
+    fn is_fundamental(&self) -> bool {
+        (*self).is_fundamental()
+    }
+}
+
+impl<'tcx> rustc_type_ir::inherent::IrAdtDef<TyCtxt<'tcx>, TyCtxt<'tcx>> for AdtDef<'tcx> {
+    fn struct_tail_ty(self, cx: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
+        Some(cx.interner().type_of(self.non_enum_variant().tail_opt()?.did))
     }
 
     fn all_field_tys(
@@ -233,11 +236,7 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
         self.sized_constraint(tcx)
     }
 
-    fn is_fundamental(&self) -> bool {
-        (*self).is_fundamental()
-    }
-
-    fn destructor<Ir: RustIr<Interner = Self::Interner>>(self, tcx: Ir) -> Option<AdtDestructorKind> {
+    fn destructor(self, tcx: TyCtxt<'tcx>) -> Option<AdtDestructorKind> {
         Some(match self.destructor(tcx)?.constness {
             hir::Constness::Const => AdtDestructorKind::Const,
             hir::Constness::NotConst => AdtDestructorKind::NotConst,
