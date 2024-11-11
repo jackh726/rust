@@ -2,7 +2,7 @@
 //! `T: const Trait` or `T: ~const Trait`.
 
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 use rustc_type_ir::{self as ty, Interner, elaborate};
 use tracing::instrument;
@@ -46,7 +46,7 @@ where
             if host_clause.def_id() == goal.predicate.def_id()
                 && host_clause.constness().satisfies(goal.predicate.constness)
             {
-                if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx()).args_may_unify(
+                if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx().interner()).args_may_unify(
                     goal.predicate.trait_ref.args.clone(),
                     host_clause.clone().skip_binder().trait_ref.args,
                 ) {
@@ -81,7 +81,7 @@ where
         goal: &Goal<I, Self>,
         alias_ty: ty::AliasTy<I>,
     ) -> Vec<Candidate<I>> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         let mut candidates = vec![];
 
         if !ecx.cx().alias_has_const_conditions(alias_ty.def_id) {
@@ -125,10 +125,10 @@ where
         goal: Goal<I, Self>,
         impl_def_id: <I as Interner>::DefId,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
 
         let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
-        if !DeepRejectCtxt::relate_rigid_infer(ecx.cx()).args_may_unify(
+        if !DeepRejectCtxt::relate_rigid_infer(cx).args_may_unify(
             goal.predicate.trait_ref.args.clone(),
             impl_trait_ref.clone().skip_binder().args,
         ) {

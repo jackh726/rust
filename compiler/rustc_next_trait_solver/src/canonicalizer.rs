@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use rustc_type_ir::data_structures::HashMap;
 use rustc_type_ir::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::visit::TypeVisitableExt;
 use rustc_type_ir::{
     self as ty, Canonical, CanonicalTyVarKind, CanonicalVarInfo, CanonicalVarKind, InferCtxtLike,
@@ -145,7 +145,7 @@ impl<'a, D: SolverDelegate<Interner = I>, I: Interner> Canonicalizer<'a, D, I> {
                     .max()
                     .unwrap_or(ty::UniverseIndex::ROOT);
 
-                let var_infos = self.delegate.cx().mk_canonical_var_infos(&var_infos);
+                let var_infos = self.delegate.cx().interner().mk_canonical_var_infos(&var_infos);
                 return (max_universe, var_infos);
             }
         }
@@ -249,7 +249,7 @@ impl<'a, D: SolverDelegate<Interner = I>, I: Interner> Canonicalizer<'a, D, I> {
             }
         }
 
-        let var_infos = self.delegate.cx().mk_canonical_var_infos(&var_infos);
+        let var_infos = self.delegate.cx().interner().mk_canonical_var_infos(&var_infos);
         (curr_compressed_uv, var_infos)
     }
 
@@ -340,7 +340,7 @@ impl<'a, D: SolverDelegate<Interner = I>, I: Interner> Canonicalizer<'a, D, I> {
 
 impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I> for Canonicalizer<'_, D, I> {
     fn cx(&self) -> I {
-        self.delegate.cx()
+        self.delegate.cx().interner()
     }
 
     fn fold_binder<T>(&mut self, t: ty::Binder<I, T>) -> ty::Binder<I, T>

@@ -108,7 +108,9 @@ pub fn simplify_type<I: Interner>(
     cx: I,
     ty: I::Ty,
     treat_params: TreatParams,
-) -> Option<SimplifiedType<I::DefId>> {
+) -> Option<SimplifiedType<I::DefId>>
+//where <I::AdtDef as AdtDef>::Ir: RustIr<Interner = I>
+{
     match ty.clone().kind() {
         ty::Bool => Some(SimplifiedType::Bool),
         ty::Char => Some(SimplifiedType::Char),

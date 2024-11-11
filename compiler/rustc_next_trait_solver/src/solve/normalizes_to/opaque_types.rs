@@ -4,7 +4,7 @@
 
 use rustc_index::bit_set::GrowableBitSet;
 use rustc_type_ir::inherent::*;
-use rustc_type_ir::{self as ty, Interner, TypingMode};
+use rustc_type_ir::{self as ty, Interner, TypingMode, RustIr};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::{Certainty, EvalCtxt, Goal, NoSolution, QueryResult, inspect};
@@ -18,7 +18,7 @@ where
         &mut self,
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let opaque_ty = goal.predicate.alias;
         let expected = goal.predicate.term.as_type().expect("no such thing as an opaque const");
 
@@ -44,7 +44,7 @@ where
                 }
 
                 // FIXME: This may have issues when the args contain aliases...
-                match uses_unique_placeholders_ignoring_regions(self.cx(), opaque_ty.args.clone()) {
+                match uses_unique_placeholders_ignoring_regions(self.cx().interner(), opaque_ty.args.clone()) {
                     Err(NotUniqueParam::NotParam(param)) if param.is_non_region_infer() => {
                         return self.evaluate_added_goals_and_make_canonical_response(
                             Certainty::AMBIGUOUS,

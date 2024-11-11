@@ -5,7 +5,7 @@
 //! 2. equate the self type, and
 //! 3. instantiate and register where clauses.
 
-use rustc_type_ir::{self as ty, Interner};
+use rustc_type_ir::{self as ty, Interner, RustIr};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::{Certainty, EvalCtxt, Goal, GoalSource, QueryResult};
@@ -19,7 +19,7 @@ where
         &mut self,
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let inherent = goal.predicate.alias.clone().expect_ty(cx);
 
         let impl_def_id = cx.parent(inherent.def_id);

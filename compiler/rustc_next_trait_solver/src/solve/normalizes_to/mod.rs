@@ -6,7 +6,7 @@ mod weak_types;
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
-use rustc_type_ir::{self as ty, Interner, NormalizesTo, TypingMode, Upcast as _};
+use rustc_type_ir::{self as ty, Interner, NormalizesTo, TypingMode, Upcast as _, RustIr};
 use tracing::instrument;
 
 use crate::delegate::SolverDelegate;
@@ -63,7 +63,7 @@ where
         param_env: I::ParamEnv,
         rigid_alias: ty::AliasTerm<I>,
     ) -> Result<(), NoSolution> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         match rigid_alias.clone().kind(cx) {
             // Projections are rigid only if their trait ref holds,
             // and the GAT where-clauses hold.
@@ -101,7 +101,7 @@ where
     /// returns `NoSolution`.
     #[instrument(level = "trace", skip(self), ret)]
     fn normalize_at_least_one_step(&mut self, goal: Goal<I, NormalizesTo<I>>) -> QueryResult<I> {
-        match goal.predicate.alias.clone().kind(self.cx()) {
+        match goal.predicate.alias.clone().kind(self.cx().interner()) {
             ty::AliasTermKind::ProjectionTy | ty::AliasTermKind::ProjectionConst => {
                 let candidates = self.assemble_and_evaluate_candidates(goal);
                 self.merge_candidates(candidates)
@@ -158,8 +158,8 @@ where
     ) -> Result<Candidate<I>, NoSolution> {
         if let Some(projection_pred) = assumption.as_projection_clause() {
             if projection_pred.projection_def_id() == goal.predicate.clone().def_id() {
-                let cx = ecx.cx();
-                if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx()).args_may_unify(
+                let cx = ecx.cx().interner();
+                if !DeepRejectCtxt::relate_rigid_rigid(cx).args_may_unify(
                     goal.predicate.alias.args.clone(),
                     projection_pred.clone().skip_binder().projection_term.args,
                 ) {
@@ -211,11 +211,11 @@ where
         goal: Goal<I, NormalizesTo<I>>,
         impl_def_id: I::DefId,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
 
         let goal_trait_ref = goal.predicate.alias.clone().trait_ref(cx);
         let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
-        if !DeepRejectCtxt::relate_rigid_infer(ecx.cx()).args_may_unify(
+        if !DeepRejectCtxt::relate_rigid_infer(ecx.cx().interner()).args_may_unify(
             goal.predicate.alias.clone().trait_ref(cx).args,
             impl_trait_ref.clone().skip_binder().args,
         ) {
@@ -343,7 +343,7 @@ where
         ecx: &mut EvalCtxt<'_, D>,
         _goal: Goal<I, Self>,
     ) -> Result<Candidate<I>, NoSolution> {
-        ecx.cx().delay_bug("associated types not allowed on auto traits");
+        ecx.cx().interner().delay_bug("associated types not allowed on auto traits");
         Err(NoSolution)
     }
 
@@ -380,7 +380,7 @@ where
         goal: Goal<I, Self>,
         goal_kind: ty::ClosureKind,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         let tupled_inputs_and_output =
             match structural_traits::extract_tupled_inputs_and_output_from_callable(
                 cx,
@@ -423,7 +423,7 @@ where
         goal: Goal<I, Self>,
         goal_kind: ty::ClosureKind,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
 
         let env_region = match goal_kind {
             ty::ClosureKind::Fn | ty::ClosureKind::FnMut => {
@@ -543,7 +543,7 @@ where
         }
 
         let upvars_ty = ty::CoroutineClosureSignature::tupled_upvars_by_closure_kind(
-            ecx.cx(),
+            ecx.cx().interner(),
             goal_kind,
             tupled_inputs_ty.expect_ty(),
             tupled_upvars_ty.expect_ty(),
@@ -568,7 +568,7 @@ where
         ecx: &mut EvalCtxt<'_, D>,
         goal: Goal<I, Self>,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         let metadata_def_id = cx.require_lang_item(TraitSolverLangItem::Metadata);
         assert_eq!(metadata_def_id, goal.predicate.def_id());
         ecx.probe_builtin_trait_candidate(BuiltinImplSource::Misc).enter(|ecx| {
@@ -617,7 +617,7 @@ where
                     Ty::new_unit(cx)
                 }
 
-                ty::Adt(def, args) if def.is_struct() => match def.struct_tail_ty(cx) {
+                ty::Adt(def, args) if def.is_struct() => match def.struct_tail_ty(ecx.cx()) {
                     None => Ty::new_unit(cx),
                     Some(tail_ty) => {
                         Ty::new_projection(cx, metadata_def_id, [tail_ty.instantiate(cx, args)])
@@ -654,7 +654,7 @@ where
         };
 
         // Coroutines are not futures unless they come from `async` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_async(def_id) {
             return Err(NoSolution);
         }
@@ -667,7 +667,7 @@ where
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx(), goal_predicate_def_id, [self_ty]),
+                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [self_ty]),
                 term,
             }
             .upcast(cx),
@@ -687,7 +687,7 @@ where
         };
 
         // Coroutines are not Iterators unless they come from `gen` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_gen(def_id) {
             return Err(NoSolution);
         }
@@ -700,7 +700,7 @@ where
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx(), goal_predicate_def_id, [self_ty]),
+                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [self_ty]),
                 term,
             }
             .upcast(cx),
@@ -727,7 +727,7 @@ where
         };
 
         // Coroutines are not AsyncIterators unless they come from `gen` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_async_gen(def_id) {
             return Err(NoSolution);
         }
@@ -763,7 +763,7 @@ where
         };
 
         // `async`-desugared coroutines do not implement the coroutine trait
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.is_general_coroutine(def_id) {
             return Err(NoSolution);
         }
@@ -785,7 +785,7 @@ where
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::ProjectionPredicate {
-                projection_term: ty::AliasTerm::new(ecx.cx(), goal_predicate_def_id, [
+                projection_term: ty::AliasTerm::new(ecx.cx().interner(), goal_predicate_def_id, [
                     self_ty,
                     coroutine.resume_ty(),
                 ]),
@@ -834,7 +834,7 @@ where
             | ty::Slice(_)
             | ty::Dynamic(_, _, _)
             | ty::Tuple(_)
-            | ty::Error(_) => self_ty.discriminant_ty(ecx.cx()),
+            | ty::Error(_) => self_ty.discriminant_ty(ecx.cx().interner()),
 
             // We do not call `Ty::discriminant_ty` on alias, param, or placeholder
             // types, which return `<self_ty as DiscriminantKind>::Discriminant`
@@ -881,7 +881,7 @@ where
             | ty::Str
             | ty::Slice(_)
             | ty::Tuple(_)
-            | ty::Error(_) => self_ty.async_destructor_ty(ecx.cx()),
+            | ty::Error(_) => self_ty.async_destructor_ty(ecx.cx().interner()),
 
             // We do not call `Ty::async_destructor_ty` on alias, param, or placeholder
             // types, which return `<self_ty as AsyncDestruct>::AsyncDestructor`
@@ -938,7 +938,7 @@ where
         impl_trait_ref: rustc_type_ir::TraitRef<I>,
         target_container_def_id: I::DefId,
     ) -> Result<I::GenericArgs, NoSolution> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         Ok(if target_container_def_id == impl_trait_ref.def_id {
             // Default value from the trait definition. No need to rebase.
             goal.predicate.alias.args

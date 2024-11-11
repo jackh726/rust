@@ -16,7 +16,7 @@
 //! relate them structurally.
 
 use rustc_type_ir::inherent::*;
-use rustc_type_ir::{self as ty, Interner};
+use rustc_type_ir::{self as ty, Interner, RustIr};
 use tracing::{instrument, trace};
 
 use crate::delegate::SolverDelegate;
@@ -32,7 +32,7 @@ where
         &mut self,
         goal: Goal<I, (I::Term, I::Term, ty::AliasRelationDirection)>,
     ) -> QueryResult<I> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let Goal { param_env, predicate: (lhs, rhs, direction) } = goal.clone();
         debug_assert!(
             lhs.clone().to_alias_term().is_some() || rhs.clone().to_alias_term().is_some()

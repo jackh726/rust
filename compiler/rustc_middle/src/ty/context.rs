@@ -49,7 +49,7 @@ use rustc_session::{Limit, MetadataKind, Session};
 use rustc_span::def_id::{CRATE_DEF_ID, DefPathHash, StableCrateId};
 use rustc_span::symbol::{Ident, Symbol, kw, sym};
 use rustc_span::{DUMMY_SP, Span};
-use rustc_type_ir::TyKind::*;
+use rustc_type_ir::{RustIr, TyKind::*};
 use rustc_type_ir::fold::TypeFoldable;
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 pub use rustc_type_ir::lift::Lift;
@@ -631,6 +631,14 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
 
     fn opaque_types_defined_by(self, defining_anchor: LocalDefId) -> Self::DefiningOpaqueTypes {
         self.opaque_types_defined_by(defining_anchor)
+    }
+}
+
+impl<'tcx> RustIr for TyCtxt<'tcx> {
+    type Interner = Self;
+
+    fn interner(self) -> Self::Interner {
+        self
     }
 }
 

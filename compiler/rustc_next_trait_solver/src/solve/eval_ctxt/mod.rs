@@ -6,7 +6,7 @@ use rustc_macros::{HashStable_NoContext, TyDecodable, TyEncodable};
 use rustc_type_ir::data_structures::{HashMap, HashSet, ensure_sufficient_stack};
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
 use rustc_type_ir::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::relate::Relate;
 use rustc_type_ir::relate::solver_relating::RelateExt;
 use rustc_type_ir::visit::{TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor};
@@ -26,9 +26,9 @@ use crate::solve::{
 pub(super) mod canonical;
 mod probe;
 
-pub struct EvalCtxt<'a, D, I = <D as SolverDelegate>::Interner>
+pub struct EvalCtxt<'a, D, Ir = <D as SolverDelegate>::Ir, I = <D as SolverDelegate>::Interner>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
     I: Interner,
 {
     /// The inference context that backs (mostly) inference and placeholder terms
@@ -175,7 +175,7 @@ where
         goal: Goal<I, I::Predicate>,
         generate_proof_tree: GenerateProofTree,
     ) -> (Result<(HasChanged, Certainty), NoSolution>, Option<inspect::GoalEvaluation<I>>) {
-        EvalCtxt::enter_root(self, self.cx().recursion_limit(), generate_proof_tree, |ecx| {
+        EvalCtxt::enter_root(self, self.cx().interner().recursion_limit(), generate_proof_tree, |ecx| {
             ecx.evaluate_goal(GoalEvaluationKind::Root, GoalSource::Misc, goal)
         })
     }
@@ -203,7 +203,7 @@ where
         Result<(NestedNormalizationGoals<I>, HasChanged, Certainty), NoSolution>,
         Option<inspect::GoalEvaluation<I>>,
     ) {
-        EvalCtxt::enter_root(self, self.cx().recursion_limit(), generate_proof_tree, |ecx| {
+        EvalCtxt::enter_root(self, self.cx().interner().recursion_limit(), generate_proof_tree, |ecx| {
             ecx.evaluate_goal_raw(GoalEvaluationKind::Root, GoalSource::Misc, goal)
         })
     }
@@ -243,6 +243,7 @@ where
             // which we don't do within this evaluation context.
             predefined_opaques_in_body: delegate
                 .cx()
+                .interner()
                 .mk_predefined_opaques_in_body(PredefinedOpaquesData::default()),
             max_input_universe: ty::UniverseIndex::ROOT,
             variables: Default::default(),
@@ -396,7 +397,7 @@ where
         let mut goal_evaluation =
             self.inspect.new_goal_evaluation(goal.clone(), &orig_values, goal_evaluation_kind);
         let canonical_response = EvalCtxt::evaluate_canonical_goal(
-            self.cx(),
+            self.cx().interner(),
             self.search_graph,
             canonical_goal,
             &mut goal_evaluation,
@@ -492,7 +493,7 @@ where
             }
         } else {
             self.enter_forall(kind, |ecx, kind| {
-                let goal = goal.clone().with(ecx.cx(), ty::Binder::dummy(kind));
+                let goal = goal.clone().with(ecx.cx().interner(), ty::Binder::dummy(kind));
                 ecx.add_goal(GoalSource::InstantiateHigherRanked, goal);
                 ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
             })
@@ -531,7 +532,7 @@ where
     ///
     /// Goals for the next step get directly added to the nested goals of the `EvalCtxt`.
     fn evaluate_added_goals_step(&mut self) -> Result<Option<Certainty>, NoSolution> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let mut goals = core::mem::take(&mut self.nested_goals);
 
         // If this loop did not result in any progress, what's our final certainty.
@@ -616,7 +617,7 @@ where
         self.inspect.record_impl_args(self.delegate, self.max_input_universe, impl_args)
     }
 
-    pub(super) fn cx(&self) -> I {
+    pub(super) fn cx(&self) -> D::Ir {
         self.delegate.cx()
     }
 
@@ -807,7 +808,7 @@ where
         // NOTE: this check is purely an optimization, the structural eq would
         // always fail if the term is not an inference variable.
         if term.is_infer() {
-            let cx = self.cx();
+            let cx = self.cx().interner();
             // We need to relate `alias` to `term` treating only the outermost
             // constructor as rigid, relating any contained generic arguments as
             // normal. We do this by first structurally equating the `term`
@@ -994,7 +995,7 @@ where
             self.delegate.clone_opaque_types_for_query_response().into_iter().filter(
                 |(candidate_key, _)| {
                     candidate_key.def_id == key.def_id
-                        && DeepRejectCtxt::relate_rigid_rigid(self.cx())
+                        && DeepRejectCtxt::relate_rigid_rigid(self.cx().interner())
                             .args_may_unify(candidate_key.args.clone(), key.args.clone())
                 },
             );
@@ -1059,7 +1060,7 @@ where
     I: Interner,
 {
     fn cx(&self) -> I {
-        self.ecx.cx()
+        self.ecx.cx().interner()
     }
 
     fn fold_ty(&mut self, ty: I::Ty) -> I::Ty {

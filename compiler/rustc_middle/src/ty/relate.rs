@@ -1,6 +1,7 @@
 use std::iter;
 
 pub use rustc_type_ir::relate::*;
+use rustc_type_ir::RustIr;
 
 use crate::ty::error::{ExpectedFound, TypeError};
 use crate::ty::predicate::ExistentialPredicateStableCmpExt as _;
@@ -10,7 +11,7 @@ pub type RelateResult<'tcx, T> = rustc_type_ir::relate::RelateResult<TyCtxt<'tcx
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::ImplSubject<'tcx> {
     #[inline]
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: ty::ImplSubject<'tcx>,
         b: ty::ImplSubject<'tcx>,
@@ -34,7 +35,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::ImplSubject<'tcx> {
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for Ty<'tcx> {
     #[inline]
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: Ty<'tcx>,
         b: Ty<'tcx>,
@@ -45,7 +46,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for Ty<'tcx> {
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Pattern<'tcx> {
     #[inline]
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: Self,
         b: Self,
@@ -67,19 +68,19 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Pattern<'tcx> {
                 if inc_a != inc_b {
                     todo!()
                 }
-                Ok(relation.cx().mk_pat(ty::PatternKind::Range { start, end, include_end: inc_a }))
+                Ok(relation.cx().interner().mk_pat(ty::PatternKind::Range { start, end, include_end: inc_a }))
             }
         }
     }
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for &'tcx ty::List<ty::PolyExistentialPredicate<'tcx>> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: Self,
         b: Self,
     ) -> RelateResult<'tcx, Self> {
-        let tcx = relation.cx();
+        let tcx = relation.cx().interner();
 
         // FIXME: this is wasteful, but want to do a perf run to see how slow it is.
         // We need to perform this deduplication as we sometimes generate duplicate projections
@@ -120,7 +121,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for &'tcx ty::List<ty::PolyExistentialPredicate<
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::GenericArgsRef<'tcx> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: ty::GenericArgsRef<'tcx>,
         b: ty::GenericArgsRef<'tcx>,
@@ -130,7 +131,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::GenericArgsRef<'tcx> {
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Region<'tcx> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: ty::Region<'tcx>,
         b: ty::Region<'tcx>,
@@ -140,7 +141,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Region<'tcx> {
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Const<'tcx> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: ty::Const<'tcx>,
         b: ty::Const<'tcx>,
@@ -150,7 +151,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Const<'tcx> {
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Expr<'tcx> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         ae: ty::Expr<'tcx>,
         be: ty::Expr<'tcx>,
@@ -175,7 +176,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Expr<'tcx> {
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::GenericArg<'tcx> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: ty::GenericArg<'tcx>,
         b: ty::GenericArg<'tcx>,
@@ -196,7 +197,7 @@ impl<'tcx> Relate<TyCtxt<'tcx>> for ty::GenericArg<'tcx> {
 }
 
 impl<'tcx> Relate<TyCtxt<'tcx>> for ty::Term<'tcx> {
-    fn relate<R: TypeRelation<TyCtxt<'tcx>>>(
+    fn relate<R: TypeRelation<I = TyCtxt<'tcx>>>(
         relation: &mut R,
         a: Self,
         b: Self,

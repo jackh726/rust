@@ -3,7 +3,7 @@
 use rustc_ast_ir::Movability;
 use rustc_type_ir::data_structures::IndexSet;
 use rustc_type_ir::fast_reject::DeepRejectCtxt;
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 use rustc_type_ir::visit::TypeVisitableExt as _;
 use rustc_type_ir::{self as ty, Interner, TraitPredicate, TypingMode, Upcast as _, elaborate};
@@ -52,10 +52,10 @@ where
         goal: Goal<I, TraitPredicate<I>>,
         impl_def_id: I::DefId,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
 
         let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
-        if !DeepRejectCtxt::relate_rigid_infer(ecx.cx()).args_may_unify(
+        if !DeepRejectCtxt::relate_rigid_infer(cx).args_may_unify(
             goal.predicate.trait_ref.args.clone(),
             impl_trait_ref.clone().skip_binder().args,
         ) {
@@ -132,7 +132,7 @@ where
             if trait_clause.clone().def_id() == goal.predicate.clone().def_id()
                 && trait_clause.clone().polarity() == goal.predicate.polarity
             {
-                if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx()).args_may_unify(
+                if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx().interner()).args_may_unify(
                     goal.predicate.trait_ref.args.clone(),
                     trait_clause.clone().skip_binder().trait_ref.args,
                 ) {
@@ -206,7 +206,7 @@ where
             return Err(NoSolution);
         }
 
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
 
         ecx.probe_builtin_trait_candidate(BuiltinImplSource::Misc).enter(|ecx| {
             let nested_obligations = cx
@@ -289,7 +289,7 @@ where
             return Err(NoSolution);
         }
 
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         let tupled_inputs_and_output =
             match structural_traits::extract_tupled_inputs_and_output_from_callable(
                 cx,
@@ -334,7 +334,7 @@ where
             return Err(NoSolution);
         }
 
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         let (tupled_inputs_and_output_and_coroutine, nested_preds) =
             structural_traits::extract_tupled_inputs_and_output_from_async_callable(
                 cx,
@@ -442,7 +442,7 @@ where
         };
 
         // Coroutines are not futures unless they come from `async` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_async(def_id) {
             return Err(NoSolution);
         }
@@ -467,7 +467,7 @@ where
         };
 
         // Coroutines are not iterators unless they come from `gen` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_gen(def_id) {
             return Err(NoSolution);
         }
@@ -492,7 +492,7 @@ where
         };
 
         // Coroutines are not iterators unless they come from `gen` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_gen(def_id) {
             return Err(NoSolution);
         }
@@ -515,7 +515,7 @@ where
         };
 
         // Coroutines are not iterators unless they come from `gen` desugaring
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.coroutine_is_async_gen(def_id) {
             return Err(NoSolution);
         }
@@ -541,7 +541,7 @@ where
         };
 
         // `async`-desugared coroutines do not implement the coroutine trait
-        let cx = ecx.cx();
+        let cx = ecx.cx().interner();
         if !cx.is_general_coroutine(def_id) {
             return Err(NoSolution);
         }
@@ -660,7 +660,7 @@ where
                 return vec![];
             };
 
-            let goal = goal.clone().with(ecx.cx(), (a_ty.clone(), b_ty.clone()));
+            let goal = goal.clone().with(ecx.cx().interner(), (a_ty.clone(), b_ty.clone()));
             match (a_ty.clone().kind(), b_ty.clone().kind()) {
                 (ty::Infer(ty::TyVar(..)), ..) => panic!("unexpected infer {a_ty:?} {b_ty:?}"),
 
@@ -708,9 +708,10 @@ where
     }
 }
 
-impl<D, I> EvalCtxt<'_, D>
+impl<D, Ir, I> EvalCtxt<'_, D>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
 {
     /// Trait upcasting allows for coercions between trait objects:
@@ -730,7 +731,7 @@ where
         b_data: I::BoundExistentialPredicates,
         b_region: I::Region,
     ) -> Vec<Candidate<I>> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let Goal { predicate: (a_ty, _b_ty), .. } = goal;
 
         let mut responses = vec![];
@@ -749,7 +750,7 @@ where
             ));
         } else if let Some(a_principal) = a_data.clone().principal() {
             for new_a_principal in
-                elaborate::supertraits(self.cx(), a_principal.with_self_ty(cx, a_ty)).skip(1)
+                elaborate::supertraits(self.cx().interner(), a_principal.with_self_ty(cx, a_ty)).skip(1)
             {
                 responses.extend(self.consider_builtin_upcast_to_principal(
                     &goal.param_env,
@@ -774,7 +775,7 @@ where
         b_data: I::BoundExistentialPredicates,
         b_region: I::Region,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let Goal { predicate: (a_ty, _), .. } = goal.clone();
 
         // Can only unsize to an dyn-compatible trait.
@@ -834,8 +835,8 @@ where
             .auto_traits()
             .into_iter()
             .chain(a_data.clone().principal_def_id().into_iter().flat_map(|principal_def_id| {
-                elaborate::supertrait_def_ids(self.cx(), principal_def_id)
-                    .filter(|def_id| self.cx().trait_is_auto(*def_id))
+                elaborate::supertrait_def_ids(self.cx().interner(), principal_def_id)
+                    .filter(|def_id| self.cx().interner().trait_is_auto(*def_id))
             }))
             .collect();
 
@@ -920,7 +921,7 @@ where
             // Also require that a_ty's lifetime outlives b_ty's lifetime.
             ecx.add_goal(
                 GoalSource::ImplWhereBound,
-                Goal::new(ecx.cx(), param_env.clone(), ty::OutlivesPredicate(a_region, b_region)),
+                Goal::new(ecx.cx().interner(), param_env.clone(), ty::OutlivesPredicate(a_region, b_region)),
             );
 
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
@@ -966,7 +967,7 @@ where
         a_args: I::GenericArgs,
         b_args: I::GenericArgs,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let Goal { predicate: (_a_ty, b_ty), .. } = goal.clone();
 
         let unsizing_params = cx.unsizing_params_for_adt(def.def_id());
@@ -976,7 +977,7 @@ where
             return Err(NoSolution);
         }
 
-        let tail_field_ty = def.clone().struct_tail_ty(cx).unwrap();
+        let tail_field_ty = def.clone().struct_tail_ty(self.cx()).unwrap();
 
         let a_tail_ty = tail_field_ty.clone().instantiate(cx, a_args.clone());
         let b_tail_ty = tail_field_ty.instantiate(cx, b_args.clone());
@@ -1021,7 +1022,7 @@ where
         a_tys: I::Tys,
         b_tys: I::Tys,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let Goal { predicate: (_a_ty, b_ty), .. } = goal.clone();
 
         let (a_last_ty, a_rest_tys) = a_tys.split_last().unwrap();
@@ -1082,9 +1083,10 @@ where
             ty::Coroutine(def_id, _)
                 if self
                     .cx()
+                    .interner()
                     .is_lang_item(goal.predicate.clone().def_id(), TraitSolverLangItem::Unpin) =>
             {
-                match self.cx().coroutine_movability(def_id) {
+                match self.cx().interner().coroutine_movability(def_id) {
                     Movability::Static => Some(Err(NoSolution)),
                     Movability::Movable => Some(
                         self.probe_builtin_trait_candidate(BuiltinImplSource::Misc).enter(|ecx| {
@@ -1129,7 +1131,7 @@ where
             | ty::Tuple(_)
             | ty::Adt(_, _) => {
                 let mut disqualifying_impl = None;
-                self.cx().for_each_relevant_impl(
+                self.cx().interner().for_each_relevant_impl(
                     goal.predicate.clone().def_id(),
                     goal.predicate.clone().self_ty(),
                     |impl_def_id| {
@@ -1168,7 +1170,7 @@ where
                 .map(|ty| {
                     ecx.enter_forall(ty, |ecx, ty| {
                         goal.clone()
-                            .with_predicate(ecx.cx(), |pred| pred.with_self_ty(ecx.cx(), ty))
+                            .with_predicate(ecx.cx().interner(), |pred| pred.with_self_ty(ecx.cx().interner(), ty))
                     })
                 })
                 .collect::<Vec<_>>();

@@ -1,4 +1,4 @@
-use rustc_type_ir::{self as ty, Interner, ProjectionPredicate};
+use rustc_type_ir::{self as ty, Interner, ProjectionPredicate, RustIr};
 use tracing::instrument;
 
 use crate::delegate::SolverDelegate;
@@ -14,7 +14,7 @@ where
         &mut self,
         goal: Goal<I, ProjectionPredicate<I>>,
     ) -> QueryResult<I> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let projection_term = goal.predicate.projection_term.clone().to_term(cx);
         let goal = goal.clone().with(
             cx,

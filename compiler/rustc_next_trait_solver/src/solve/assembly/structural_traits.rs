@@ -5,7 +5,7 @@ use derive_where::derive_where;
 use rustc_ast_ir::{Movability, Mutability};
 use rustc_type_ir::data_structures::HashMap;
 use rustc_type_ir::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 use rustc_type_ir::{self as ty, Interner, Upcast as _, elaborate};
 use rustc_type_ir_macros::{TypeFoldable_Generic, TypeVisitable_Generic};
@@ -24,7 +24,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    let cx = ecx.cx();
+    let cx = ecx.cx().interner();
     match ty.clone().kind() {
         ty::Uint(_)
         | ty::Int(_)
@@ -78,6 +78,7 @@ where
 
         ty::CoroutineWitness(def_id, args) => Ok(ecx
             .cx()
+            .interner()
             .bound_coroutine_hidden_types(def_id)
             .into_iter()
             .map(|bty| bty.instantiate(cx, args.clone()))
@@ -87,7 +88,7 @@ where
         ty::Adt(def, args) if def.is_phantom_data() => Ok(vec![ty::Binder::dummy(args.type_at(0))]),
 
         ty::Adt(def, args) => {
-            Ok(def.all_field_tys(cx).iter_instantiated(cx, args).map(ty::Binder::dummy).collect())
+            Ok(def.all_field_tys(ecx.cx()).iter_instantiated(cx, args).map(ty::Binder::dummy).collect())
         }
 
         ty::Alias(ty::Opaque, ty::AliasTy { def_id, args, .. }) => {
@@ -159,7 +160,7 @@ where
         //   if the ADT is sized for all possible args.
         ty::Adt(def, args) => {
             if let Some(sized_crit) = def.sized_constraint(ecx.cx()) {
-                Ok(vec![ty::Binder::dummy(sized_crit.instantiate(ecx.cx(), args))])
+                Ok(vec![ty::Binder::dummy(sized_crit.instantiate(ecx.cx().interner(), args))])
             } else {
                 Ok(vec![])
             }
@@ -224,10 +225,10 @@ where
 
         // only when `coroutine_clone` is enabled and the coroutine is movable
         // impl Copy/Clone for Coroutine where T: Copy/Clone forall T in (upvars, witnesses)
-        ty::Coroutine(def_id, args) => match ecx.cx().coroutine_movability(def_id) {
+        ty::Coroutine(def_id, args) => match ecx.cx().interner().coroutine_movability(def_id) {
             Movability::Static => Err(NoSolution),
             Movability::Movable => {
-                if ecx.cx().features().coroutine_clone() {
+                if ecx.cx().interner().features().coroutine_clone() {
                     let coroutine = args.as_coroutine();
                     Ok(vec![
                         ty::Binder::dummy(coroutine.clone().tupled_upvars_ty()),
@@ -242,9 +243,10 @@ where
         // impl Copy/Clone for CoroutineWitness where T: Copy/Clone forall T in coroutine_hidden_types
         ty::CoroutineWitness(def_id, args) => Ok(ecx
             .cx()
+            .interner()
             .bound_coroutine_hidden_types(def_id)
             .into_iter()
-            .map(|bty| bty.instantiate(ecx.cx(), args.clone()))
+            .map(|bty| bty.instantiate(ecx.cx().interner(), args.clone()))
             .collect()),
     }
 }
@@ -848,7 +850,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    let cx = ecx.cx();
+    let cx = ecx.cx().interner();
     let mut requirements = vec![];
     // Elaborating all supertrait outlives obligations here is not soundness critical,
     // since if we just used the unelaborated set, then the transitive supertraits would
@@ -923,7 +925,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I>
     for ReplaceProjectionWith<'_, D, I>
 {
     fn cx(&self) -> I {
-        self.ecx.cx()
+        self.ecx.cx().interner()
     }
 
     fn fold_ty(&mut self, ty: I::Ty) -> I::Ty {
@@ -939,7 +941,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I>
                         .eq_and_get_goals(
                             self.param_env.clone(),
                             alias_ty,
-                            proj.projection_term.expect_ty(self.ecx.cx()),
+                            proj.projection_term.expect_ty(self.ecx.cx().interner()),
                         )
                         .expect(
                             "expected to be able to unify goal projection with dyn's projection",

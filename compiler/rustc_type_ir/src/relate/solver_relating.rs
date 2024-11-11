@@ -5,6 +5,7 @@ use tracing::{debug, instrument};
 
 use self::combine::{PredicateEmittingRelation, super_combine_consts, super_combine_tys};
 use crate::data_structures::DelayedSet;
+use crate::RustIr;
 
 pub trait RelateExt: InferCtxtLike {
     fn relate<T: Relate<Self::Interner>>(
@@ -63,14 +64,14 @@ impl<Infcx: InferCtxtLike> RelateExt for Infcx {
 }
 
 /// Enforce that `a` is equal to or a subtype of `b`.
-pub struct SolverRelating<'infcx, Infcx, I: Interner> {
+pub struct SolverRelating<'infcx, Infcx, Ir: RustIr> {
     infcx: &'infcx Infcx,
     // Immutable fields.
     structurally_relate_aliases: StructurallyRelateAliases,
-    param_env: I::ParamEnv,
+    param_env: <Ir::Interner as Interner>::ParamEnv,
     // Mutable fields.
     ambient_variance: ty::Variance,
-    goals: Vec<Goal<I, I::Predicate>>,
+    goals: Vec<Goal<Ir::Interner, <Ir::Interner as Interner>::Predicate>>,
     /// The cache only tracks the `ambient_variance` as it's the
     /// only field which is mutable and which meaningfully changes
     /// the result when relating types.
@@ -93,19 +94,19 @@ pub struct SolverRelating<'infcx, Infcx, I: Interner> {
     /// constrain `?1` to `u32`. When using the cache entry from the
     /// first time we've related these types, this only happens when
     /// later proving the `Subtype(?0, ?1)` goal from the first relation.
-    cache: DelayedSet<(ty::Variance, I::Ty, I::Ty)>,
+    cache: DelayedSet<(ty::Variance, <Ir::Interner as Interner>::Ty, <Ir::Interner as Interner>::Ty)>,
 }
 
-impl<'infcx, Infcx, I> SolverRelating<'infcx, Infcx, I>
+impl<'infcx, Infcx, Ir> SolverRelating<'infcx, Infcx, Ir>
 where
-    Infcx: InferCtxtLike<Interner = I>,
-    I: Interner,
+    Infcx: InferCtxtLike<Ir = Ir>,
+    Ir: RustIr,
 {
     pub fn new(
         infcx: &'infcx Infcx,
         structurally_relate_aliases: StructurallyRelateAliases,
         ambient_variance: ty::Variance,
-        param_env: I::ParamEnv,
+        param_env: <Ir::Interner as Interner>::ParamEnv,
     ) -> Self {
         SolverRelating {
             infcx,
@@ -118,40 +119,43 @@ where
     }
 }
 
-impl<Infcx, I> TypeRelation<I> for SolverRelating<'_, Infcx, I>
+impl<Infcx, Ir> TypeRelation for SolverRelating<'_, Infcx, Ir>
 where
-    Infcx: InferCtxtLike<Interner = I>,
-    I: Interner,
+    Infcx: InferCtxtLike<Ir = Ir, Interner = Ir::Interner>,
+    Ir: RustIr,
 {
-    fn cx(&self) -> I {
+    type I = Ir::Interner;
+    type Ir = Ir;
+
+    fn cx(&self) -> Ir {
         self.infcx.cx()
     }
 
     fn relate_item_args(
         &mut self,
-        item_def_id: I::DefId,
-        a_arg: I::GenericArgs,
-        b_arg: I::GenericArgs,
-    ) -> RelateResult<I, I::GenericArgs> {
+        item_def_id: <Ir::Interner as Interner>::DefId,
+        a_arg: <Ir::Interner as Interner>::GenericArgs,
+        b_arg: <Ir::Interner as Interner>::GenericArgs,
+    ) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::GenericArgs> {
         if self.ambient_variance == ty::Invariant {
             // Avoid fetching the variance if we are in an invariant
             // context; no need, and it can induce dependency cycles
             // (e.g., #41849).
             relate_args_invariantly(self, a_arg, b_arg)
         } else {
-            let tcx = self.cx();
+            let tcx = self.cx().interner();
             let opt_variances = tcx.variances_of(item_def_id);
             relate_args_with_variances(self, item_def_id, opt_variances, a_arg, b_arg, false)
         }
     }
 
-    fn relate_with_variance<T: Relate<I>>(
+    fn relate_with_variance<T: Relate<Ir::Interner>>(
         &mut self,
         variance: ty::Variance,
-        _info: VarianceDiagInfo<I>,
+        _info: VarianceDiagInfo<Ir::Interner>,
         a: T,
         b: T,
-    ) -> RelateResult<I, T> {
+    ) -> RelateResult<Ir::Interner, T> {
         let old_ambient_variance = self.ambient_variance;
         self.ambient_variance = self.ambient_variance.xform(variance);
         debug!(?self.ambient_variance, "new ambient variance");
@@ -163,7 +167,9 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    fn tys(&mut self, a: I::Ty, b: I::Ty) -> RelateResult<I, I::Ty> {
+    fn tys(&mut self, a: <Ir::Interner as Interner>::Ty, b: <Ir::Interner as Interner>::Ty) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Ty> {
+        let cx = self.cx().interner();
+
         if a == b {
             return Ok(a);
         }
@@ -183,7 +189,7 @@ where
                         // can't make progress on `A <: B` if both A and B are
                         // type variables, so record an obligation.
                         self.goals.push(Goal::new(
-                            self.cx(),
+                            cx,
                             self.param_env.clone(),
                             ty::Binder::dummy(ty::PredicateKind::Subtype(ty::SubtypePredicate {
                                 a_is_expected: true,
@@ -196,7 +202,7 @@ where
                         // can't make progress on `B <: A` if both A and B are
                         // type variables, so record an obligation.
                         self.goals.push(Goal::new(
-                            self.cx(),
+                            cx,
                             self.param_env.clone(),
                             ty::Binder::dummy(ty::PredicateKind::Subtype(ty::SubtypePredicate {
                                 a_is_expected: false,
@@ -244,7 +250,7 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    fn regions(&mut self, a: I::Region, b: I::Region) -> RelateResult<I, I::Region> {
+    fn regions(&mut self, a: <Ir::Interner as Interner>::Region, b: <Ir::Interner as Interner>::Region) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Region> {
         let a_ret = a.clone();
         match self.ambient_variance {
             // Subtype(&'a u8, &'b u8) => Outlives('a: 'b) => SubRegion('b, 'a)
@@ -261,17 +267,17 @@ where
     }
 
     #[instrument(skip(self), level = "trace")]
-    fn consts(&mut self, a: I::Const, b: I::Const) -> RelateResult<I, I::Const> {
+    fn consts(&mut self, a: <Ir::Interner as Interner>::Const, b: <Ir::Interner as Interner>::Const) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Const> {
         super_combine_consts(self.infcx, self, a, b)
     }
 
     fn binders<T>(
         &mut self,
-        a: ty::Binder<I, T>,
-        b: ty::Binder<I, T>,
-    ) -> RelateResult<I, ty::Binder<I, T>>
+        a: ty::Binder<Ir::Interner, T>,
+        b: ty::Binder<Ir::Interner, T>,
+    ) -> RelateResult<Ir::Interner, ty::Binder<Ir::Interner, T>>
     where
-        T: Relate<I>,
+        T: Relate<Ir::Interner>,
     {
         // If they're equal, then short-circuit.
         if a == b {
@@ -345,16 +351,16 @@ where
     }
 }
 
-impl<Infcx, I> PredicateEmittingRelation<Infcx> for SolverRelating<'_, Infcx, I>
+impl<Infcx, Ir> PredicateEmittingRelation<Infcx> for SolverRelating<'_, Infcx, Ir>
 where
-    Infcx: InferCtxtLike<Interner = I>,
-    I: Interner,
+    Infcx: InferCtxtLike<Ir = Ir, Interner = Ir::Interner>,
+    Ir: RustIr,
 {
-    fn span(&self) -> I::Span {
+    fn span(&self) -> <Ir::Interner as Interner>::Span {
         Span::dummy()
     }
 
-    fn param_env(&self) -> &I::ParamEnv {
+    fn param_env(&self) -> &<Ir::Interner as Interner>::ParamEnv {
         &self.param_env
     }
 
@@ -364,20 +370,20 @@ where
 
     fn register_predicates(
         &mut self,
-        obligations: impl IntoIterator<Item: ty::Upcast<I, I::Predicate>>,
+        obligations: impl IntoIterator<Item: ty::Upcast<Ir::Interner, <Ir::Interner as Interner>::Predicate>>,
     ) {
         self.goals.extend(
             obligations
                 .into_iter()
-                .map(|pred| Goal::new(self.infcx.cx(), self.param_env.clone(), pred)),
+                .map(|pred| Goal::new(self.infcx.cx().interner(), self.param_env.clone(), pred)),
         );
     }
 
-    fn register_goals(&mut self, obligations: impl IntoIterator<Item = Goal<I, I::Predicate>>) {
+    fn register_goals(&mut self, obligations: impl IntoIterator<Item = Goal<Ir::Interner, <Ir::Interner as Interner>::Predicate>>) {
         self.goals.extend(obligations);
     }
 
-    fn register_alias_relate_predicate(&mut self, a: I::Ty, b: I::Ty) {
+    fn register_alias_relate_predicate(&mut self, a: <Ir::Interner as Interner>::Ty, b: <Ir::Interner as Interner>::Ty) {
         self.register_predicates([ty::Binder::dummy(match self.ambient_variance {
             ty::Covariant => ty::PredicateKind::AliasRelate(
                 a.into(),

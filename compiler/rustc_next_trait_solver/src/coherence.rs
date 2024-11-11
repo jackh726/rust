@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::ControlFlow;
 
 use derive_where::derive_where;
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::visit::{TypeVisitable, TypeVisitableExt, TypeVisitor};
 use rustc_type_ir::{self as ty, InferCtxtLike, Interner};
 use tracing::instrument;
@@ -60,7 +60,7 @@ where
         return Ok(Err(Conflict::Downstream));
     }
 
-    if trait_ref_is_local_or_fundamental(infcx.cx(), trait_ref.clone()) {
+    if trait_ref_is_local_or_fundamental(infcx.cx().interner(), trait_ref.clone()) {
         // This is a local or fundamental trait, so future-compatibility
         // is no concern. We know that downstream/cousin crates are not
         // allowed to implement a generic parameter of this trait ref,

@@ -21,7 +21,7 @@ mod project_goals;
 mod search_graph;
 mod trait_goals;
 
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 pub use rustc_type_ir::solve::*;
 use rustc_type_ir::{self as ty, Interner};
 use tracing::instrument;
@@ -118,7 +118,7 @@ where
     }
 
     fn compute_dyn_compatible_goal(&mut self, trait_def_id: I::DefId) -> QueryResult<I> {
-        if self.cx().trait_is_dyn_compatible(trait_def_id) {
+        if self.cx().interner().trait_is_dyn_compatible(trait_def_id) {
             self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         } else {
             Err(NoSolution)
@@ -190,7 +190,7 @@ where
                 return self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes);
             }
             ty::ConstKind::Unevaluated(uv) => {
-                self.cx().type_of(uv.def).instantiate(self.cx(), uv.args)
+                self.cx().interner().type_of(uv.def).instantiate(self.cx().interner(), uv.args)
             }
             ty::ConstKind::Expr(_) => unimplemented!(
                 "`feature(generic_const_exprs)` is not supported in the new trait solver"
@@ -201,7 +201,7 @@ where
             ty::ConstKind::Bound(_, _) => panic!("escaping bound vars in {:?}", ct),
             ty::ConstKind::Value(ty, _) => ty,
             ty::ConstKind::Placeholder(placeholder) => {
-                self.cx().find_const_ty_from_env(&goal.param_env, placeholder)
+                self.cx().interner().find_const_ty_from_env(&goal.param_env, placeholder)
             }
         };
 
@@ -275,7 +275,7 @@ where
         if let ty::Alias(..) = ty.clone().kind() {
             let normalized_ty = self.next_ty_infer();
             let alias_relate_goal = Goal::new(
-                self.cx(),
+                self.cx().interner(),
                 param_env,
                 ty::PredicateKind::AliasRelate(
                     ty.into(),
@@ -306,7 +306,7 @@ where
         if let ty::ConstKind::Unevaluated(..) = ct.clone().kind() {
             let normalized_ct = self.next_const_infer();
             let alias_relate_goal = Goal::new(
-                self.cx(),
+                self.cx().interner(),
                 param_env,
                 ty::PredicateKind::AliasRelate(
                     ct.into(),

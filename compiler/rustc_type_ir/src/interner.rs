@@ -30,6 +30,7 @@ pub trait Interner:
     + IrPrint<ty::SubtypePredicate<Self>>
     + IrPrint<ty::CoercePredicate<Self>>
     + IrPrint<ty::FnSig<Self>>
+//where <Self::AdtDef as AdtDef>::Ir: RustIr<Interner = Self>
 {
     type DefId: DefId<Self>;
     type LocalDefId: Copy + Debug + Hash + Eq + Into<Self::DefId> + TypeFoldable<Self>;
@@ -142,7 +143,7 @@ pub trait Interner:
 
     fn type_of(self, def_id: Self::DefId) -> ty::EarlyBinder<Self, Self::Ty>;
 
-    type AdtDef: AdtDef<Self>;
+    type AdtDef: AdtDef<Interner = Self>;
     fn adt_def(self, adt_def_id: Self::DefId) -> Self::AdtDef;
 
     fn alias_ty_kind(self, alias: ty::AliasTy<Self>) -> ty::AliasTyKind;
@@ -419,4 +420,10 @@ impl<I: Interner> search_graph::Cx for I {
     fn evaluation_is_concurrent(&self) -> bool {
         self.evaluation_is_concurrent()
     }
+}
+
+pub trait RustIr: Sized + Copy {
+    type Interner: Interner;
+
+    fn interner(self) -> Self::Interner;
 }

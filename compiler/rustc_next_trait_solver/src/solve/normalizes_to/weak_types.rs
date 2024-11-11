@@ -4,7 +4,7 @@
 //! Since a weak alias is never ambiguous, this just computes the `type_of` of
 //! the alias and registers the where-clauses of the type alias.
 
-use rustc_type_ir::{self as ty, Interner};
+use rustc_type_ir::{self as ty, Interner, RustIr};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::{Certainty, EvalCtxt, Goal, GoalSource, QueryResult};
@@ -18,7 +18,7 @@ where
         &mut self,
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let weak_ty = goal.predicate.alias.clone();
 
         // Check where clauses

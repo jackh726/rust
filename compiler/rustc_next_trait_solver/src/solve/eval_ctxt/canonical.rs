@@ -15,7 +15,7 @@ use rustc_index::IndexVec;
 use rustc_type_ir::fold::TypeFoldable;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::relate::solver_relating::RelateExt;
-use rustc_type_ir::{self as ty, Canonical, CanonicalVarValues, InferCtxtLike, Interner};
+use rustc_type_ir::{self as ty, Canonical, CanonicalVarValues, InferCtxtLike, Interner, RustIr};
 use tracing::{debug, instrument, trace};
 
 use crate::canonicalizer::{CanonicalizeMode, Canonicalizer};
@@ -69,6 +69,7 @@ where
                 goal,
                 predefined_opaques_in_body: self
                     .cx()
+                    .interner()
                     .mk_predefined_opaques_in_body(PredefinedOpaquesData { opaque_types }),
             },
         );
@@ -160,7 +161,7 @@ where
             Response {
                 var_values,
                 certainty,
-                external_constraints: self.cx().mk_external_constraints(external_constraints),
+                external_constraints: self.cx().interner().mk_external_constraints(external_constraints),
             },
         );
 
@@ -181,7 +182,7 @@ where
                 .iter()
                 .filter(|c| !c.is_region() && c.is_existential())
                 .count();
-            if num_non_region_vars > self.cx().recursion_limit() {
+            if num_non_region_vars > self.cx().interner().recursion_limit() {
                 debug!(?num_non_region_vars, "too many inference variables -> overflow");
                 return Ok(self.make_ambiguous_response_no_constraints(MaybeCause::Overflow {
                     suggest_increasing_limit: true,
@@ -201,7 +202,7 @@ where
         maybe_cause: MaybeCause,
     ) -> CanonicalResponse<I> {
         response_no_constraints_raw(
-            self.cx(),
+            self.cx().interner(),
             self.max_input_universe,
             self.variables.clone(),
             Certainty::Maybe(maybe_cause),
@@ -338,7 +339,7 @@ where
             }
         }
 
-        let var_values = delegate.cx().mk_args_from_iter(
+        let var_values = delegate.cx().interner().mk_args_from_iter(
             response.variables.clone().iter().enumerate().map(|(index, info)| {
                 if info.universe() != ty::UniverseIndex::ROOT {
                     // A variable from inside a binder of the query. While ideally these shouldn't
@@ -437,7 +438,7 @@ where
     I: Interner,
     T: TypeFoldable<I>,
 {
-    let var_values = CanonicalVarValues { var_values: delegate.cx().mk_args(var_values) };
+    let var_values = CanonicalVarValues { var_values: delegate.cx().interner().mk_args(var_values) };
     let state = inspect::State { var_values, data };
     let state = state.fold_with(&mut EagerResolver::new(delegate));
     Canonicalizer::canonicalize(

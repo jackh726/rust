@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 
 use derive_where::derive_where;
 use rustc_type_ir::inherent::*;
-use rustc_type_ir::{self as ty, Interner};
+use rustc_type_ir::{self as ty, Interner, RustIr};
 
 use crate::delegate::SolverDelegate;
 use crate::solve::eval_ctxt::canonical;
@@ -422,7 +422,7 @@ impl<D: SolverDelegate<Interner = I>, I: Interner> ProofTreeBuilder<D> {
             delegate,
             max_input_universe,
             GoalSource::Misc,
-            goal.clone().with_predicate(delegate.cx(), |pred| pred),
+            goal.clone().with_predicate(delegate.cx().interner(), |pred| pred),
         );
     }
 

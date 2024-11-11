@@ -5,13 +5,13 @@ use super::{
     structurally_relate_consts, structurally_relate_tys,
 };
 use crate::error::TypeError;
-use crate::inherent::*;
+use crate::{inherent::*, RustIr};
 use crate::solve::Goal;
 use crate::visit::TypeVisitableExt as _;
 use crate::{self as ty, InferCtxtLike, Interner, TypingMode, Upcast};
 
 pub trait PredicateEmittingRelation<Infcx, I = <Infcx as InferCtxtLike>::Interner>:
-    TypeRelation<I>
+    TypeRelation<I = I>
 where
     Infcx: InferCtxtLike<Interner = I>,
     I: Interner,
@@ -49,6 +49,7 @@ where
     Infcx: InferCtxtLike<Interner = I>,
     I: Interner,
     R: PredicateEmittingRelation<Infcx>,
+    //<I::AdtDef as AdtDef>::Ir: RustIr<Interner = I>,
 {
     debug!("super_combine_tys::<{}>({:?}, {:?})", std::any::type_name::<R>(), a, b);
     debug_assert!(!a.has_escaping_bound_vars());
@@ -57,7 +58,7 @@ where
     match (a.clone().kind(), b.clone().kind()) {
         (ty::Error(e), _) | (_, ty::Error(e)) => {
             infcx.set_tainted_by_errors(e);
-            return Ok(Ty::new_error(infcx.cx(), e));
+            return Ok(Ty::new_error(infcx.cx().interner(), e));
         }
 
         // Relate integral variables to other types
@@ -198,7 +199,7 @@ where
         }
 
         (ty::ConstKind::Unevaluated(..), _) | (_, ty::ConstKind::Unevaluated(..))
-            if infcx.cx().features().generic_const_exprs() || infcx.next_trait_solver() =>
+            if infcx.cx().interner().features().generic_const_exprs() || infcx.next_trait_solver() =>
         {
             match relation.structurally_relate_aliases() {
                 StructurallyRelateAliases::No => {

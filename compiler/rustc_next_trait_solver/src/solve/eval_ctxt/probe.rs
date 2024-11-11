@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use rustc_type_ir::{InferCtxtLike, Interner};
+use rustc_type_ir::{InferCtxtLike, Interner, RustIr};
 use tracing::instrument;
 
 use crate::delegate::SolverDelegate;
@@ -9,20 +9,22 @@ use crate::solve::{
     BuiltinImplSource, CandidateSource, EvalCtxt, NoSolution, QueryResult, inspect,
 };
 
-pub(in crate::solve) struct ProbeCtxt<'me, 'a, D, I, F, T>
+pub(in crate::solve) struct ProbeCtxt<'me, 'a, D, Ir, I, F, T>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
 {
-    ecx: &'me mut EvalCtxt<'a, D, I>,
+    ecx: &'me mut EvalCtxt<'a, D, Ir, I>,
     probe_kind: F,
     _result: PhantomData<T>,
 }
 
-impl<D, I, F, T> ProbeCtxt<'_, '_, D, I, F, T>
+impl<D, Ir, I, F, T> ProbeCtxt<'_, '_, D, Ir, I, F, T>
 where
     F: FnOnce(&T) -> inspect::ProbeKind<I>,
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
 {
     pub(in crate::solve) fn enter(self, f: impl FnOnce(&mut EvalCtxt<'_, D>) -> T) -> T {
@@ -56,18 +58,20 @@ where
     }
 }
 
-pub(in crate::solve) struct TraitProbeCtxt<'me, 'a, D, I, F>
+pub(in crate::solve) struct TraitProbeCtxt<'me, 'a, D, Ir, I, F>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
 {
-    cx: ProbeCtxt<'me, 'a, D, I, F, QueryResult<I>>,
+    cx: ProbeCtxt<'me, 'a, D, Ir, I, F, QueryResult<I>>,
     source: CandidateSource<I>,
 }
 
-impl<D, I, F> TraitProbeCtxt<'_, '_, D, I, F>
+impl<D, Ir, I, F> TraitProbeCtxt<'_, '_, D, Ir, I, F>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
     F: FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>,
 {
@@ -80,14 +84,15 @@ where
     }
 }
 
-impl<'a, D, I> EvalCtxt<'a, D, I>
+impl<'a, D, Ir, I> EvalCtxt<'a, D, Ir, I>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
 {
     /// `probe_kind` is only called when proof tree building is enabled so it can be
     /// as expensive as necessary to output the desired information.
-    pub(in crate::solve) fn probe<F, T>(&mut self, probe_kind: F) -> ProbeCtxt<'_, 'a, D, I, F, T>
+    pub(in crate::solve) fn probe<F, T>(&mut self, probe_kind: F) -> ProbeCtxt<'_, 'a, D, Ir, I, F, T>
     where
         F: FnOnce(&T) -> inspect::ProbeKind<I>,
     {
@@ -97,14 +102,14 @@ where
     pub(in crate::solve) fn probe_builtin_trait_candidate(
         &mut self,
         source: BuiltinImplSource,
-    ) -> TraitProbeCtxt<'_, 'a, D, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>> {
+    ) -> TraitProbeCtxt<'_, 'a, D, Ir, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>> {
         self.probe_trait_candidate(CandidateSource::BuiltinImpl(source))
     }
 
     pub(in crate::solve) fn probe_trait_candidate(
         &mut self,
         source: CandidateSource<I>,
-    ) -> TraitProbeCtxt<'_, 'a, D, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>> {
+    ) -> TraitProbeCtxt<'_, 'a, D, Ir, I, impl FnOnce(&QueryResult<I>) -> inspect::ProbeKind<I>> {
         TraitProbeCtxt {
             cx: ProbeCtxt {
                 ecx: self,

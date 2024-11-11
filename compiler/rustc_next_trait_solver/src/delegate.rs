@@ -2,12 +2,13 @@ use std::ops::Deref;
 
 use rustc_type_ir::fold::TypeFoldable;
 use rustc_type_ir::solve::{Certainty, Goal, NoSolution};
-use rustc_type_ir::{self as ty, InferCtxtLike, Interner};
+use rustc_type_ir::{self as ty, InferCtxtLike, Interner, RustIr};
 
 pub trait SolverDelegate: Deref<Target = <Self as SolverDelegate>::Infcx> + Sized {
-    type Infcx: InferCtxtLike<Interner = <Self as SolverDelegate>::Interner>;
+    type Infcx: InferCtxtLike<Interner = <Self as SolverDelegate>::Interner, Ir = Self::Ir>;
     type Interner: Interner;
-    fn cx(&self) -> Self::Interner {
+    type Ir: RustIr<Interner = Self::Interner>;
+    fn cx(&self) -> Self::Ir {
         (**self).cx()
     }
 

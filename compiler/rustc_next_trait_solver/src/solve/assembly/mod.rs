@@ -4,7 +4,7 @@ pub(super) mod structural_traits;
 
 use derive_where::derive_where;
 use rustc_type_ir::fold::TypeFoldable;
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::lang_items::TraitSolverLangItem;
 use rustc_type_ir::solve::{Response, inspect};
 use rustc_type_ir::visit::TypeVisitableExt as _;
@@ -88,7 +88,7 @@ where
             goal.clone(),
             assumption,
             |ecx| {
-                let cx = ecx.cx();
+                let cx = ecx.cx().interner();
                 let ty::Dynamic(bounds, _, _) = goal.predicate.self_ty().kind() else {
                     panic!("expected object type in `probe_and_consider_object_bound_candidate`");
                 };
@@ -280,10 +280,11 @@ where
     ) -> Vec<Candidate<I>>;
 }
 
-impl<D, I> EvalCtxt<'_, D>
+impl<D, Ir, I> EvalCtxt<'_, D>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Ir = Ir, Interner = I>,
     I: Interner,
+    Ir: RustIr<Interner = I>,
 {
     pub(super) fn assemble_and_evaluate_candidates<G: GoalKind<D>>(
         &mut self,
@@ -302,7 +303,7 @@ where
                 .enter(|this| {
                     let normalized_ty = this.next_ty_infer();
                     let alias_relate_goal = Goal::new(
-                        this.cx(),
+                        this.cx().interner(),
                         goal.param_env,
                         ty::PredicateKind::AliasRelate(
                             goal.predicate.self_ty().into(),
@@ -324,7 +325,7 @@ where
 
         let goal: Goal<I, G> = goal
             .clone()
-            .with_predicate(self.cx(), |pred| pred.with_self_ty(self.cx(), normalized_self_ty));
+            .with_predicate(self.cx().interner(), |pred| pred.with_self_ty(self.cx().interner(), normalized_self_ty));
         // Vars that show up in the rest of the goal substs may have been constrained by
         // normalizing the self type as well, since type variables are not uniquified.
         let goal = self.resolve_vars_if_possible(goal);
@@ -378,7 +379,7 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         cx.for_each_relevant_impl(
             goal.predicate.clone().trait_def_id(cx),
             goal.predicate.self_ty(),
@@ -404,7 +405,7 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let trait_def_id = goal.predicate.clone().trait_def_id(cx);
 
         let goal_for_builtin_unsizing = goal.clone();
@@ -595,15 +596,16 @@ where
 
             ty::Alias(kind @ (ty::Projection | ty::Opaque), alias_ty) => (kind, alias_ty),
             ty::Alias(ty::Inherent | ty::Weak, _) => {
-                self.cx().delay_bug(format!("could not normalize {self_ty:?}, it is not WF"));
+                self.cx().interner().delay_bug(format!("could not normalize {self_ty:?}, it is not WF"));
                 return;
             }
         };
 
         for assumption in self
             .cx()
+            .interner()
             .item_bounds(alias_ty.def_id)
-            .iter_instantiated(self.cx(), alias_ty.args.clone())
+            .iter_instantiated(self.cx().interner(), alias_ty.args.clone())
         {
             candidates.extend(G::probe_and_consider_implied_clause(
                 self,
@@ -635,7 +637,7 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         if !cx.trait_may_be_implemented_via_object(goal.predicate.clone().trait_def_id(cx)) {
             return;
         }
@@ -726,7 +728,7 @@ where
         goal: Goal<I, G>,
     ) -> Result<Candidate<I>, NoSolution> {
         self.probe_trait_candidate(CandidateSource::CoherenceUnknowable).enter(|ecx| {
-            let cx = ecx.cx();
+            let cx = ecx.cx().interner();
             let trait_ref = goal.predicate.clone().trait_ref(cx);
             if ecx.trait_ref_is_knowable(goal.param_env.clone(), trait_ref.clone())? {
                 Err(NoSolution)
@@ -763,7 +765,7 @@ where
         goal: Goal<I, G>,
         candidates: &mut Vec<Candidate<I>>,
     ) {
-        let cx = self.cx();
+        let cx = self.cx().interner();
         let trait_goal: Goal<I, ty::TraitPredicate<I>> =
             goal.clone().with_predicate(cx, |pred| pred.trait_ref(cx));
 

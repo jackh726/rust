@@ -19,6 +19,7 @@ use rustc_query_system::ich::StableHashingContext;
 use rustc_session::DataTypeKind;
 use rustc_span::symbol::sym;
 use rustc_type_ir::solve::AdtDestructorKind;
+use rustc_type_ir::RustIr;
 use tracing::{debug, info, trace};
 
 use super::{
@@ -200,7 +201,9 @@ impl<'tcx> AdtDef<'tcx> {
     }
 }
 
-impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
+impl<'tcx> rustc_type_ir::inherent::AdtDef for AdtDef<'tcx> {
+    type Interner = TyCtxt<'tcx>;
+
     fn def_id(&self) -> DefId {
         self.did()
     }
@@ -209,24 +212,24 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
         (*self).is_struct()
     }
 
-    fn struct_tail_ty(self, interner: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
-        Some(interner.type_of(self.non_enum_variant().tail_opt()?.did))
+    fn struct_tail_ty<Ir: RustIr<Interner = Self::Interner>>(self, cx: Ir) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
+        Some(cx.interner().type_of(self.non_enum_variant().tail_opt()?.did))
     }
 
     fn is_phantom_data(&self) -> bool {
         (*self).is_phantom_data()
     }
 
-    fn all_field_tys(
+    fn all_field_tys<Ir: RustIr<Interner = Self::Interner>>(
         self,
-        tcx: TyCtxt<'tcx>,
+        tcx: Ir,
     ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = Ty<'tcx>>> {
         ty::EarlyBinder::bind(
             self.all_fields().map(move |field| tcx.type_of(field.did).skip_binder()),
         )
     }
 
-    fn sized_constraint(self, tcx: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
+    fn sized_constraint<Ir: RustIr<Interner = Self::Interner>>(self, tcx: Ir) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
         self.sized_constraint(tcx)
     }
 
@@ -234,7 +237,7 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
         (*self).is_fundamental()
     }
 
-    fn destructor(self, tcx: TyCtxt<'tcx>) -> Option<AdtDestructorKind> {
+    fn destructor<Ir: RustIr<Interner = Self::Interner>>(self, tcx: Ir) -> Option<AdtDestructorKind> {
         Some(match self.destructor(tcx)?.constness {
             hir::Constness::Const => AdtDestructorKind::Const,
             hir::Constness::NotConst => AdtDestructorKind::NotConst,

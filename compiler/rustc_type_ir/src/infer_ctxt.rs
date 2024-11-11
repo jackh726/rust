@@ -6,7 +6,7 @@ use rustc_type_ir_macros::{TypeFoldable_Generic, TypeVisitable_Generic};
 use crate::fold::TypeFoldable;
 use crate::relate::RelateResult;
 use crate::relate::combine::PredicateEmittingRelation;
-use crate::{self as ty, Interner};
+use crate::{self as ty, Interner, RustIr};
 
 /// The current typing mode of an inference context. We unfortunately have some
 /// slightly different typing rules depending on the current context. See the
@@ -61,7 +61,8 @@ impl<I: Interner> TypingMode<I> {
 
 pub trait InferCtxtLike: Sized {
     type Interner: Interner;
-    fn cx(&self) -> Self::Interner;
+    type Ir: RustIr<Interner = Self::Interner>;
+    fn cx(&self) -> Self::Ir;
 
     /// Whether the new trait solver is enabled. This only exists because rustc
     /// shares code between the new and old trait solvers; for all other users,

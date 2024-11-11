@@ -1,6 +1,6 @@
 use rustc_type_ir::data_structures::DelayedMap;
 use rustc_type_ir::fold::{TypeFoldable, TypeFolder, TypeSuperFoldable};
-use rustc_type_ir::inherent::*;
+use rustc_type_ir::{inherent::*, RustIr};
 use rustc_type_ir::visit::TypeVisitableExt;
 use rustc_type_ir::{self as ty, InferCtxtLike, Interner};
 
@@ -29,7 +29,7 @@ impl<'a, D: SolverDelegate> EagerResolver<'a, D> {
 
 impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I> for EagerResolver<'_, D> {
     fn cx(&self) -> I {
-        self.delegate.cx()
+        self.delegate.cx().interner()
     }
 
     fn fold_ty(&mut self, t: I::Ty) -> I::Ty {

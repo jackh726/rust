@@ -13,7 +13,7 @@ use crate::fold::{TypeFoldable, TypeSuperFoldable};
 use crate::relate::Relate;
 use crate::solve::{AdtDestructorKind, Reveal};
 use crate::visit::{Flags, TypeSuperVisitable, TypeVisitable};
-use crate::{self as ty, CollectAndApply, Interner, UpcastFrom};
+use crate::{self as ty, CollectAndApply, Interner, RustIr, UpcastFrom};
 
 pub trait Ty<I: Interner<Ty = Self>>:
     Clone
@@ -520,26 +520,28 @@ pub trait ParamLike {
     fn index(&self) -> u32;
 }
 
-pub trait AdtDef<I: Interner>: Clone + Debug + Hash + Eq {
-    fn def_id(&self) -> I::DefId;
+pub trait AdtDef: Clone + Debug + Hash + Eq {
+    type Interner: Interner;
+
+    fn def_id(&self) -> <Self::Interner as Interner>::DefId;
 
     fn is_struct(&self) -> bool;
 
     /// Returns the type of the struct tail.
     ///
     /// Expects the `AdtDef` to be a struct. If it is not, then this will panic.
-    fn struct_tail_ty(self, interner: I) -> Option<ty::EarlyBinder<I, I::Ty>>;
+    fn struct_tail_ty<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> Option<ty::EarlyBinder<Self::Interner, <Self::Interner as Interner>::Ty>>;
 
     fn is_phantom_data(&self) -> bool;
 
     // FIXME: perhaps use `all_fields` and expose `FieldDef`.
-    fn all_field_tys(self, interner: I) -> ty::EarlyBinder<I, impl IntoIterator<Item = I::Ty>>;
+    fn all_field_tys<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> ty::EarlyBinder<Self::Interner, impl IntoIterator<Item = <Self::Interner as Interner>::Ty>>;
 
-    fn sized_constraint(self, interner: I) -> Option<ty::EarlyBinder<I, I::Ty>>;
+    fn sized_constraint<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> Option<ty::EarlyBinder<Self::Interner, <Self::Interner as Interner>::Ty>>;
 
     fn is_fundamental(&self) -> bool;
 
-    fn destructor(self, interner: I) -> Option<AdtDestructorKind>;
+    fn destructor<Ir: RustIr<Interner = Self::Interner>>(self, ir: Ir) -> Option<AdtDestructorKind>;
 }
 
 pub trait ParamEnv<I: Interner>: Clone + Debug + Hash + Eq + TypeFoldable<I> {
