@@ -11,7 +11,7 @@ use crate::{self as ty, DebruijnIndex, Interner};
 
 /// Represents a constant in Rust.
 #[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
-#[derive_where(Copy; I: Interner, I::Ty: Copy, I::GenericArgs: Copy)]
+#[derive_where(Copy; I: Interner, I::Ty: Copy, I::GenericArgs: Copy, I::ValueConst, I::ExprConst)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum ConstKind<I: Interner> {
     /// A const generic parameter.

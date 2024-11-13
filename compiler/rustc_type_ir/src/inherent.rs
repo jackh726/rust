@@ -282,7 +282,7 @@ pub trait Const<I: Interner<Const = Self>>:
     }
 }
 
-pub trait ExprConst<I: Interner<ExprConst = Self>>: Copy + Debug + Hash + Eq + Relate<I> {
+pub trait ExprConst<I: Interner<ExprConst = Self>>: Clone + Debug + Hash + Eq + Relate<I> {
     fn args(self) -> I::GenericArgs;
 }
 
