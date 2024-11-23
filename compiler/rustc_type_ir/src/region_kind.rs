@@ -125,7 +125,8 @@ rustc_index::newtype_index! {
 /// [1]: https://smallcultfollowing.com/babysteps/blog/2013/10/29/intermingled-parameter-lists/
 /// [2]: https://smallcultfollowing.com/babysteps/blog/2013/11/04/intermingled-parameter-lists/
 /// [rustc dev guide]: https://rustc-dev-guide.rust-lang.org/traits/hrtb.html
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
+#[derive_where(Copy; I: Interner, I::EarlyParamRegion: Copy, I::BoundRegion: Copy)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable))]
 pub enum RegionKind<I: Interner> {
     /// A region parameter; for example `'a` in `impl<'a> Trait for &'a ()`.

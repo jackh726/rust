@@ -110,16 +110,16 @@ pub trait Interner:
     // Kinds of consts
     type Const: Const<Self>;
     type PlaceholderConst: PlaceholderLike;
-    type ParamConst: Copy + Debug + Hash + Eq + ParamLike;
-    type BoundConst: Copy + Debug + Hash + Eq + BoundVarLike<Self>;
+    type ParamConst: Clone + Debug + Hash + Eq + ParamLike;
+    type BoundConst: Clone + Debug + Hash + Eq + BoundVarLike<Self>;
     type ValueConst: Clone + Debug + Hash + Eq;
     type ExprConst: ExprConst<Self>;
 
     // Kinds of regions
     type Region: Region<Self>;
-    type EarlyParamRegion: Copy + Debug + Hash + Eq + ParamLike;
+    type EarlyParamRegion: Clone + Debug + Hash + Eq + ParamLike;
     type LateParamRegion: Copy + Debug + Hash + Eq;
-    type BoundRegion: Copy + Debug + Hash + Eq + BoundVarLike<Self>;
+    type BoundRegion: Clone + Debug + Hash + Eq + BoundVarLike<Self>;
     type PlaceholderRegion: PlaceholderLike;
 
     // Predicates
