@@ -66,7 +66,7 @@ impl AliasTyKind {
 /// converted to this representation using `<dyn HirTyLowerer>::lower_ty`.
 #[cfg_attr(feature = "nightly", rustc_diagnostic_item = "IrTyKind")]
 #[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
-#[derive_where(Copy; I: Interner, I::AdtDef: Copy, I::GenericArgs: Copy, I::Ty: Copy, I::Const: Copy, I::Region: Copy, I::BoundVarKinds: Copy, I::Tys: Copy, I::BoundExistentialPredicates: Copy)]
+#[derive_where(Copy; I: Interner, I::AdtDef: Copy, I::GenericArgs: Copy, I::Ty: Copy, I::Const: Copy, I::Region: Copy, I::BoundVarKinds: Copy, I::Tys: Copy, I::BoundExistentialPredicates: Copy, I::ParamTy: Copy, I::BoundTy: Copy)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum TyKind<I: Interner> {
     /// The primitive boolean type. Written as `bool`.

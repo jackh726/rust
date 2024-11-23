@@ -374,7 +374,7 @@ pub struct BoundTy {
 }
 
 impl<'tcx> rustc_type_ir::inherent::BoundVarLike<TyCtxt<'tcx>> for BoundTy {
-    fn var(self) -> BoundVar {
+    fn var(&self) -> BoundVar {
         self.var
     }
 

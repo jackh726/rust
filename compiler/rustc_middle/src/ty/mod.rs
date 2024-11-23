@@ -883,7 +883,7 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderRegion {
         self.universe
     }
 
-    fn var(self) -> BoundVar {
+    fn var(&self) -> BoundVar {
         self.bound.var
     }
 
@@ -903,7 +903,7 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderType {
         self.universe
     }
 
-    fn var(self) -> BoundVar {
+    fn var(&self) -> BoundVar {
         self.bound.var
     }
 
@@ -930,7 +930,7 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderConst {
         self.universe
     }
 
-    fn var(self) -> BoundVar {
+    fn var(&self) -> BoundVar {
         self.bound
     }
 

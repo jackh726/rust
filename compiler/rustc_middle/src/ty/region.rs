@@ -387,7 +387,7 @@ pub struct BoundRegion {
 }
 
 impl<'tcx> rustc_type_ir::inherent::BoundVarLike<TyCtxt<'tcx>> for BoundRegion {
-    fn var(self) -> BoundVar {
+    fn var(&self) -> BoundVar {
         self.var
     }
 

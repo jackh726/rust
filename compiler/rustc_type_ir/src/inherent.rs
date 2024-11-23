@@ -497,7 +497,7 @@ pub trait Clause<I: Interner<Clause = Self>>:
 /// Common capabilities of placeholder kinds
 pub trait PlaceholderLike: Copy + Debug + Hash + Eq {
     fn universe(self) -> ty::UniverseIndex;
-    fn var(self) -> ty::BoundVar;
+    fn var(&self) -> ty::BoundVar;
 
     fn with_updated_universe(self, ui: ty::UniverseIndex) -> Self;
 
@@ -511,7 +511,7 @@ pub trait IntoKind {
 }
 
 pub trait BoundVarLike<I: Interner> {
-    fn var(self) -> ty::BoundVar;
+    fn var(&self) -> ty::BoundVar;
 
     fn assert_eq(self, var: I::BoundVarKind);
 }

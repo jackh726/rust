@@ -385,8 +385,8 @@ rustc_index::newtype_index! {
 }
 
 impl<I: Interner> inherent::BoundVarLike<I> for BoundVar {
-    fn var(self) -> BoundVar {
-        self
+    fn var(&self) -> BoundVar {
+        *self
     }
 
     fn assert_eq(self, _var: I::BoundVarKind) {
