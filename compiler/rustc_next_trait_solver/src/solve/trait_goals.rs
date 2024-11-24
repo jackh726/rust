@@ -20,25 +20,27 @@ use crate::solve::{
     NoSolution, QueryResult,
 };
 
-impl<D, I> assembly::GoalKind<D> for TraitPredicate<I>
+impl<D, Ir, I> assembly::GoalKind<D> for TraitPredicate<I>
 where
-    D: SolverDelegate<Interner = I>,
+    D: SolverDelegate<Interner = I, Ir = Ir>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
     }
 
-    fn trait_ref(self, _: I) -> ty::TraitRef<I> {
+    fn trait_ref(self, _: Ir) -> ty::TraitRef<I> {
         self.trait_ref
     }
 
-    fn with_self_ty(self, cx: I, self_ty: I::Ty) -> Self {
+    fn with_self_ty(self, cx: Ir, self_ty: I::Ty) -> Self {
         self.with_self_ty(cx, self_ty)
     }
 
-    fn trait_def_id(&self, _: I) -> I::DefId {
+    fn trait_def_id(&self, _: Ir) -> I::DefId {
         self.def_id()
     }
 
@@ -55,10 +57,10 @@ where
         goal: Goal<I, TraitPredicate<I>>,
         impl_def_id: I::DefId,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
 
         let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
-        if !DeepRejectCtxt::relate_rigid_infer(cx).args_may_unify(
+        if !DeepRejectCtxt::relate_rigid_infer(cx.interner()).args_may_unify(
             goal.predicate.trait_ref.args.clone(),
             impl_trait_ref.clone().skip_binder().args,
         ) {
@@ -90,25 +92,28 @@ where
         ecx.probe_trait_candidate(CandidateSource::Impl(impl_def_id)).enter(|ecx| {
             let impl_args = ecx.fresh_args_for_item(impl_def_id);
             ecx.record_impl_args(impl_args.clone());
-            let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args.clone());
+            let impl_trait_ref = impl_trait_ref.instantiate(cx.interner(), impl_args.clone());
 
             ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref.clone(), impl_trait_ref)?;
             let where_clause_bounds = cx
                 .predicates_of(impl_def_id)
-                .iter_instantiated(cx, impl_args)
-                .map(|pred| goal.clone().with(cx, pred));
+                .iter_instantiated(cx.interner(), impl_args)
+                .map(|pred| goal.clone().with(cx.interner(), pred));
             ecx.add_goals(GoalSource::ImplWhereBound, where_clause_bounds);
 
             // We currently elaborate all supertrait outlives obligations from impls.
             // This can be removed when we actually do coinduction correctly, and prove
             // all supertrait obligations unconditionally.
-            let goal_clause: I::Clause = goal.predicate.clone().upcast(cx);
+            let goal_clause: I::Clause = goal.predicate.clone().upcast(cx.interner());
             for clause in elaborate::elaborate(cx, [goal_clause]) {
                 if matches!(
                     clause.clone().kind().skip_binder(),
                     ty::ClauseKind::TypeOutlives(..) | ty::ClauseKind::RegionOutlives(..)
                 ) {
-                    ecx.add_goal(GoalSource::Misc, goal.clone().with(cx, clause.clone()));
+                    ecx.add_goal(
+                        GoalSource::Misc,
+                        goal.clone().with(cx.interner(), clause.clone()),
+                    );
                 }
             }
 
@@ -209,13 +214,13 @@ where
             return Err(NoSolution);
         }
 
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
 
         ecx.probe_builtin_trait_candidate(BuiltinImplSource::Misc).enter(|ecx| {
             let nested_obligations = cx
                 .predicates_of(goal.predicate.clone().def_id())
-                .iter_instantiated(cx, goal.predicate.trait_ref.args.clone())
-                .map(|p| goal.clone().with(cx, p));
+                .iter_instantiated(cx.interner(), goal.predicate.trait_ref.args.clone())
+                .map(|p| goal.clone().with(cx.interner(), p));
             // FIXME(-Znext-solver=coinductive): Should this be `GoalSource::ImplWhereBound`?
             ecx.add_goals(GoalSource::Misc, nested_obligations);
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
@@ -292,7 +297,7 @@ where
             return Err(NoSolution);
         }
 
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         let tupled_inputs_and_output =
             match structural_traits::extract_tupled_inputs_and_output_from_callable(
                 cx,
@@ -318,13 +323,13 @@ where
                     inputs,
                 ])
             })
-            .upcast(cx);
+            .upcast(cx.interner());
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal.clone(),
             pred,
-            [(GoalSource::ImplWhereBound, goal.clone().with(cx, output_is_sized_pred))],
+            [(GoalSource::ImplWhereBound, goal.clone().with(cx.interner(), output_is_sized_pred))],
         )
     }
 
@@ -337,14 +342,14 @@ where
             return Err(NoSolution);
         }
 
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         let (tupled_inputs_and_output_and_coroutine, nested_preds) =
             structural_traits::extract_tupled_inputs_and_output_from_async_callable(
                 cx,
                 goal.predicate.clone().self_ty(),
                 goal_kind,
                 // This region doesn't matter because we're throwing away the coroutine type
-                Region::new_static(cx),
+                Region::new_static(cx.interner()),
             )?;
 
         // A built-in `AsyncFn` impl only holds if the output is sized.
@@ -364,15 +369,15 @@ where
                     tupled_inputs_ty,
                 ])
             })
-            .upcast(cx);
+            .upcast(cx.interner());
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal.clone(),
             pred,
-            [goal.clone().with(cx, output_is_sized_pred)]
+            [goal.clone().with(cx.interner(), output_is_sized_pred)]
                 .into_iter()
-                .chain(nested_preds.into_iter().map(|pred| goal.clone().with(cx, pred)))
+                .chain(nested_preds.into_iter().map(|pred| goal.clone().with(cx.interner(), pred)))
                 .map(|goal| (GoalSource::ImplWhereBound, goal)),
         )
     }
@@ -445,7 +450,7 @@ where
         };
 
         // Coroutines are not futures unless they come from `async` desugaring
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         if !cx.coroutine_is_async(def_id) {
             return Err(NoSolution);
         }
@@ -470,7 +475,7 @@ where
         };
 
         // Coroutines are not iterators unless they come from `gen` desugaring
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         if !cx.coroutine_is_gen(def_id) {
             return Err(NoSolution);
         }
@@ -495,7 +500,7 @@ where
         };
 
         // Coroutines are not iterators unless they come from `gen` desugaring
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         if !cx.coroutine_is_gen(def_id) {
             return Err(NoSolution);
         }
@@ -518,7 +523,7 @@ where
         };
 
         // Coroutines are not iterators unless they come from `gen` desugaring
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         if !cx.coroutine_is_async_gen(def_id) {
             return Err(NoSolution);
         }
@@ -544,7 +549,7 @@ where
         };
 
         // `async`-desugared coroutines do not implement the coroutine trait
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         if !cx.is_general_coroutine(def_id) {
             return Err(NoSolution);
         }
@@ -556,7 +561,7 @@ where
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),
             goal,
             ty::TraitRef::new(cx, goal_predicate_def_id, [self_ty, coroutine.resume_ty()])
-                .upcast(cx),
+                .upcast(cx.interner()),
             // Technically, we need to check that the coroutine types are Sized,
             // but that's already proven by the coroutine being WF.
             [],
@@ -717,6 +722,7 @@ where
     Ir: RustIr<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, Ir>,
 {
     /// Trait upcasting allows for coercions between trait objects:
     /// ```ignore (builtin impl example)
@@ -735,7 +741,7 @@ where
         b_data: I::BoundExistentialPredicates,
         b_region: I::Region,
     ) -> Vec<Candidate<I>> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let Goal { predicate: (a_ty, _b_ty), .. } = goal;
 
         let mut responses = vec![];
@@ -754,8 +760,7 @@ where
             ));
         } else if let Some(a_principal) = a_data.clone().principal() {
             for new_a_principal in
-                elaborate::supertraits(self.cx().interner(), a_principal.with_self_ty(cx, a_ty))
-                    .skip(1)
+                elaborate::supertraits(self.cx(), a_principal.with_self_ty(cx, a_ty)).skip(1)
             {
                 responses.extend(self.consider_builtin_upcast_to_principal(
                     &goal.param_env,
@@ -765,7 +770,7 @@ where
                     b_data.clone(),
                     b_region.clone(),
                     Some(new_a_principal.map_bound(|trait_ref| {
-                        ty::ExistentialTraitRef::erase_self_ty(cx, trait_ref)
+                        ty::ExistentialTraitRef::erase_self_ty(cx.interner(), trait_ref)
                     })),
                 ));
             }
@@ -780,7 +785,7 @@ where
         b_data: I::BoundExistentialPredicates,
         b_region: I::Region,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let Goal { predicate: (a_ty, _), .. } = goal.clone();
 
         // Can only unsize to an dyn-compatible trait.
@@ -797,16 +802,16 @@ where
             // (i.e. the principal, all of the associated types match, and any auto traits)
             ecx.add_goals(
                 GoalSource::ImplWhereBound,
-                b_data
-                    .iter()
-                    .map(|pred| goal.clone().with(cx, pred.with_self_ty(cx, a_ty.clone()))),
+                b_data.iter().map(|pred| {
+                    goal.clone().with(cx.interner(), pred.with_self_ty(cx, a_ty.clone()))
+                }),
             );
 
             // The type must be `Sized` to be unsized.
             ecx.add_goal(
                 GoalSource::ImplWhereBound,
                 goal.clone().with(
-                    cx,
+                    cx.interner(),
                     ty::TraitRef::new(cx, cx.require_lang_item(TraitSolverLangItem::Sized), [
                         a_ty.clone()
                     ]),
@@ -816,7 +821,7 @@ where
             // The type must outlive the lifetime of the `dyn` we're unsizing into.
             ecx.add_goal(
                 GoalSource::Misc,
-                goal.clone().with(cx, ty::OutlivesPredicate(a_ty, b_region)),
+                goal.clone().with(cx.interner(), ty::OutlivesPredicate(a_ty, b_region)),
             );
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         })
@@ -840,8 +845,8 @@ where
             .auto_traits()
             .into_iter()
             .chain(a_data.clone().principal_def_id().into_iter().flat_map(|principal_def_id| {
-                elaborate::supertrait_def_ids(self.cx().interner(), principal_def_id)
-                    .filter(|def_id| self.cx().interner().trait_is_auto(*def_id))
+                elaborate::supertrait_def_ids(self.cx(), principal_def_id)
+                    .filter(|def_id| self.cx().trait_is_auto(*def_id))
             }))
             .collect();
 
@@ -976,7 +981,7 @@ where
         a_args: I::GenericArgs,
         b_args: I::GenericArgs,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let Goal { predicate: (_a_ty, b_ty), .. } = goal.clone();
 
         let unsizing_params = cx.unsizing_params_for_adt(def.def_id());
@@ -988,16 +993,17 @@ where
 
         let tail_field_ty = def.clone().struct_tail_ty(self.cx()).unwrap();
 
-        let a_tail_ty = tail_field_ty.clone().instantiate(cx, a_args.clone());
-        let b_tail_ty = tail_field_ty.instantiate(cx, b_args.clone());
+        let a_tail_ty = tail_field_ty.clone().instantiate(cx.interner(), a_args.clone());
+        let b_tail_ty = tail_field_ty.instantiate(cx.interner(), b_args.clone());
 
         // Instantiate just the unsizing params from B into A. The type after
         // this instantiation must be equal to B. This is so we don't unsize
         // unrelated type parameters.
-        let new_a_args = cx.mk_args_from_iter(a_args.iter().enumerate().map(|(i, a)| {
-            if unsizing_params.contains(i as u32) { b_args.clone().get(i).unwrap() } else { a }
-        }));
-        let unsized_a_ty = Ty::new_adt(cx, def, new_a_args);
+        let new_a_args =
+            cx.interner().mk_args_from_iter(a_args.iter().enumerate().map(|(i, a)| {
+                if unsizing_params.contains(i as u32) { b_args.clone().get(i).unwrap() } else { a }
+            }));
+        let unsized_a_ty = Ty::new_adt(cx.interner(), def, new_a_args);
 
         // Finally, we require that `TailA: Unsize<TailB>` for the tail field
         // types.
@@ -1005,7 +1011,7 @@ where
         self.add_goal(
             GoalSource::ImplWhereBound,
             goal.with(
-                cx,
+                cx.interner(),
                 ty::TraitRef::new(cx, cx.require_lang_item(TraitSolverLangItem::Unsize), [
                     a_tail_ty, b_tail_ty,
                 ]),
@@ -1031,22 +1037,24 @@ where
         a_tys: I::Tys,
         b_tys: I::Tys,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let Goal { predicate: (_a_ty, b_ty), .. } = goal.clone();
 
         let (a_last_ty, a_rest_tys) = a_tys.split_last().unwrap();
         let b_last_ty = b_tys.last().unwrap();
 
         // Instantiate just the tail field of B., and require that they're equal.
-        let unsized_a_ty =
-            Ty::new_tup_from_iter(cx, a_rest_tys.iter().cloned().chain([b_last_ty.clone()]));
+        let unsized_a_ty = Ty::new_tup_from_iter(
+            cx.interner(),
+            a_rest_tys.iter().cloned().chain([b_last_ty.clone()]),
+        );
         self.eq(goal.param_env.clone(), unsized_a_ty, b_ty)?;
 
         // Similar to ADTs, require that we can unsize the tail.
         self.add_goal(
             GoalSource::ImplWhereBound,
             goal.with(
-                cx,
+                cx.interner(),
                 ty::TraitRef::new(cx, cx.require_lang_item(TraitSolverLangItem::Unsize), [
                     a_last_ty.clone(),
                     b_last_ty,
@@ -1092,10 +1100,9 @@ where
             ty::Coroutine(def_id, _)
                 if self
                     .cx()
-                    .interner()
                     .is_lang_item(goal.predicate.clone().def_id(), TraitSolverLangItem::Unpin) =>
             {
-                match self.cx().interner().coroutine_movability(def_id) {
+                match self.cx().coroutine_movability(def_id) {
                     Movability::Static => Some(Err(NoSolution)),
                     Movability::Movable => Some(
                         self.probe_builtin_trait_candidate(BuiltinImplSource::Misc).enter(|ecx| {
@@ -1140,7 +1147,7 @@ where
             | ty::Tuple(_)
             | ty::Adt(_, _) => {
                 let mut disqualifying_impl = None;
-                self.cx().interner().for_each_relevant_impl(
+                self.cx().for_each_relevant_impl(
                     goal.predicate.clone().def_id(),
                     goal.predicate.clone().self_ty(),
                     |impl_def_id| {
@@ -1179,7 +1186,7 @@ where
                 .map(|ty| {
                     ecx.enter_forall(ty, |ecx, ty| {
                         goal.clone().with_predicate(ecx.cx().interner(), |pred| {
-                            pred.with_self_ty(ecx.cx().interner(), ty)
+                            pred.with_self_ty(ecx.cx(), ty)
                         })
                     })
                 })

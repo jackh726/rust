@@ -1,10 +1,10 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 
-use rustc_type_ir::Interner;
 use rustc_type_ir::inherent::*;
 use rustc_type_ir::search_graph::{self, PathKind};
 use rustc_type_ir::solve::{CanonicalInput, Certainty, QueryResult};
+use rustc_type_ir::{Interner, RustIr};
 
 use super::inspect::ProofTreeBuilder;
 use super::{FIXPOINT_STEP_LIMIT, has_no_inference_or_external_constraints};
@@ -21,7 +21,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    type Cx = D::Interner;
+    type Cx = D::Ir;
 
     const ENABLE_PROVISIONAL_CACHE: bool = true;
     type ValidationScope = Infallible;
@@ -42,13 +42,15 @@ where
     const DIVIDE_AVAILABLE_DEPTH_ON_OVERFLOW: usize = 4;
 
     fn initial_provisional_result(
-        cx: I,
+        cx: D::Ir,
         kind: PathKind,
         input: &CanonicalInput<I>,
     ) -> QueryResult<I> {
         match kind {
-            PathKind::Coinductive => response_no_constraints(cx, input, Certainty::Yes),
-            PathKind::Inductive => response_no_constraints(cx, input, Certainty::overflow(false)),
+            PathKind::Coinductive => response_no_constraints(cx.interner(), input, Certainty::Yes),
+            PathKind::Inductive => {
+                response_no_constraints(cx.interner(), input, Certainty::overflow(false))
+            }
         }
     }
 
@@ -59,24 +61,27 @@ where
         result: &QueryResult<I>,
     ) -> bool {
         match kind {
-            PathKind::Coinductive => &response_no_constraints(cx, &input, Certainty::Yes) == result,
+            PathKind::Coinductive => {
+                &response_no_constraints(cx.interner(), &input, Certainty::Yes) == result
+            }
             PathKind::Inductive => {
-                &response_no_constraints(cx, &input, Certainty::overflow(false)) == result
+                &response_no_constraints(cx.interner(), &input, Certainty::overflow(false))
+                    == result
             }
         }
     }
 
     fn on_stack_overflow(
-        cx: I,
+        cx: D::Ir,
         inspect: &mut ProofTreeBuilder<D>,
         input: CanonicalInput<I>,
     ) -> QueryResult<I> {
         inspect.canonical_goal_evaluation_overflow();
-        response_no_constraints(cx, &input, Certainty::overflow(true))
+        response_no_constraints(cx.interner(), &input, Certainty::overflow(true))
     }
 
-    fn on_fixpoint_overflow(cx: I, input: &CanonicalInput<I>) -> QueryResult<I> {
-        response_no_constraints(cx, input, Certainty::overflow(false))
+    fn on_fixpoint_overflow(cx: D::Ir, input: &CanonicalInput<I>) -> QueryResult<I> {
+        response_no_constraints(cx.interner(), input, Certainty::overflow(false))
     }
 
     fn is_ambiguous_result(result: &QueryResult<I>) -> bool {
@@ -87,16 +92,16 @@ where
     }
 
     fn propagate_ambiguity(
-        cx: I,
+        cx: D::Ir,
         for_input: &CanonicalInput<I>,
         from_result: &QueryResult<I>,
     ) -> QueryResult<I> {
         let certainty = from_result.as_ref().map(|q| q.value.certainty).unwrap();
-        response_no_constraints(cx, for_input, certainty)
+        response_no_constraints(cx.interner(), for_input, certainty)
     }
 
-    fn step_is_coinductive(cx: I, input: &CanonicalInput<I>) -> bool {
-        input.canonical.value.goal.predicate.is_coinductive(cx)
+    fn step_is_coinductive(cx: D::Ir, input: &CanonicalInput<I>) -> bool {
+        input.canonical.value.goal.predicate.is_coinductive(cx.interner())
     }
 }
 

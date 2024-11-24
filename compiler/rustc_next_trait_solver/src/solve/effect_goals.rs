@@ -19,20 +19,21 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
     }
 
-    fn trait_ref(self, _: I) -> ty::TraitRef<I> {
+    fn trait_ref(self, _: D::Ir) -> ty::TraitRef<I> {
         self.trait_ref
     }
 
-    fn with_self_ty(self, cx: I, self_ty: I::Ty) -> Self {
+    fn with_self_ty(self, cx: D::Ir, self_ty: I::Ty) -> Self {
         self.with_self_ty(cx, self_ty)
     }
 
-    fn trait_def_id(&self, _: I) -> I::DefId {
+    fn trait_def_id(&self, _: D::Ir) -> I::DefId {
         self.def_id()
     }
 
@@ -82,7 +83,7 @@ where
         goal: &Goal<I, Self>,
         alias_ty: ty::AliasTy<I>,
     ) -> Vec<Candidate<I>> {
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
         let mut candidates = vec![];
 
         if !cx.alias_has_const_conditions(alias_ty.def_id) {
@@ -92,8 +93,10 @@ where
         for clause in elaborate::elaborate(
             cx,
             cx.explicit_implied_const_bounds(alias_ty.def_id)
-                .iter_instantiated(cx, alias_ty.args.clone())
-                .map(|trait_ref| trait_ref.to_host_effect_clause(cx, goal.predicate.constness)),
+                .iter_instantiated(cx.interner(), alias_ty.args.clone())
+                .map(|trait_ref| {
+                    trait_ref.to_host_effect_clause(cx.interner(), goal.predicate.constness)
+                }),
         ) {
             candidates.extend(Self::probe_and_match_goal_against_assumption(
                 ecx,
@@ -105,11 +108,14 @@ where
                     ecx.add_goals(
                         GoalSource::Misc,
                         cx.const_conditions(alias_ty.def_id)
-                            .iter_instantiated(cx, alias_ty.args.clone())
+                            .iter_instantiated(cx.interner(), alias_ty.args.clone())
                             .map(|trait_ref| {
                                 goal.clone().with(
-                                    cx,
-                                    trait_ref.to_host_effect_clause(cx, goal.predicate.constness),
+                                    cx.interner(),
+                                    trait_ref.to_host_effect_clause(
+                                        cx.interner(),
+                                        goal.predicate.constness,
+                                    ),
                                 )
                             }),
                     );
@@ -126,10 +132,10 @@ where
         goal: Goal<I, Self>,
         impl_def_id: <I as Interner>::DefId,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
 
         let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
-        if !DeepRejectCtxt::relate_rigid_infer(cx).args_may_unify(
+        if !DeepRejectCtxt::relate_rigid_infer(cx.interner()).args_may_unify(
             goal.predicate.trait_ref.args.clone(),
             impl_trait_ref.clone().skip_binder().args,
         ) {
@@ -152,23 +158,24 @@ where
         ecx.probe_trait_candidate(CandidateSource::Impl(impl_def_id)).enter(|ecx| {
             let impl_args = ecx.fresh_args_for_item(impl_def_id);
             ecx.record_impl_args(impl_args.clone());
-            let impl_trait_ref = impl_trait_ref.instantiate(cx, impl_args.clone());
+            let impl_trait_ref = impl_trait_ref.instantiate(cx.interner(), impl_args.clone());
 
             ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref.clone(), impl_trait_ref)?;
             let where_clause_bounds = cx
                 .predicates_of(impl_def_id)
-                .iter_instantiated(cx, impl_args.clone())
-                .map(|pred| goal.clone().with(cx, pred));
+                .iter_instantiated(cx.interner(), impl_args.clone())
+                .map(|pred| goal.clone().with(cx.interner(), pred));
             ecx.add_goals(GoalSource::ImplWhereBound, where_clause_bounds);
 
             // For this impl to be `const`, we need to check its `~const` bounds too.
             let const_conditions = cx
                 .const_conditions(impl_def_id)
-                .iter_instantiated(cx, impl_args)
+                .iter_instantiated(cx.interner(), impl_args)
                 .map(|bound_trait_ref| {
                     goal.clone().with(
-                        cx,
-                        bound_trait_ref.to_host_effect_clause(cx, goal.predicate.constness),
+                        cx.interner(),
+                        bound_trait_ref
+                            .to_host_effect_clause(cx.interner(), goal.predicate.constness),
                     )
                 });
             ecx.add_goals(GoalSource::ImplWhereBound, const_conditions);
@@ -225,7 +232,7 @@ where
         goal: Goal<I, Self>,
         _kind: rustc_type_ir::ClosureKind,
     ) -> Result<Candidate<I>, NoSolution> {
-        let cx = ecx.cx().interner();
+        let cx = ecx.cx();
 
         let self_ty = goal.predicate.self_ty();
         let (inputs_and_output, def_id, args) =
@@ -238,25 +245,30 @@ where
         });
         let requirements = cx
             .const_conditions(def_id)
-            .iter_instantiated(cx, args)
+            .iter_instantiated(cx.interner(), args)
             .map(|trait_ref| {
                 (
                     GoalSource::ImplWhereBound,
-                    goal.clone()
-                        .with(cx, trait_ref.to_host_effect_clause(cx, goal.predicate.constness)),
+                    goal.clone().with(
+                        cx.interner(),
+                        trait_ref.to_host_effect_clause(cx.interner(), goal.predicate.constness),
+                    ),
                 )
             })
-            .chain([(GoalSource::ImplWhereBound, goal.clone().with(cx, output_is_sized_pred))]);
+            .chain([(
+                GoalSource::ImplWhereBound,
+                goal.clone().with(cx.interner(), output_is_sized_pred),
+            )]);
 
         let pred = inputs_and_output
             .clone()
             .map_bound(|(inputs, _)| {
                 ty::TraitRef::new(cx, goal.predicate.def_id(), [
                     goal.predicate.self_ty(),
-                    Ty::new_tup(cx, inputs.as_slice()),
+                    Ty::new_tup(cx.interner(), inputs.as_slice()),
                 ])
             })
-            .to_host_effect_clause(cx, goal.predicate.constness);
+            .to_host_effect_clause(cx.interner(), goal.predicate.constness);
 
         Self::probe_and_consider_implied_clause(
             ecx,
@@ -389,6 +401,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self))]
     pub(super) fn compute_host_effect_goal(

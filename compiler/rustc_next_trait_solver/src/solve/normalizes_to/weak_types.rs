@@ -15,23 +15,24 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     pub(super) fn normalize_weak_type(
         &mut self,
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let weak_ty = goal.predicate.alias.clone();
 
         // Check where clauses
         self.add_goals(
             GoalSource::Misc,
             cx.predicates_of(weak_ty.def_id)
-                .iter_instantiated(cx, weak_ty.args.clone())
-                .map(|pred| goal.clone().with(cx, pred)),
+                .iter_instantiated(cx.interner(), weak_ty.args.clone())
+                .map(|pred| goal.clone().with(cx.interner(), pred)),
         );
 
-        let actual = cx.type_of(weak_ty.def_id).instantiate(cx, weak_ty.args);
+        let actual = cx.type_of(weak_ty.def_id).instantiate(cx.interner(), weak_ty.args);
         self.instantiate_normalizes_to_term(goal, actual.into());
 
         self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)

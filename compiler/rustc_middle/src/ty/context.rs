@@ -120,9 +120,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.mk_external_constraints(data)
     }
     type DepNodeIndex = DepNodeIndex;
-    fn with_cached_task<T>(self, task: impl FnOnce() -> T) -> (T, DepNodeIndex) {
-        self.dep_graph.with_anon_task(self, crate::dep_graph::dep_kinds::TraitSelect, task)
-    }
+
     type Ty = Ty<'tcx>;
     type Tys = &'tcx List<Ty<'tcx>>;
 
@@ -158,15 +156,53 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     type Clause = Clause<'tcx>;
     type Clauses = ty::Clauses<'tcx>;
 
+    type Features = &'tcx rustc_feature::Features;
+
     type Tracked<T: fmt::Debug + Clone> = WithDepNode<T>;
+
+    type GenericsOf = &'tcx ty::Generics;
+
+    type VariancesOf = &'tcx [ty::Variance];
+
+    type AdtDef = ty::AdtDef<'tcx>;
+
+    type UnsizingParams = &'tcx rustc_index::bit_set::BitSet<u32>;
+
+    fn mk_args(self, args: &[Self::GenericArg]) -> ty::GenericArgsRef<'tcx> {
+        self.mk_args(args)
+    }
+
+    fn mk_args_from_iter<I, T>(self, args: I) -> T::Output
+    where
+        I: Iterator<Item = T>,
+        T: CollectAndApply<Self::GenericArg, ty::GenericArgsRef<'tcx>>,
+    {
+        self.mk_args_from_iter(args)
+    }
+}
+
+impl<'tcx> RustIr for TyCtxt<'tcx> {
+    type Interner = Self;
+
+    fn interner(self) -> Self::Interner {
+        self
+    }
+
+    fn with_cached_task<T>(self, task: impl FnOnce() -> T) -> (T, DepNodeIndex) {
+        self.dep_graph.with_anon_task(self, crate::dep_graph::dep_kinds::TraitSelect, task)
+    }
+
     fn mk_tracked<T: fmt::Debug + Clone>(
         self,
         data: T,
         dep_node: DepNodeIndex,
-    ) -> Self::Tracked<T> {
+    ) -> <Self::Interner as Interner>::Tracked<T> {
         WithDepNode::new(dep_node, data)
     }
-    fn get_tracked<T: fmt::Debug + Clone>(self, tracked: &Self::Tracked<T>) -> T {
+    fn get_tracked<T: fmt::Debug + Clone>(
+        self,
+        tracked: &<Self::Interner as Interner>::Tracked<T>,
+    ) -> T {
         tracked.get(self)
     }
 
@@ -182,15 +218,11 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.expand_abstract_consts(t)
     }
 
-    type GenericsOf = &'tcx ty::Generics;
-
     fn generics_of(self, def_id: DefId) -> &'tcx ty::Generics {
         self.generics_of(def_id)
     }
 
-    type VariancesOf = &'tcx [ty::Variance];
-
-    fn variances_of(self, def_id: DefId) -> Self::VariancesOf {
+    fn variances_of(self, def_id: DefId) -> <Self::Interner as Interner>::VariancesOf {
         self.variances_of(def_id)
     }
 
@@ -198,8 +230,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.type_of(def_id)
     }
 
-    type AdtDef = ty::AdtDef<'tcx>;
-    fn adt_def(self, adt_def_id: DefId) -> Self::AdtDef {
+    fn adt_def(self, adt_def_id: DefId) -> <Self::Interner as Interner>::AdtDef {
         self.adt_def(adt_def_id)
     }
 
@@ -254,18 +285,6 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         )
     }
 
-    fn mk_args(self, args: &[Self::GenericArg]) -> ty::GenericArgsRef<'tcx> {
-        self.mk_args(args)
-    }
-
-    fn mk_args_from_iter<I, T>(self, args: I) -> T::Output
-    where
-        I: Iterator<Item = T>,
-        T: CollectAndApply<Self::GenericArg, ty::GenericArgsRef<'tcx>>,
-    {
-        self.mk_args_from_iter(args)
-    }
-
     fn check_args_compatible(self, def_id: DefId, args: ty::GenericArgsRef<'tcx>) -> bool {
         self.check_args_compatible(def_id, args)
     }
@@ -279,8 +298,8 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     /// a dummy self type and forward to `debug_assert_args_compatible`.
     fn debug_assert_existential_args_compatible(
         self,
-        def_id: Self::DefId,
-        args: Self::GenericArgs,
+        def_id: <Self::Interner as Interner>::DefId,
+        args: <Self::Interner as Interner>::GenericArgs,
     ) {
         // FIXME: We could perhaps add a `skip: usize` to `debug_assert_args_compatible`
         // to avoid needing to reintern the set of args...
@@ -310,9 +329,7 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.recursion_limit().0
     }
 
-    type Features = &'tcx rustc_feature::Features;
-
-    fn features(self) -> Self::Features {
+    fn features(self) -> <Self::Interner as Interner>::Features {
         self.features()
     }
 
@@ -611,15 +628,17 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.coroutine_is_async_gen(coroutine_def_id)
     }
 
-    type UnsizingParams = &'tcx rustc_index::bit_set::BitSet<u32>;
-    fn unsizing_params_for_adt(self, adt_def_id: DefId) -> Self::UnsizingParams {
+    fn unsizing_params_for_adt(
+        self,
+        adt_def_id: DefId,
+    ) -> <Self::Interner as Interner>::UnsizingParams {
         self.unsizing_params_for_adt(adt_def_id)
     }
 
     fn find_const_ty_from_env(
         self,
         param_env: &ty::ParamEnv<'tcx>,
-        placeholder: Self::PlaceholderConst,
+        placeholder: <Self::Interner as Interner>::PlaceholderConst,
     ) -> Ty<'tcx> {
         placeholder.find_const_ty_from_env(param_env)
     }
@@ -631,16 +650,11 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.anonymize_bound_vars(binder)
     }
 
-    fn opaque_types_defined_by(self, defining_anchor: LocalDefId) -> Self::DefiningOpaqueTypes {
+    fn opaque_types_defined_by(
+        self,
+        defining_anchor: LocalDefId,
+    ) -> <Self::Interner as Interner>::DefiningOpaqueTypes {
         self.opaque_types_defined_by(defining_anchor)
-    }
-}
-
-impl<'tcx> RustIr for TyCtxt<'tcx> {
-    type Interner = Self;
-
-    fn interner(self) -> Self::Interner {
-        self
     }
 }
 

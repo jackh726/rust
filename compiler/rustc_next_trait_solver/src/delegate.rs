@@ -15,7 +15,7 @@ pub trait SolverDelegate: Deref<Target = <Self as SolverDelegate>::Infcx> + Size
     type Span: Copy;
 
     fn build_with_canonical<V>(
-        cx: Self::Interner,
+        cx: Self::Ir,
         canonical: &ty::CanonicalQueryInput<Self::Interner, V>,
     ) -> (Self, V, ty::CanonicalVarValues<Self::Interner>)
     where

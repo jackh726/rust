@@ -29,6 +29,7 @@ mod probe;
 pub struct EvalCtxt<'a, D, Ir = <D as SolverDelegate>::Ir, I = <D as SolverDelegate>::Interner>
 where
     D: SolverDelegate<Ir = Ir, Interner = I>,
+    Ir: RustIr<Interner = I>,
     I: Interner,
 {
     /// The inference context that backs (mostly) inference and placeholder terms
@@ -169,6 +170,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     #[instrument(level = "debug", skip(self))]
     fn evaluate_root_goal(
@@ -176,12 +178,9 @@ where
         goal: Goal<I, I::Predicate>,
         generate_proof_tree: GenerateProofTree,
     ) -> (Result<(HasChanged, Certainty), NoSolution>, Option<inspect::GoalEvaluation<I>>) {
-        EvalCtxt::enter_root(
-            self,
-            self.cx().interner().recursion_limit(),
-            generate_proof_tree,
-            |ecx| ecx.evaluate_goal(GoalEvaluationKind::Root, GoalSource::Misc, goal),
-        )
+        EvalCtxt::enter_root(self, self.cx().recursion_limit(), generate_proof_tree, |ecx| {
+            ecx.evaluate_goal(GoalEvaluationKind::Root, GoalSource::Misc, goal)
+        })
     }
 
     fn root_goal_may_hold_with_depth(
@@ -207,12 +206,9 @@ where
         Result<(NestedNormalizationGoals<I>, HasChanged, Certainty), NoSolution>,
         Option<inspect::GoalEvaluation<I>>,
     ) {
-        EvalCtxt::enter_root(
-            self,
-            self.cx().interner().recursion_limit(),
-            generate_proof_tree,
-            |ecx| ecx.evaluate_goal_raw(GoalEvaluationKind::Root, GoalSource::Misc, goal),
-        )
+        EvalCtxt::enter_root(self, self.cx().recursion_limit(), generate_proof_tree, |ecx| {
+            ecx.evaluate_goal_raw(GoalEvaluationKind::Root, GoalSource::Misc, goal)
+        })
     }
 }
 
@@ -221,6 +217,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     pub(super) fn typing_mode(&self, param_env_for_debug_assertion: &I::ParamEnv) -> TypingMode<I> {
         self.delegate.typing_mode(param_env_for_debug_assertion)
@@ -280,7 +277,7 @@ where
     /// This function takes care of setting up the inference context, setting the anchor,
     /// and registering opaques from the canonicalized input.
     fn enter_canonical<R>(
-        cx: I,
+        cx: D::Ir,
         search_graph: &'a mut SearchGraph<D>,
         canonical_input: CanonicalInput<I>,
         canonical_goal_evaluation: &mut ProofTreeBuilder<D>,
@@ -335,7 +332,7 @@ where
     /// outside of it.
     #[instrument(level = "debug", skip(cx, search_graph, goal_evaluation), ret)]
     fn evaluate_canonical_goal(
-        cx: I,
+        cx: D::Ir,
         search_graph: &'a mut SearchGraph<D>,
         canonical_input: CanonicalInput<I>,
         goal_evaluation: &mut ProofTreeBuilder<D>,
@@ -405,7 +402,7 @@ where
         let mut goal_evaluation =
             self.inspect.new_goal_evaluation(goal.clone(), &orig_values, goal_evaluation_kind);
         let canonical_response = EvalCtxt::evaluate_canonical_goal(
-            self.cx().interner(),
+            self.cx(),
             self.search_graph,
             canonical_goal,
             &mut goal_evaluation,
@@ -816,7 +813,7 @@ where
         // NOTE: this check is purely an optimization, the structural eq would
         // always fail if the term is not an inference variable.
         if term.is_infer() {
-            let cx = self.cx().interner();
+            let cx = self.cx();
             // We need to relate `alias` to `term` treating only the outermost
             // constructor as rigid, relating any contained generic arguments as
             // normal. We do this by first structurally equating the `term`
@@ -1067,6 +1064,7 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     fn cx(&self) -> I {
         self.ecx.cx().interner()

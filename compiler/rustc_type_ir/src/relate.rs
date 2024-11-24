@@ -84,7 +84,7 @@ pub trait TypeRelation: Sized {
         a_arg: <Self::I as Interner>::GenericArgs,
         b_arg: <Self::I as Interner>::GenericArgs,
     ) -> RelateResult<Self::I, <Self::I as Interner>::GenericArgs> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let opt_variances = cx.variances_of(item_def_id);
         relate_args_with_variances(self, item_def_id, opt_variances, a_arg, b_arg, true)
     }
@@ -157,7 +157,7 @@ pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(
     b_arg: I::GenericArgs,
     fetch_ty_for_diag: bool,
 ) -> RelateResult<I, I::GenericArgs> {
-    let cx = relation.cx().interner();
+    let cx = relation.cx();
 
     let mut cached_ty = None;
     let params =
@@ -165,7 +165,9 @@ pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(
             let variance = variances.clone().get(i).unwrap();
             let variance_info = if variance == ty::Invariant && fetch_ty_for_diag {
                 let ty = cached_ty
-                    .get_or_insert_with(|| cx.type_of(ty_def_id).instantiate(cx, a_arg.clone()))
+                    .get_or_insert_with(|| {
+                        cx.type_of(ty_def_id).instantiate(cx.interner(), a_arg.clone())
+                    })
                     .clone();
                 VarianceDiagInfo::Invariant { ty, param_index: i.try_into().unwrap() }
             } else {
@@ -174,7 +176,7 @@ pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(
             relation.relate_with_variance(variance, variance_info, a, b)
         });
 
-    cx.mk_args_from_iter(params)
+    cx.interner().mk_args_from_iter(params)
 }
 
 impl<I: Interner> Relate<I> for ty::FnSig<I> {
@@ -183,7 +185,7 @@ impl<I: Interner> Relate<I> for ty::FnSig<I> {
         a: ty::FnSig<I>,
         b: ty::FnSig<I>,
     ) -> RelateResult<I, ty::FnSig<I>> {
-        let cx = relation.cx().interner();
+        let cx = relation.cx();
 
         if a.c_variadic != b.c_variadic {
             return Err(TypeError::VariadicMismatch({
@@ -247,7 +249,7 @@ impl<I: Interner> Relate<I> for ty::AliasTy<I> {
         a: ty::AliasTy<I>,
         b: ty::AliasTy<I>,
     ) -> RelateResult<I, ty::AliasTy<I>> {
-        let cx = relation.cx().interner();
+        let cx = relation.cx();
 
         if a.def_id != b.def_id {
             Err(TypeError::ProjectionMismatched({
@@ -290,7 +292,7 @@ impl<I: Interner> Relate<I> for ty::AliasTerm<I> {
         a: ty::AliasTerm<I>,
         b: ty::AliasTerm<I>,
     ) -> RelateResult<I, ty::AliasTerm<I>> {
-        let cx = relation.cx().interner();
+        let cx = relation.cx();
 
         if a.def_id != b.def_id {
             Err(TypeError::ProjectionMismatched({
@@ -327,7 +329,7 @@ impl<I: Interner> Relate<I> for ty::ExistentialProjection<I> {
         a: ty::ExistentialProjection<I>,
         b: ty::ExistentialProjection<I>,
     ) -> RelateResult<I, ty::ExistentialProjection<I>> {
-        let cx = relation.cx().interner();
+        let cx = relation.cx();
 
         if a.def_id != b.def_id {
             Err(TypeError::ProjectionMismatched({
@@ -359,7 +361,7 @@ impl<I: Interner> Relate<I> for ty::TraitRef<I> {
         a: ty::TraitRef<I>,
         b: ty::TraitRef<I>,
     ) -> RelateResult<I, ty::TraitRef<I>> {
-        let cx = relation.cx().interner();
+        let cx = relation.cx();
 
         // Different traits cannot be related.
         if a.def_id != b.def_id {
@@ -381,7 +383,7 @@ impl<I: Interner> Relate<I> for ty::ExistentialTraitRef<I> {
         a: ty::ExistentialTraitRef<I>,
         b: ty::ExistentialTraitRef<I>,
     ) -> RelateResult<I, ty::ExistentialTraitRef<I>> {
-        let cx = relation.cx().interner();
+        let cx = relation.cx();
 
         // Different traits cannot be related.
         if a.def_id != b.def_id {
@@ -609,7 +611,7 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I = I>>(
         a,
         b
     );
-    let cx = relation.cx().interner();
+    let cx = relation.cx();
 
     if cx.features().generic_const_exprs() {
         a = cx.expand_abstract_consts(a);
@@ -648,8 +650,8 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I = I>>(
         // be stabilized.
         (ty::ConstKind::Unevaluated(au), ty::ConstKind::Unevaluated(bu)) if au.def == bu.def => {
             if cfg!(debug_assertions) {
-                let a_ty = cx.type_of(au.def).instantiate(cx, au.args.clone());
-                let b_ty = cx.type_of(bu.def).instantiate(cx, bu.args.clone());
+                let a_ty = cx.type_of(au.def).instantiate(cx.interner(), au.args.clone());
+                let b_ty = cx.type_of(bu.def).instantiate(cx.interner(), bu.args.clone());
                 assert_eq!(a_ty, b_ty);
             }
 
@@ -659,11 +661,14 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I = I>>(
                 au.args,
                 bu.args,
             )?;
-            return Ok(Const::new_unevaluated(cx, ty::UnevaluatedConst { def: au.def, args }));
+            return Ok(Const::new_unevaluated(cx.interner(), ty::UnevaluatedConst {
+                def: au.def,
+                args,
+            }));
         }
         (ty::ConstKind::Expr(ae), ty::ConstKind::Expr(be)) => {
             let expr = relation.relate(ae, be)?;
-            return Ok(Const::new_expr(cx, expr));
+            return Ok(Const::new_expr(cx.interner(), expr));
         }
         _ => false,
     };

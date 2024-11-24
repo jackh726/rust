@@ -50,23 +50,27 @@ pub trait Ty<I: Interner<Ty = Self>>:
 
     fn new_alias(interner: I, kind: ty::AliasTyKind, alias_ty: ty::AliasTy<I>) -> Self;
 
-    fn new_projection_from_args(interner: I, def_id: I::DefId, args: I::GenericArgs) -> Self {
+    fn new_projection_from_args<Ir: RustIr<Interner = I>>(
+        ir: Ir,
+        def_id: I::DefId,
+        args: I::GenericArgs,
+    ) -> Self {
         Ty::new_alias(
-            interner,
+            ir.interner(),
             ty::AliasTyKind::Projection,
-            ty::AliasTy::new_from_args(interner, def_id, args),
+            ty::AliasTy::new_from_args(ir, def_id, args),
         )
     }
 
-    fn new_projection(
-        interner: I,
+    fn new_projection<Ir: RustIr<Interner = I>>(
+        ir: Ir,
         def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> Self {
         Ty::new_alias(
-            interner,
+            ir.interner(),
             ty::AliasTyKind::Projection,
-            ty::AliasTy::new(interner, def_id, args),
+            ty::AliasTy::new(ir, def_id, args),
         )
     }
 
@@ -136,10 +140,10 @@ pub trait Ty<I: Interner<Ty = Self>>:
         matches!(self.clone().kind(), ty::FnPtr(..))
     }
 
-    fn fn_sig(self, interner: I) -> ty::Binder<I, ty::FnSig<I>> {
+    fn fn_sig<Ir: RustIr<Interner = I>>(self, ir: Ir) -> ty::Binder<I, ty::FnSig<I>> {
         match self.clone().kind() {
             ty::FnPtr(sig_tys, hdr) => sig_tys.with(hdr),
-            ty::FnDef(def_id, args) => interner.fn_sig(def_id).instantiate(interner, args),
+            ty::FnDef(def_id, args) => ir.fn_sig(def_id).instantiate(ir.interner(), args),
             ty::Error(_) => {
                 // ignore errors (#54954)
                 ty::Binder::dummy(ty::FnSig {
@@ -273,10 +277,6 @@ pub trait Const<I: Interner<Const = Self>>:
 
     fn new_error(interner: I, guar: I::ErrorGuaranteed) -> Self;
 
-    fn new_error_with_message(interner: I, msg: impl ToString) -> Self {
-        Self::new_error(interner, interner.delay_bug(msg))
-    }
-
     fn is_ct_var(self) -> bool {
         matches!(self.kind(), ty::ConstKind::Infer(ty::InferConst::Var(_)))
     }
@@ -379,26 +379,11 @@ pub trait GenericArgs<I: Interner<GenericArgs = Self>>:
 {
     fn dummy() -> Self;
 
-    fn rebase_onto(
-        self,
-        interner: I,
-        source_def_id: I::DefId,
-        target: I::GenericArgs,
-    ) -> I::GenericArgs;
-
     fn type_at(self, i: usize) -> I::Ty;
 
     fn region_at(self, i: usize) -> I::Region;
 
     fn const_at(self, i: usize) -> I::Const;
-
-    fn identity_for_item(interner: I, def_id: I::DefId) -> I::GenericArgs;
-
-    fn extend_with_error(
-        interner: I,
-        def_id: I::DefId,
-        original_args: &[I::GenericArg],
-    ) -> I::GenericArgs;
 
     fn split_closure_args(self) -> ty::ClosureArgsParts<I>;
     fn split_coroutine_closure_args(self) -> ty::CoroutineClosureArgsParts<I>;
@@ -413,6 +398,21 @@ pub trait GenericArgs<I: Interner<GenericArgs = Self>>:
     fn as_coroutine(self) -> ty::CoroutineArgs<I> {
         ty::CoroutineArgs { args: self }
     }
+}
+
+pub trait IrGenericArgs<I: Interner<GenericArgs = Self>, Ir: RustIr<Interner = I>>:
+    GenericArgs<I>
+{
+    fn rebase_onto(self, ir: Ir, source_def_id: I::DefId, target: I::GenericArgs)
+    -> I::GenericArgs;
+
+    fn identity_for_item(ir: Ir, def_id: I::DefId) -> I::GenericArgs;
+
+    fn extend_with_error(
+        ir: Ir,
+        def_id: I::DefId,
+        original_args: &[I::GenericArg],
+    ) -> I::GenericArgs;
 }
 
 pub trait Predicate<I: Interner<Predicate = Self>>:

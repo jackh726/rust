@@ -10,16 +10,17 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
+    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self), ret)]
     pub(super) fn compute_projection_goal(
         &mut self,
         goal: Goal<I, ProjectionPredicate<I>>,
     ) -> QueryResult<I> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
         let projection_term = goal.predicate.projection_term.clone().to_term(cx);
         let goal = goal.clone().with(
-            cx,
+            cx.interner(),
             ty::PredicateKind::AliasRelate(
                 projection_term,
                 goal.predicate.term,

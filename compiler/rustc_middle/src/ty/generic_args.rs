@@ -47,15 +47,6 @@ impl<'tcx> rustc_type_ir::inherent::GenericArgs<TyCtxt<'tcx>> for ty::GenericArg
         Default::default()
     }
 
-    fn rebase_onto(
-        self,
-        tcx: TyCtxt<'tcx>,
-        source_ancestor: DefId,
-        target_args: GenericArgsRef<'tcx>,
-    ) -> GenericArgsRef<'tcx> {
-        self.rebase_onto(tcx, source_ancestor, target_args)
-    }
-
     fn type_at(self, i: usize) -> Ty<'tcx> {
         self.type_at(i)
     }
@@ -66,18 +57,6 @@ impl<'tcx> rustc_type_ir::inherent::GenericArgs<TyCtxt<'tcx>> for ty::GenericArg
 
     fn const_at(self, i: usize) -> ty::Const<'tcx> {
         self.const_at(i)
-    }
-
-    fn identity_for_item(tcx: TyCtxt<'tcx>, def_id: DefId) -> ty::GenericArgsRef<'tcx> {
-        GenericArgs::identity_for_item(tcx, def_id)
-    }
-
-    fn extend_with_error(
-        tcx: TyCtxt<'tcx>,
-        def_id: DefId,
-        original_args: &[ty::GenericArg<'tcx>],
-    ) -> ty::GenericArgsRef<'tcx> {
-        ty::GenericArgs::extend_with_error(tcx, def_id, original_args)
     }
 
     fn split_closure_args(self) -> ty::ClosureArgsParts<TyCtxt<'tcx>> {
@@ -136,6 +115,31 @@ impl<'tcx> rustc_type_ir::inherent::GenericArgs<TyCtxt<'tcx>> for ty::GenericArg
             },
             _ => bug!("coroutine args missing synthetics"),
         }
+    }
+}
+
+impl<'tcx> rustc_type_ir::inherent::IrGenericArgs<TyCtxt<'tcx>, TyCtxt<'tcx>>
+    for ty::GenericArgsRef<'tcx>
+{
+    fn rebase_onto(
+        self,
+        tcx: TyCtxt<'tcx>,
+        source_ancestor: DefId,
+        target_args: GenericArgsRef<'tcx>,
+    ) -> GenericArgsRef<'tcx> {
+        self.rebase_onto(tcx, source_ancestor, target_args)
+    }
+
+    fn identity_for_item(tcx: TyCtxt<'tcx>, def_id: DefId) -> ty::GenericArgsRef<'tcx> {
+        GenericArgs::identity_for_item(tcx, def_id)
+    }
+
+    fn extend_with_error(
+        tcx: TyCtxt<'tcx>,
+        def_id: DefId,
+        original_args: &[ty::GenericArg<'tcx>],
+    ) -> ty::GenericArgsRef<'tcx> {
+        ty::GenericArgs::extend_with_error(tcx, def_id, original_args)
     }
 }
 

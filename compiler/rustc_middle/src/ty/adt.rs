@@ -18,7 +18,6 @@ use rustc_macros::{HashStable, TyDecodable, TyEncodable};
 use rustc_query_system::ich::StableHashingContext;
 use rustc_session::DataTypeKind;
 use rustc_span::symbol::sym;
-use rustc_type_ir::RustIr;
 use rustc_type_ir::solve::AdtDestructorKind;
 use tracing::{debug, info, trace};
 
@@ -220,7 +219,7 @@ impl<'tcx> rustc_type_ir::inherent::AdtDef<TyCtxt<'tcx>> for AdtDef<'tcx> {
 
 impl<'tcx> rustc_type_ir::inherent::IrAdtDef<TyCtxt<'tcx>, TyCtxt<'tcx>> for AdtDef<'tcx> {
     fn struct_tail_ty(self, cx: TyCtxt<'tcx>) -> Option<ty::EarlyBinder<'tcx, Ty<'tcx>>> {
-        Some(cx.interner().type_of(self.non_enum_variant().tail_opt()?.did))
+        Some(cx.type_of(self.non_enum_variant().tail_opt()?.did))
     }
 
     fn all_field_tys(
