@@ -879,7 +879,7 @@ impl Placeholder<BoundVar> {
 pub type PlaceholderRegion = Placeholder<BoundRegion>;
 
 impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderRegion {
-    fn universe(self) -> UniverseIndex {
+    fn universe(&self) -> UniverseIndex {
         self.universe
     }
 
@@ -887,8 +887,8 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderRegion {
         self.bound.var
     }
 
-    fn with_updated_universe(self, ui: UniverseIndex) -> Self {
-        Placeholder { universe: ui, ..self }
+    fn with_updated_universe(&self, ui: UniverseIndex) -> Self {
+        Placeholder { universe: ui, ..*self }
     }
 
     fn new(ui: UniverseIndex, var: BoundVar) -> Self {
@@ -899,7 +899,7 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderRegion {
 pub type PlaceholderType = Placeholder<BoundTy>;
 
 impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderType {
-    fn universe(self) -> UniverseIndex {
+    fn universe(&self) -> UniverseIndex {
         self.universe
     }
 
@@ -907,8 +907,8 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderType {
         self.bound.var
     }
 
-    fn with_updated_universe(self, ui: UniverseIndex) -> Self {
-        Placeholder { universe: ui, ..self }
+    fn with_updated_universe(&self, ui: UniverseIndex) -> Self {
+        Placeholder { universe: ui, ..*self }
     }
 
     fn new(ui: UniverseIndex, var: BoundVar) -> Self {
@@ -926,7 +926,7 @@ pub struct BoundConst<'tcx> {
 pub type PlaceholderConst = Placeholder<BoundVar>;
 
 impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderConst {
-    fn universe(self) -> UniverseIndex {
+    fn universe(&self) -> UniverseIndex {
         self.universe
     }
 
@@ -934,8 +934,8 @@ impl rustc_type_ir::inherent::PlaceholderLike for PlaceholderConst {
         self.bound
     }
 
-    fn with_updated_universe(self, ui: UniverseIndex) -> Self {
-        Placeholder { universe: ui, ..self }
+    fn with_updated_universe(&self, ui: UniverseIndex) -> Self {
+        Placeholder { universe: ui, ..*self }
     }
 
     fn new(ui: UniverseIndex, var: BoundVar) -> Self {

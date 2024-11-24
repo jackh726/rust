@@ -83,7 +83,8 @@ impl<I: Interner, V: fmt::Display> fmt::Display for Canonical<I, V> {
 /// canonical value. This is sufficient information for code to create
 /// a copy of the canonical value in some other inference context,
 /// with fresh inference variables replacing the canonical values.
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::PlaceholderTy: Copy, I::PlaceholderRegion: Copy, I::PlaceholderConst: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct CanonicalVarInfo<I: Interner> {
@@ -91,12 +92,12 @@ pub struct CanonicalVarInfo<I: Interner> {
 }
 
 impl<I: Interner> CanonicalVarInfo<I> {
-    pub fn universe(self) -> UniverseIndex {
+    pub fn universe(&self) -> UniverseIndex {
         self.kind.universe()
     }
 
     #[must_use]
-    pub fn with_updated_universe(self, ui: UniverseIndex) -> CanonicalVarInfo<I> {
+    pub fn with_updated_universe(&self, ui: UniverseIndex) -> CanonicalVarInfo<I> {
         CanonicalVarInfo { kind: self.kind.with_updated_universe(ui) }
     }
 
@@ -137,7 +138,8 @@ impl<I: Interner> CanonicalVarInfo<I> {
 /// Describes the "kind" of the canonical variable. This is a "kind"
 /// in the type-theory sense of the term -- i.e., a "meta" type system
 /// that analyzes type-like values.
-#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Copy; I: Interner, I::PlaceholderTy: Copy, I::PlaceholderRegion: Copy, I::PlaceholderConst: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub enum CanonicalVarKind<I: Interner> {
@@ -163,11 +165,11 @@ pub enum CanonicalVarKind<I: Interner> {
 }
 
 impl<I: Interner> CanonicalVarKind<I> {
-    pub fn universe(self) -> UniverseIndex {
+    pub fn universe(&self) -> UniverseIndex {
         match self {
-            CanonicalVarKind::Ty(CanonicalTyVarKind::General(ui)) => ui,
-            CanonicalVarKind::Region(ui) => ui,
-            CanonicalVarKind::Const(ui) => ui,
+            CanonicalVarKind::Ty(CanonicalTyVarKind::General(ui)) => *ui,
+            CanonicalVarKind::Region(ui) => *ui,
+            CanonicalVarKind::Const(ui) => *ui,
             CanonicalVarKind::PlaceholderTy(placeholder) => placeholder.universe(),
             CanonicalVarKind::PlaceholderRegion(placeholder) => placeholder.universe(),
             CanonicalVarKind::PlaceholderConst(placeholder) => placeholder.universe(),
@@ -181,7 +183,7 @@ impl<I: Interner> CanonicalVarKind<I> {
     ///
     /// In case this is a float or int variable, this causes an ICE if
     /// the updated universe is not the root.
-    pub fn with_updated_universe(self, ui: UniverseIndex) -> CanonicalVarKind<I> {
+    pub fn with_updated_universe(&self, ui: UniverseIndex) -> CanonicalVarKind<I> {
         match self {
             CanonicalVarKind::Ty(CanonicalTyVarKind::General(_)) => {
                 CanonicalVarKind::Ty(CanonicalTyVarKind::General(ui))
@@ -200,7 +202,7 @@ impl<I: Interner> CanonicalVarKind<I> {
             }
             CanonicalVarKind::Ty(CanonicalTyVarKind::Int | CanonicalTyVarKind::Float) => {
                 assert_eq!(ui, UniverseIndex::ROOT);
-                self
+                self.clone()
             }
         }
     }

@@ -134,7 +134,7 @@ pub trait PlaceholderLike {
     // Required methods
     fn universe(self) -> UniverseIndex;
     fn var(self) -> BoundVar;
-    fn with_updated_universe(self, ui: UniverseIndex) -> Self;
+    fn with_updated_universe(&self, ui: UniverseIndex) -> Self;
     fn new(ui: UniverseIndex, var: BoundVar) -> Self;
 }
 

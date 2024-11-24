@@ -495,11 +495,11 @@ pub trait Clause<I: Interner<Clause = Self>>:
 }
 
 /// Common capabilities of placeholder kinds
-pub trait PlaceholderLike: Copy + Debug + Hash + Eq {
-    fn universe(self) -> ty::UniverseIndex;
+pub trait PlaceholderLike: Clone + Debug + Hash + Eq {
+    fn universe(&self) -> ty::UniverseIndex;
     fn var(&self) -> ty::BoundVar;
 
-    fn with_updated_universe(self, ui: ty::UniverseIndex) -> Self;
+    fn with_updated_universe(&self, ui: ty::UniverseIndex) -> Self;
 
     fn new(ui: ty::UniverseIndex, var: ty::BoundVar) -> Self;
 }
