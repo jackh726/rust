@@ -118,7 +118,7 @@ pub trait Interner:
     // Kinds of regions
     type Region: Region<Self>;
     type EarlyParamRegion: Clone + Debug + Hash + Eq + ParamLike;
-    type LateParamRegion: Copy + Debug + Hash + Eq;
+    type LateParamRegion: Clone + Debug + Hash + Eq;
     type BoundRegion: Clone + Debug + Hash + Eq + BoundVarLike<Self>;
     type PlaceholderRegion: PlaceholderLike;
 
