@@ -1,11 +1,12 @@
 use std::fmt;
 
 use derive_where::derive_where;
+// We *would* normally import these through `rustc_data_structures`, but external
+// users (i.e. rust-analyzer) may need the impls for these traits.
+use ena::unify::{NoError, UnifyKey, UnifyValue};
 use rustc_ast_ir::Mutability;
 #[cfg(feature = "nightly")]
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
-#[cfg(feature = "nightly")]
-use rustc_data_structures::unify::{NoError, UnifyKey, UnifyValue};
 #[cfg(feature = "nightly")]
 use rustc_macros::{Decodable, Encodable, HashStable_NoContext, TyDecodable, TyEncodable};
 use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
@@ -645,7 +646,6 @@ rustc_index::newtype_index! {
     #[encodable]
     #[orderable]
     #[debug_format = "?{}t"]
-    #[gate_rustc_only]
     pub struct TyVid {}
 }
 
@@ -654,7 +654,6 @@ rustc_index::newtype_index! {
     #[encodable]
     #[orderable]
     #[debug_format = "?{}i"]
-    #[gate_rustc_only]
     pub struct IntVid {}
 }
 
@@ -663,7 +662,6 @@ rustc_index::newtype_index! {
     #[encodable]
     #[orderable]
     #[debug_format = "?{}f"]
-    #[gate_rustc_only]
     pub struct FloatVid {}
 }
 
@@ -706,7 +704,6 @@ pub enum InferTy {
 
 /// Raw `TyVid` are used as the unification key for `sub_relations`;
 /// they carry no values.
-#[cfg(feature = "nightly")]
 impl UnifyKey for TyVid {
     type Value = ();
     #[inline]
@@ -722,7 +719,6 @@ impl UnifyKey for TyVid {
     }
 }
 
-#[cfg(feature = "nightly")]
 impl UnifyValue for IntVarValue {
     type Error = NoError;
 
@@ -742,7 +738,6 @@ impl UnifyValue for IntVarValue {
     }
 }
 
-#[cfg(feature = "nightly")]
 impl UnifyKey for IntVid {
     type Value = IntVarValue;
     #[inline] // make this function eligible for inlining - it is quite hot.
@@ -758,7 +753,6 @@ impl UnifyKey for IntVid {
     }
 }
 
-#[cfg(feature = "nightly")]
 impl UnifyValue for FloatVarValue {
     type Error = NoError;
 
@@ -776,7 +770,6 @@ impl UnifyValue for FloatVarValue {
     }
 }
 
-#[cfg(feature = "nightly")]
 impl UnifyKey for FloatVid {
     type Value = FloatVarValue;
     #[inline]
