@@ -646,6 +646,7 @@ rustc_index::newtype_index! {
     #[encodable]
     #[orderable]
     #[debug_format = "?{}t"]
+    #[gate_rustc_only]
     pub struct TyVid {}
 }
 
@@ -654,6 +655,7 @@ rustc_index::newtype_index! {
     #[encodable]
     #[orderable]
     #[debug_format = "?{}i"]
+    #[gate_rustc_only]
     pub struct IntVid {}
 }
 
@@ -662,6 +664,7 @@ rustc_index::newtype_index! {
     #[encodable]
     #[orderable]
     #[debug_format = "?{}f"]
+    #[gate_rustc_only]
     pub struct FloatVid {}
 }
 
