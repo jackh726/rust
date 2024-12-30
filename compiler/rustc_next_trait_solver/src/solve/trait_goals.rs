@@ -129,6 +129,7 @@ where
             .enter(|ecx| ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes))
     }
 
+    #[instrument(level = "trace", skip(ecx, then))]
     fn probe_and_match_goal_against_assumption(
         ecx: &mut EvalCtxt<'_, D>,
         source: CandidateSource<I>,
@@ -137,13 +138,16 @@ where
         then: impl FnOnce(&mut EvalCtxt<'_, D>) -> QueryResult<I>,
     ) -> Result<Candidate<I>, NoSolution> {
         if let Some(trait_clause) = assumption.as_trait_clause() {
+            trace!("assumption is trait_clause");
             if trait_clause.clone().def_id() == goal.predicate.clone().def_id()
                 && trait_clause.clone().polarity() == goal.predicate.polarity
             {
+                trace!("trait and polarity match");
                 if !DeepRejectCtxt::relate_rigid_rigid(ecx.cx().interner()).args_may_unify(
                     goal.predicate.trait_ref.args.clone(),
                     trait_clause.clone().skip_binder().trait_ref.args,
                 ) {
+                    trace!("args may not unify");
                     return Err(NoSolution);
                 }
 
@@ -306,6 +310,7 @@ where
             )? {
                 Some(a) => a,
                 None => {
+                    trace!("Unable to extract inputs and output");
                     return ecx.forced_ambiguity(MaybeCause::Ambiguity);
                 }
             };
@@ -324,6 +329,7 @@ where
                 ])
             })
             .upcast(cx.interner());
+        trace!(?pred);
         Self::probe_and_consider_implied_clause(
             ecx,
             CandidateSource::BuiltinImpl(BuiltinImplSource::Misc),

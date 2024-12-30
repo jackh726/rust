@@ -429,7 +429,9 @@ where
         } else if cx.trait_is_alias(trait_def_id) {
             G::consider_trait_alias_candidate(self, goal)
         } else {
-            match cx.as_lang_item(trait_def_id) {
+            let lang_item = cx.as_lang_item(trait_def_id);
+            tracing::trace!(?lang_item);
+            match lang_item {
                 Some(TraitSolverLangItem::Sized) => G::consider_builtin_sized_candidate(self, goal),
                 Some(TraitSolverLangItem::Copy | TraitSolverLangItem::Clone) => {
                     G::consider_builtin_copy_clone_candidate(self, goal)

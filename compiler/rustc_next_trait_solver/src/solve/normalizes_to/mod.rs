@@ -156,6 +156,7 @@ where
         self.trait_def_id(cx)
     }
 
+    #[instrument(level = "trace", skip(ecx, then))]
     fn probe_and_match_goal_against_assumption(
         ecx: &mut EvalCtxt<'_, D>,
         source: CandidateSource<I>,
@@ -164,17 +165,20 @@ where
         then: impl FnOnce(&mut EvalCtxt<'_, D>) -> QueryResult<I>,
     ) -> Result<Candidate<I>, NoSolution> {
         if let Some(projection_pred) = assumption.as_projection_clause() {
+            tracing::trace!("assumption is projection clause");
             if projection_pred.projection_def_id() == goal.predicate.clone().def_id() {
                 let cx = ecx.cx();
                 if !DeepRejectCtxt::relate_rigid_rigid(cx.interner()).args_may_unify(
                     goal.predicate.alias.args.clone(),
                     projection_pred.clone().skip_binder().projection_term.args,
                 ) {
+                    tracing::trace!("args will not unify");
                     return Err(NoSolution);
                 }
                 ecx.probe_trait_candidate(source).enter(|ecx| {
                     let assumption_projection_pred =
                         ecx.instantiate_binder_with_infer(projection_pred);
+                    tracing::trace!(?assumption_projection_pred);
                     ecx.eq(
                         goal.param_env.clone(),
                         goal.predicate.alias.clone(),
@@ -334,6 +338,8 @@ where
                 kind => panic!("expected projection, found {kind:?}"),
             };
 
+            tracing::trace!(?term);
+
             ecx.instantiate_normalizes_to_term(goal, term.instantiate(cx.interner(), target_args));
             ecx.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         })
@@ -384,6 +390,7 @@ where
         panic!("`FnPtr` does not have an associated type: {:?}", goal);
     }
 
+    #[tracing::instrument(level = "trace", skip(ecx), ret)]
     fn consider_builtin_fn_trait_candidates(
         ecx: &mut EvalCtxt<'_, D>,
         goal: Goal<I, Self>,
@@ -417,6 +424,8 @@ where
                 term: output.into(),
             })
             .upcast(cx.interner());
+
+        tracing::trace!(?pred);
 
         Self::probe_and_consider_implied_clause(
             ecx,

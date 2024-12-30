@@ -236,6 +236,7 @@ impl<I: Interner, const INSTANTIATE_LHS_WITH_INFER: bool, const INSTANTIATE_RHS_
         })
     }
 
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     pub fn types_may_unify(self, lhs: I::Ty, rhs: I::Ty) -> bool {
         match rhs.clone().kind() {
             // Start by checking whether the `rhs` type may unify with

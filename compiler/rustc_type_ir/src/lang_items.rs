@@ -1,5 +1,6 @@
 /// Lang items used by the new trait solver. This can be mapped to whatever internal
 /// representation of `LangItem`s used in the underlying compiler implementation.
+#[derive(Debug, PartialEq)]
 pub enum TraitSolverLangItem {
     // tidy-alphabetical-start
     AsyncDestruct,

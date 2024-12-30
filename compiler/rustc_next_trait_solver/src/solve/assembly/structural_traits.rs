@@ -260,6 +260,7 @@ where
 }
 
 // Returns a binder of the tupled inputs types and output type from a builtin callable type.
+#[tracing::instrument(level = "trace", skip(cx), ret)]
 pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<
     Ir: RustIr<Interner = I>,
     I: Interner,
