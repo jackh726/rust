@@ -7,6 +7,7 @@ use rustc_macros::{Decodable, Encodable, HashStable_NoContext, TyDecodable, TyEn
 use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
 
 use crate::inherent::*;
+use crate::ir_print::IrPrint;
 use crate::lift::Lift;
 use crate::upcast::{Upcast, UpcastFrom};
 use crate::visit::TypeVisitableExt as _;
@@ -503,7 +504,7 @@ impl AliasTermKind {
 /// * For a projection, this would be `<Ty as Trait<...>>::N<...>`.
 /// * For an inherent projection, this would be `Ty::N<...>`.
 /// * For an opaque type, there is no explicit syntax.
-#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
 #[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
@@ -533,9 +534,15 @@ pub struct AliasTerm<I: Interner> {
     pub def_id: I::DefId,
 
     /// This field exists to prevent the creation of `AliasTerm` without using [`AliasTerm::new_from_args`].
-    #[derive_where(skip(Debug))]
     _use_alias_term_new_instead: (),
 }
+
+impl<I: Interner> fmt::Debug for AliasTerm<I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <I as IrPrint<Self>>::print_debug(self, f)
+    }
+}
+
 
 impl<I: Interner> AliasTerm<I> {
     pub fn new_from_args<Ir: RustIr<Interner = I>>(
@@ -744,7 +751,7 @@ impl<I: Interner> ty::Binder<I, ProjectionPredicate<I>> {
 
 impl<I: Interner> fmt::Debug for ProjectionPredicate<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ProjectionPredicate({:?}, {:?})", self.projection_term, self.term)
+        <I as IrPrint<Self>>::print_debug(self, f)
     }
 }
 

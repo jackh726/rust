@@ -14,6 +14,7 @@ use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Gen
 use self::TyKind::*;
 pub use self::closure::*;
 use crate::inherent::*;
+use crate::ir_print::IrPrint;
 use crate::{self as ty, DebruijnIndex, Interner, RustIr};
 
 mod closure;
@@ -329,7 +330,7 @@ impl<I: Interner> fmt::Debug for TyKind<I> {
 /// * For a projection, this would be `<Ty as Trait<...>>::N<...>`.
 /// * For an inherent projection, this would be `Ty::N<...>`.
 /// * For an opaque type, there is no explicit syntax.
-#[derive_where(Clone, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive_where(Clone, Hash, PartialEq, Eq; I: Interner)]
 #[derive_where(Copy; I: Interner, I::GenericArgs: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
@@ -359,8 +360,13 @@ pub struct AliasTy<I: Interner> {
     pub def_id: I::DefId,
 
     /// This field exists to prevent the creation of `AliasTy` without using [`AliasTy::new_from_args`].
-    #[derive_where(skip(Debug))]
     pub(crate) _use_alias_ty_new_instead: (),
+}
+
+impl<I: Interner> fmt::Debug for AliasTy<I> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <I as IrPrint<Self>>::print_debug(self, f)
+    }
 }
 
 impl<I: Interner> AliasTy<I> {
