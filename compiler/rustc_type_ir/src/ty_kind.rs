@@ -887,8 +887,10 @@ impl<I: Interner> FnSig<I> {
         self.inputs_and_output.output()
     }
 
+    #[tracing::instrument(skip(self), ret)]
     pub fn is_fn_trait_compatible(self) -> bool {
         let FnSig { safety, abi, c_variadic, .. } = self;
+        tracing::debug!(?c_variadic, ?safety, ?abi);
         !c_variadic && safety.is_safe() && abi.is_rust()
     }
 }

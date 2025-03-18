@@ -19,7 +19,7 @@ use rustc_span::symbol::{Ident, sym};
 use rustc_trait_selection::error_reporting::traits::DefIdOrName;
 use rustc_trait_selection::infer::InferCtxtExt as _;
 use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt as _;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, trace};
 
 use super::method::MethodCallee;
 use super::method::probe::ProbeScope;
@@ -494,6 +494,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // have been normalized before.
         let fn_sig = self.instantiate_binder_with_fresh_vars(call_expr.span, infer::FnCall, fn_sig);
         let fn_sig = self.normalize(call_expr.span, fn_sig);
+        trace!(?fn_sig);
 
         self.check_argument_types(
             call_expr.span,
@@ -544,6 +545,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
         }
 
+        let fn_sig = self.resolve_vars_if_possible(fn_sig);
+        trace!(?fn_sig);
         fn_sig.output()
     }
 

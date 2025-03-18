@@ -182,7 +182,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
     /// Check an expr with an expectation type which may be used to eagerly
     /// guide inference when evaluating that expr.
-    #[instrument(skip(self, expr), level = "debug")]
     pub(super) fn check_expr_with_expectation(
         &self,
         expr: &'tcx hir::Expr<'tcx>,
@@ -195,6 +194,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// the arguments of a [`ExprKind::Call`] when evaluating its callee that
     /// is an [`ExprKind::Path`]. We use this to refine the spans for certain
     /// well-formedness guarantees for the path expr.
+    #[instrument(skip(self, expr), level = "debug")]
     pub(super) fn check_expr_with_expectation_and_args(
         &self,
         expr: &'tcx hir::Expr<'tcx>,

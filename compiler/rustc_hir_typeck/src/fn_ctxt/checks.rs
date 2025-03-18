@@ -27,7 +27,7 @@ use rustc_span::{DUMMY_SP, Span, sym};
 use rustc_trait_selection::error_reporting::infer::{FailureCode, ObligationCauseExt};
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::{self, ObligationCauseCode, ObligationCtxt, SelectionContext};
-use tracing::debug;
+use tracing::{debug, trace};
 use {rustc_ast as ast, rustc_hir as hir};
 
 use crate::Expectation::*;
@@ -314,7 +314,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // 1. Unify the provided argument with the expected type
             let expectation = Expectation::rvalue_hint(self, expected_input_ty);
 
+            trace!(?expectation);
+
             let checked_ty = self.check_expr_with_expectation(provided_arg, expectation);
+
+            trace!(?checked_ty);
+            let checked_ty = self.resolve_vars_with_obligations(checked_ty);
+            trace!(?checked_ty);
 
             // 2. Coerce to the most detailed type that could be coerced
             //    to, which is `expected_ty` if `rvalue_hint` returns an
@@ -325,6 +331,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // argument and not the call. This lets us customize the span pointed to in the
             // fulfillment error to be more accurate.
             let coerced_ty = self.resolve_vars_with_obligations(coerced_ty);
+
+            trace!(?coerced_ty);
 
             let coerce_error =
                 self.coerce(provided_arg, checked_ty, coerced_ty, AllowTwoPhase::Yes, None).err();
@@ -343,6 +351,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // If neither check failed, the types are compatible
             match formal_ty_error {
                 Ok(InferOk { obligations, value: () }) => {
+                    trace!(?obligations);
                     self.register_predicates(obligations);
                     Compatibility::Compatible
                 }
@@ -419,6 +428,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     call_appears_satisfied = false;
                 }
             }
+        }
+
+        for input in formal_input_tys.iter() {
+            let input = self.resolve_vars_if_possible(*input);
+            trace!(?input);
         }
 
         if c_variadic && provided_arg_count < minimum_input_count {
