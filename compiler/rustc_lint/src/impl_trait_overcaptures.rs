@@ -509,7 +509,6 @@ struct FunctionalVariances<'tcx> {
 
 impl<'tcx> TypeRelation for FunctionalVariances<'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.tcx
     }

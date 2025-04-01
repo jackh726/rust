@@ -7,7 +7,7 @@ use tracing::{instrument, trace};
 use crate::error::{ExpectedFound, TypeError};
 use crate::fold::TypeFoldable;
 use crate::inherent::*;
-use crate::{self as ty, Interner, RustIr};
+use crate::{self as ty, Interner};
 
 pub mod combine;
 pub mod solver_relating;
@@ -66,8 +66,7 @@ impl<I: Interner> VarianceDiagInfo<I> {
 
 pub trait TypeRelation: Sized {
     type I: Interner;
-    type Ir: RustIr<Interner = Self::I>;
-    fn cx(&self) -> Self::Ir;
+    fn cx(&self) -> Self::I;
 
     /// Generic relation routine suitable for most anything.
     fn relate<T: Relate<Self::I>>(&mut self, a: T, b: T) -> RelateResult<Self::I, T> {
@@ -144,9 +143,9 @@ pub fn relate_args_invariantly<I: Interner, R: TypeRelation<I = I>>(
     a_arg: I::GenericArgs,
     b_arg: I::GenericArgs,
 ) -> RelateResult<I, I::GenericArgs> {
-    relation.cx().interner().mk_args_from_iter(iter::zip(a_arg.iter(), b_arg.iter()).map(
-        |(a, b)| relation.relate_with_variance(ty::Invariant, VarianceDiagInfo::default(), a, b),
-    ))
+    relation.cx().mk_args_from_iter(iter::zip(a_arg.iter(), b_arg.iter()).map(|(a, b)| {
+        relation.relate_with_variance(ty::Invariant, VarianceDiagInfo::default(), a, b)
+    }))
 }
 
 pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(
@@ -165,9 +164,7 @@ pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(
             let variance = variances.clone().get(i).unwrap();
             let variance_info = if variance == ty::Invariant && fetch_ty_for_diag {
                 let ty = cached_ty
-                    .get_or_insert_with(|| {
-                        cx.type_of(ty_def_id).instantiate(cx.interner(), a_arg.clone())
-                    })
+                    .get_or_insert_with(|| cx.type_of(ty_def_id).instantiate(cx, a_arg.clone()))
                     .clone();
                 VarianceDiagInfo::Invariant { ty, param_index: i.try_into().unwrap() }
             } else {
@@ -176,7 +173,7 @@ pub fn relate_args_with_variances<I: Interner, R: TypeRelation<I = I>>(
             relation.relate_with_variance(variance, variance_info, a, b)
         });
 
-    cx.interner().mk_args_from_iter(params)
+    cx.mk_args_from_iter(params)
 }
 
 impl<I: Interner> Relate<I> for ty::FnSig<I> {
@@ -407,10 +404,8 @@ pub fn structurally_relate_tys<I: Interner, R: TypeRelation<I = I>>(
     relation: &mut R,
     a: I::Ty,
     b: I::Ty,
-) -> RelateResult<I, I::Ty>
-//where <I::AdtDef as AdtDef>::Ir: RustIr<Interner = I>
-{
-    let cx = relation.cx().interner();
+) -> RelateResult<I, I::Ty> {
+    let cx = relation.cx();
     match (a.clone().kind(), b.clone().kind()) {
         (ty::Infer(_), _) | (_, ty::Infer(_)) => {
             // The caller should handle these cases!
@@ -650,8 +645,8 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I = I>>(
         // be stabilized.
         (ty::ConstKind::Unevaluated(au), ty::ConstKind::Unevaluated(bu)) if au.def == bu.def => {
             if cfg!(debug_assertions) {
-                let a_ty = cx.type_of(au.def).instantiate(cx.interner(), au.args.clone());
-                let b_ty = cx.type_of(bu.def).instantiate(cx.interner(), bu.args.clone());
+                let a_ty = cx.type_of(au.def).instantiate(cx, au.args.clone());
+                let b_ty = cx.type_of(bu.def).instantiate(cx, bu.args.clone());
                 assert_eq!(a_ty, b_ty);
             }
 
@@ -661,14 +656,11 @@ pub fn structurally_relate_consts<I: Interner, R: TypeRelation<I = I>>(
                 au.args,
                 bu.args,
             )?;
-            return Ok(Const::new_unevaluated(cx.interner(), ty::UnevaluatedConst {
-                def: au.def,
-                args,
-            }));
+            return Ok(Const::new_unevaluated(cx, ty::UnevaluatedConst { def: au.def, args }));
         }
         (ty::ConstKind::Expr(ae), ty::ConstKind::Expr(be)) => {
             let expr = relation.relate(ae, be)?;
-            return Ok(Const::new_expr(cx.interner(), expr));
+            return Ok(Const::new_expr(cx, expr));
         }
         _ => false,
     };

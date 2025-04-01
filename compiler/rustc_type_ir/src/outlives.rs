@@ -8,7 +8,7 @@ use smallvec::{SmallVec, smallvec};
 use crate::data_structures::SsoHashSet;
 use crate::inherent::*;
 use crate::visit::{TypeSuperVisitable, TypeVisitable, TypeVisitableExt as _, TypeVisitor};
-use crate::{self as ty, Interner, RustIr};
+use crate::{self as ty, Interner};
 
 #[derive_where(Debug; I: Interner)]
 pub enum Component<I: Interner> {
@@ -53,21 +53,21 @@ pub enum Component<I: Interner> {
 
 /// Push onto `out` all the things that must outlive `'a` for the condition
 /// `ty0: 'a` to hold. Note that `ty0` must be a **fully resolved type**.
-pub fn push_outlives_components<Ir: RustIr<Interner = I>, I: Interner>(
-    cx: Ir,
+pub fn push_outlives_components<I: Interner>(
+    cx: I,
     ty: I::Ty,
     out: &mut SmallVec<[Component<I>; 4]>,
 ) {
     ty.visit_with(&mut OutlivesCollector { cx, out, visited: Default::default() });
 }
 
-struct OutlivesCollector<'a, Ir: RustIr<Interner = I>, I: Interner> {
-    cx: Ir,
+struct OutlivesCollector<'a, I: Interner> {
+    cx: I,
     out: &'a mut SmallVec<[Component<I>; 4]>,
     visited: SsoHashSet<I::Ty>,
 }
 
-impl<Ir: RustIr<Interner = I>, I: Interner> TypeVisitor<I> for OutlivesCollector<'_, Ir, I> {
+impl<I: Interner> TypeVisitor<I> for OutlivesCollector<'_, I> {
     #[cfg(not(feature = "nightly"))]
     type Result = ();
 
@@ -220,8 +220,8 @@ impl<Ir: RustIr<Interner = I>, I: Interner> TypeVisitor<I> for OutlivesCollector
 ///
 /// This should not be used to get the components of `parent` itself.
 /// Use [push_outlives_components] instead.
-pub fn compute_alias_components_recursive<Ir: RustIr<Interner = I>, I: Interner>(
-    cx: Ir,
+pub fn compute_alias_components_recursive<I: Interner>(
+    cx: I,
     alias_ty: I::Ty,
     out: &mut SmallVec<[Component<I>; 4]>,
 ) {

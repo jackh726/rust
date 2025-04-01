@@ -60,7 +60,7 @@ where
         return Ok(Err(Conflict::Downstream));
     }
 
-    if trait_ref_is_local_or_fundamental(infcx.cx(), trait_ref.clone()) {
+    if trait_ref_is_local_or_fundamental(infcx.cx().interner(), trait_ref.clone()) {
         // This is a local or fundamental trait, so future-compatibility
         // is no concern. We know that downstream/cousin crates are not
         // allowed to implement a generic parameter of this trait ref,
@@ -91,10 +91,7 @@ where
     }
 }
 
-pub fn trait_ref_is_local_or_fundamental<Ir: RustIr<Interner = I>, I: Interner>(
-    tcx: Ir,
-    trait_ref: ty::TraitRef<I>,
-) -> bool {
+pub fn trait_ref_is_local_or_fundamental<I: Interner>(tcx: I, trait_ref: ty::TraitRef<I>) -> bool {
     trait_ref.def_id.is_local() || tcx.trait_is_fundamental(trait_ref.def_id)
 }
 

@@ -199,7 +199,8 @@ where
         }
 
         (ty::ConstKind::Unevaluated(..), _) | (_, ty::ConstKind::Unevaluated(..))
-            if infcx.cx().features().generic_const_exprs() || infcx.next_trait_solver() =>
+            if infcx.cx().interner().features().generic_const_exprs()
+                || infcx.next_trait_solver() =>
         {
             match relation.structurally_relate_aliases() {
                 StructurallyRelateAliases::No => {

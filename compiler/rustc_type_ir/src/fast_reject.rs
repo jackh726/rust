@@ -13,7 +13,7 @@ use rustc_macros::{HashStable_NoContext, TyDecodable, TyEncodable};
 
 use crate::inherent::*;
 use crate::visit::TypeVisitableExt as _;
-use crate::{self as ty, Interner, RustIr};
+use crate::{self as ty, Interner};
 
 /// See `simplify_type`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,8 +104,8 @@ pub enum TreatParams {
 /// is only correct if they are fully normalized.
 ///
 /// ¹ meaning that if the outermost layers are different, then the whole types are also different.
-pub fn simplify_type<Ir: RustIr<Interner = I>, I: Interner>(
-    cx: Ir,
+pub fn simplify_type<I: Interner>(
+    cx: I,
     ty: I::Ty,
     treat_params: TreatParams,
 ) -> Option<SimplifiedType<I::DefId>>

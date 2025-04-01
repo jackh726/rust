@@ -137,6 +137,142 @@ pub trait Interner:
     type Features: Features<Self>;
 
     type UnsizingParams: Deref<Target = BitSet<u32>>;
+
+    fn evaluation_is_concurrent(&self) -> bool;
+
+    fn expand_abstract_consts<T: TypeFoldable<Self>>(self, t: T) -> T;
+
+    fn generics_of(self, def_id: Self::DefId) -> Self::GenericsOf;
+
+    fn variances_of(self, def_id: Self::DefId) -> Self::VariancesOf;
+
+    fn type_of(self, def_id: Self::DefId) -> ty::EarlyBinder<Self, Self::Ty>;
+
+    fn adt_def(self, adt_def_id: Self::DefId) -> Self::AdtDef;
+
+    fn alias_ty_kind(self, alias: ty::AliasTy<Self>) -> ty::AliasTyKind;
+
+    fn alias_term_kind(self, alias: ty::AliasTerm<Self>) -> ty::AliasTermKind;
+
+    fn trait_ref_and_own_args_for_alias(
+        self,
+        def_id: Self::DefId,
+        args: Self::GenericArgs,
+    ) -> (ty::TraitRef<Self>, Self::GenericArgsSlice);
+
+    fn check_args_compatible(self, def_id: Self::DefId, args: Self::GenericArgs) -> bool;
+
+    fn debug_assert_args_compatible(self, def_id: Self::DefId, args: Self::GenericArgs);
+
+    /// Assert that the args from an `ExistentialTraitRef` or `ExistentialProjection`
+    /// are compatible with the `DefId`.
+    fn debug_assert_existential_args_compatible(self, def_id: Self::DefId, args: Self::GenericArgs);
+
+    fn mk_type_list_from_iter<I, T>(self, args: I) -> T::Output
+    where
+        I: Iterator<Item = T>,
+        T: CollectAndApply<Self::Ty, Self::Tys>;
+
+    fn parent(self, def_id: Self::DefId) -> Self::DefId;
+
+    fn recursion_limit(self) -> usize;
+
+    fn features(self) -> Self::Features;
+
+    fn bound_coroutine_hidden_types(
+        self,
+        def_id: Self::DefId,
+    ) -> impl IntoIterator<Item = ty::EarlyBinder<Self, ty::Binder<Self, Self::Ty>>>;
+
+    fn fn_sig(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, ty::Binder<Self, ty::FnSig<Self>>>;
+
+    fn coroutine_movability(self, def_id: Self::DefId) -> Movability;
+
+    fn coroutine_for_closure(self, def_id: Self::DefId) -> Self::DefId;
+
+    fn predicates_of(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
+
+    fn own_predicates_of(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
+
+    fn explicit_super_predicates_of(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = (Self::Clause, Self::Span)>>;
+
+    fn explicit_implied_predicates_of(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = (Self::Clause, Self::Span)>>;
+
+    fn impl_is_const(self, def_id: Self::DefId) -> bool;
+    fn fn_is_const(self, def_id: Self::DefId) -> bool;
+    fn alias_has_const_conditions(self, def_id: Self::DefId) -> bool;
+    fn const_conditions(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = ty::Binder<Self, ty::TraitRef<Self>>>>;
+    fn explicit_implied_const_bounds(
+        self,
+        def_id: Self::DefId,
+    ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = ty::Binder<Self, ty::TraitRef<Self>>>>;
+
+    fn has_target_features(self, def_id: Self::DefId) -> bool;
+
+    fn associated_type_def_ids(self, def_id: Self::DefId) -> impl IntoIterator<Item = Self::DefId>;
+
+    fn has_item_definition(self, def_id: Self::DefId) -> bool;
+
+    fn impl_is_default(self, impl_def_id: Self::DefId) -> bool;
+
+    fn impl_trait_ref(self, impl_def_id: Self::DefId) -> ty::EarlyBinder<Self, ty::TraitRef<Self>>;
+
+    fn impl_polarity(self, impl_def_id: Self::DefId) -> ty::ImplPolarity;
+
+    fn trait_is_auto(self, trait_def_id: Self::DefId) -> bool;
+
+    fn trait_is_alias(self, trait_def_id: Self::DefId) -> bool;
+
+    fn trait_is_dyn_compatible(self, trait_def_id: Self::DefId) -> bool;
+
+    fn trait_is_fundamental(self, def_id: Self::DefId) -> bool;
+
+    fn trait_may_be_implemented_via_object(self, trait_def_id: Self::DefId) -> bool;
+
+    fn is_impl_trait_in_trait(self, def_id: Self::DefId) -> bool;
+
+    fn delay_bug(self, msg: impl ToString) -> Self::ErrorGuaranteed;
+
+    fn is_general_coroutine(self, coroutine_def_id: Self::DefId) -> bool;
+    fn coroutine_is_async(self, coroutine_def_id: Self::DefId) -> bool;
+    fn coroutine_is_gen(self, coroutine_def_id: Self::DefId) -> bool;
+    fn coroutine_is_async_gen(self, coroutine_def_id: Self::DefId) -> bool;
+
+    fn unsizing_params_for_adt(self, adt_def_id: Self::DefId) -> Self::UnsizingParams;
+
+    fn find_const_ty_from_env(
+        self,
+        param_env: &Self::ParamEnv,
+        placeholder: Self::PlaceholderConst,
+    ) -> Self::Ty;
+
+    fn anonymize_bound_vars<T: TypeFoldable<Self>>(
+        self,
+        binder: ty::Binder<Self, T>,
+    ) -> ty::Binder<Self, T>;
+
+    fn opaque_types_defined_by(
+        self,
+        defining_anchor: Self::LocalDefId,
+    ) -> Self::DefiningOpaqueTypes;
 }
 
 /// Imagine you have a function `F: FnOnce(&[T]) -> R`, plus an iterator `iter`
@@ -240,6 +376,7 @@ impl<Ir: RustIr<Interner = I>, I: Interner> search_graph::Cx for Ir {
 
     type DepNodeIndex = I::DepNodeIndex;
     type Tracked<T: Debug + Clone> = I::Tracked<T>;
+
     fn mk_tracked<T: Debug + Clone>(
         self,
         data: T,
@@ -257,15 +394,12 @@ impl<Ir: RustIr<Interner = I>, I: Interner> search_graph::Cx for Ir {
         Ir::with_global_cache(self, f)
     }
     fn evaluation_is_concurrent(&self) -> bool {
-        self.evaluation_is_concurrent()
+        self.interner().evaluation_is_concurrent()
     }
 }
 
 pub trait RustIr: Sized + Copy {
-    type Interner: Interner<
-            AdtDef: IrAdtDef<Self::Interner, Self>,
-            GenericArgs: IrGenericArgs<Self::Interner, Self>,
-        >;
+    type Interner: Interner<AdtDef: IrAdtDef<Self::Interner, Self>>;
 
     fn interner(self) -> Self::Interner;
 
@@ -283,96 +417,6 @@ pub trait RustIr: Sized + Copy {
 
     fn with_global_cache<R>(self, f: impl FnOnce(&mut search_graph::GlobalCache<Self>) -> R) -> R;
 
-    fn evaluation_is_concurrent(&self) -> bool;
-
-    fn expand_abstract_consts<T: TypeFoldable<Self::Interner>>(self, t: T) -> T;
-
-    fn generics_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> <Self::Interner as Interner>::GenericsOf;
-
-    fn variances_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> <Self::Interner as Interner>::VariancesOf;
-
-    fn type_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<Self::Interner, <Self::Interner as Interner>::Ty>;
-
-    fn adt_def(
-        self,
-        adt_def_id: <Self::Interner as Interner>::DefId,
-    ) -> <Self::Interner as Interner>::AdtDef;
-
-    fn alias_ty_kind(self, alias: ty::AliasTy<Self::Interner>) -> ty::AliasTyKind;
-
-    fn alias_term_kind(self, alias: ty::AliasTerm<Self::Interner>) -> ty::AliasTermKind;
-
-    fn trait_ref_and_own_args_for_alias(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-        args: <Self::Interner as Interner>::GenericArgs,
-    ) -> (ty::TraitRef<Self::Interner>, <Self::Interner as Interner>::GenericArgsSlice);
-
-    fn check_args_compatible(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-        args: <Self::Interner as Interner>::GenericArgs,
-    ) -> bool;
-
-    fn debug_assert_args_compatible(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-        args: <Self::Interner as Interner>::GenericArgs,
-    );
-
-    /// Assert that the args from an `ExistentialTraitRef` or `ExistentialProjection`
-    /// are compatible with the `DefId`.
-    fn debug_assert_existential_args_compatible(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-        args: <Self::Interner as Interner>::GenericArgs,
-    );
-
-    fn mk_type_list_from_iter<I, T>(self, args: I) -> T::Output
-    where
-        I: Iterator<Item = T>,
-        T: CollectAndApply<<Self::Interner as Interner>::Ty, <Self::Interner as Interner>::Tys>;
-
-    fn parent(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> <Self::Interner as Interner>::DefId;
-
-    fn recursion_limit(self) -> usize;
-
-    fn features(self) -> <Self::Interner as Interner>::Features;
-
-    fn bound_coroutine_hidden_types(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> impl IntoIterator<
-        Item = ty::EarlyBinder<
-            Self::Interner,
-            ty::Binder<Self::Interner, <Self::Interner as Interner>::Ty>,
-        >,
-    >;
-
-    fn fn_sig(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<Self::Interner, ty::Binder<Self::Interner, ty::FnSig<Self::Interner>>>;
-
-    fn coroutine_movability(self, def_id: <Self::Interner as Interner>::DefId) -> Movability;
-
-    fn coroutine_for_closure(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> <Self::Interner as Interner>::DefId;
-
     fn generics_require_sized_self(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
 
     fn item_bounds(
@@ -382,62 +426,6 @@ pub trait RustIr: Sized + Copy {
         Self::Interner,
         impl IntoIterator<Item = <Self::Interner as Interner>::Clause>,
     >;
-
-    fn predicates_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<
-        Self::Interner,
-        impl IntoIterator<Item = <Self::Interner as Interner>::Clause>,
-    >;
-
-    fn own_predicates_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<
-        Self::Interner,
-        impl IntoIterator<Item = <Self::Interner as Interner>::Clause>,
-    >;
-
-    fn explicit_super_predicates_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<
-        Self::Interner,
-        impl IntoIterator<
-            Item = (<Self::Interner as Interner>::Clause, <Self::Interner as Interner>::Span),
-        >,
-    >;
-
-    fn explicit_implied_predicates_of(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<
-        Self::Interner,
-        impl IntoIterator<
-            Item = (<Self::Interner as Interner>::Clause, <Self::Interner as Interner>::Span),
-        >,
-    >;
-
-    fn impl_is_const(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
-    fn fn_is_const(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
-    fn alias_has_const_conditions(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
-    fn const_conditions(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<
-        Self::Interner,
-        impl IntoIterator<Item = ty::Binder<Self::Interner, ty::TraitRef<Self::Interner>>>,
-    >;
-    fn explicit_implied_const_bounds(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<
-        Self::Interner,
-        impl IntoIterator<Item = ty::Binder<Self::Interner, ty::TraitRef<Self::Interner>>>,
-    >;
-
-    fn has_target_features(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
 
     fn require_lang_item(
         self,
@@ -455,69 +443,10 @@ pub trait RustIr: Sized + Copy {
         def_id: <Self::Interner as Interner>::DefId,
     ) -> Option<TraitSolverLangItem>;
 
-    fn associated_type_def_ids(
-        self,
-        def_id: <Self::Interner as Interner>::DefId,
-    ) -> impl IntoIterator<Item = <Self::Interner as Interner>::DefId>;
-
     fn for_each_relevant_impl(
         self,
         trait_def_id: <Self::Interner as Interner>::DefId,
         self_ty: <Self::Interner as Interner>::Ty,
         f: impl FnMut(<Self::Interner as Interner>::DefId),
     );
-
-    fn has_item_definition(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn impl_is_default(self, impl_def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn impl_trait_ref(
-        self,
-        impl_def_id: <Self::Interner as Interner>::DefId,
-    ) -> ty::EarlyBinder<Self::Interner, ty::TraitRef<Self::Interner>>;
-
-    fn impl_polarity(self, impl_def_id: <Self::Interner as Interner>::DefId) -> ty::ImplPolarity;
-
-    fn trait_is_auto(self, trait_def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn trait_is_alias(self, trait_def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn trait_is_dyn_compatible(self, trait_def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn trait_is_fundamental(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn trait_may_be_implemented_via_object(
-        self,
-        trait_def_id: <Self::Interner as Interner>::DefId,
-    ) -> bool;
-
-    fn is_impl_trait_in_trait(self, def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn delay_bug(self, msg: impl ToString) -> <Self::Interner as Interner>::ErrorGuaranteed;
-
-    fn is_general_coroutine(self, coroutine_def_id: <Self::Interner as Interner>::DefId) -> bool;
-    fn coroutine_is_async(self, coroutine_def_id: <Self::Interner as Interner>::DefId) -> bool;
-    fn coroutine_is_gen(self, coroutine_def_id: <Self::Interner as Interner>::DefId) -> bool;
-    fn coroutine_is_async_gen(self, coroutine_def_id: <Self::Interner as Interner>::DefId) -> bool;
-
-    fn unsizing_params_for_adt(
-        self,
-        adt_def_id: <Self::Interner as Interner>::DefId,
-    ) -> <Self::Interner as Interner>::UnsizingParams;
-
-    fn find_const_ty_from_env(
-        self,
-        param_env: &<Self::Interner as Interner>::ParamEnv,
-        placeholder: <Self::Interner as Interner>::PlaceholderConst,
-    ) -> <Self::Interner as Interner>::Ty;
-
-    fn anonymize_bound_vars<T: TypeFoldable<Self::Interner>>(
-        self,
-        binder: ty::Binder<Self::Interner, T>,
-    ) -> ty::Binder<Self::Interner, T>;
-
-    fn opaque_types_defined_by(
-        self,
-        defining_anchor: <Self::Interner as Interner>::LocalDefId,
-    ) -> <Self::Interner as Interner>::DefiningOpaqueTypes;
 }

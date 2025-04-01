@@ -54,10 +54,7 @@ impl<I: Interner> TypingMode<I> {
 
     /// While typechecking a body, we need to be able to define the opaque
     /// types defined by that body.
-    pub fn analysis_in_body<Ir: RustIr<Interner = I>>(
-        cx: Ir,
-        body_def_id: I::LocalDefId,
-    ) -> TypingMode<I> {
+    pub fn analysis_in_body(cx: I, body_def_id: I::LocalDefId) -> TypingMode<I> {
         TypingMode::Analysis { defining_opaque_types: cx.opaque_types_defined_by(body_def_id) }
     }
 }

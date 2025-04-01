@@ -50,27 +50,23 @@ pub trait Ty<I: Interner<Ty = Self>>:
 
     fn new_alias(interner: I, kind: ty::AliasTyKind, alias_ty: ty::AliasTy<I>) -> Self;
 
-    fn new_projection_from_args<Ir: RustIr<Interner = I>>(
-        ir: Ir,
-        def_id: I::DefId,
-        args: I::GenericArgs,
-    ) -> Self {
+    fn new_projection_from_args(interner: I, def_id: I::DefId, args: I::GenericArgs) -> Self {
         Ty::new_alias(
-            ir.interner(),
+            interner,
             ty::AliasTyKind::Projection,
-            ty::AliasTy::new_from_args(ir, def_id, args),
+            ty::AliasTy::new_from_args(interner, def_id, args),
         )
     }
 
-    fn new_projection<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    fn new_projection(
+        interner: I,
         def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> Self {
         Ty::new_alias(
-            ir.interner(),
+            interner,
             ty::AliasTyKind::Projection,
-            ty::AliasTy::new(ir, def_id, args),
+            ty::AliasTy::new(interner, def_id, args),
         )
     }
 
@@ -140,10 +136,10 @@ pub trait Ty<I: Interner<Ty = Self>>:
         matches!(self.clone().kind(), ty::FnPtr(..))
     }
 
-    fn fn_sig<Ir: RustIr<Interner = I>>(self, ir: Ir) -> ty::Binder<I, ty::FnSig<I>> {
+    fn fn_sig(self, interner: I) -> ty::Binder<I, ty::FnSig<I>> {
         match self.clone().kind() {
             ty::FnPtr(sig_tys, hdr) => sig_tys.with(hdr),
-            ty::FnDef(def_id, args) => ir.fn_sig(def_id).instantiate(ir.interner(), args),
+            ty::FnDef(def_id, args) => interner.fn_sig(def_id).instantiate(interner, args),
             ty::Error(_) => {
                 // ignore errors (#54954)
                 ty::Binder::dummy(ty::FnSig {
@@ -398,18 +394,17 @@ pub trait GenericArgs<I: Interner<GenericArgs = Self>>:
     fn as_coroutine(self) -> ty::CoroutineArgs<I> {
         ty::CoroutineArgs { args: self }
     }
-}
+    fn rebase_onto(
+        self,
+        interner: I,
+        source_def_id: I::DefId,
+        target: I::GenericArgs,
+    ) -> I::GenericArgs;
 
-pub trait IrGenericArgs<I: Interner<GenericArgs = Self>, Ir: RustIr<Interner = I>>:
-    GenericArgs<I>
-{
-    fn rebase_onto(self, ir: Ir, source_def_id: I::DefId, target: I::GenericArgs)
-    -> I::GenericArgs;
-
-    fn identity_for_item(ir: Ir, def_id: I::DefId) -> I::GenericArgs;
+    fn identity_for_item(interner: I, def_id: I::DefId) -> I::GenericArgs;
 
     fn extend_with_error(
-        ir: Ir,
+        interner: I,
         def_id: I::DefId,
         original_args: &[I::GenericArg],
     ) -> I::GenericArgs;

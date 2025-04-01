@@ -24,7 +24,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     let cx = ecx.cx();
     match ty.clone().kind() {
@@ -82,6 +81,7 @@ where
 
         ty::CoroutineWitness(def_id, args) => Ok(ecx
             .cx()
+            .interner()
             .bound_coroutine_hidden_types(def_id)
             .into_iter()
             .map(|bty| bty.instantiate(cx.interner(), args.clone()))
@@ -100,7 +100,9 @@ where
             // We can resolve the `impl Trait` to its concrete type,
             // which enforces a DAG between the functions requiring
             // the auto trait bounds in question.
-            Ok(vec![ty::Binder::dummy(cx.type_of(def_id).instantiate(cx.interner(), args))])
+            Ok(vec![ty::Binder::dummy(
+                cx.interner().type_of(def_id).instantiate(cx.interner(), args),
+            )])
         }
     }
 }
@@ -114,7 +116,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     match ty.clone().kind() {
         // impl Sized for u*, i*, bool, f*, FnDef, FnPtr, *(const/mut) T, char, &mut? T, [T; N], dyn* Trait, !
@@ -184,7 +185,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     match ty.clone().kind() {
         // impl Copy/Clone for FnDef, FnPtr
@@ -234,10 +234,10 @@ where
 
         // only when `coroutine_clone` is enabled and the coroutine is movable
         // impl Copy/Clone for Coroutine where T: Copy/Clone forall T in (upvars, witnesses)
-        ty::Coroutine(def_id, args) => match ecx.cx().coroutine_movability(def_id) {
+        ty::Coroutine(def_id, args) => match ecx.cx().interner().coroutine_movability(def_id) {
             Movability::Static => Err(NoSolution),
             Movability::Movable => {
-                if ecx.cx().features().coroutine_clone() {
+                if ecx.cx().interner().features().coroutine_clone() {
                     let coroutine = args.as_coroutine();
                     Ok(vec![
                         ty::Binder::dummy(coroutine.clone().tupled_upvars_ty()),
@@ -252,6 +252,7 @@ where
         // impl Copy/Clone for CoroutineWitness where T: Copy/Clone forall T in coroutine_hidden_types
         ty::CoroutineWitness(def_id, args) => Ok(ecx
             .cx()
+            .interner()
             .bound_coroutine_hidden_types(def_id)
             .into_iter()
             .map(|bty| bty.instantiate(ecx.cx().interner(), args.clone()))
@@ -272,8 +273,9 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_callable<
     match self_ty.clone().kind() {
         // keep this in sync with assemble_fn_pointer_candidates until the old solver is removed.
         ty::FnDef(def_id, args) => {
-            let sig = cx.fn_sig(def_id);
-            if sig.clone().skip_binder().is_fn_trait_compatible() && !cx.has_target_features(def_id)
+            let sig = cx.interner().fn_sig(def_id);
+            if sig.clone().skip_binder().is_fn_trait_compatible()
+                && !cx.interner().has_target_features(def_id)
             {
                 Ok(Some(sig.clone().instantiate(cx.interner(), args).map_bound(|sig| {
                     (Ty::new_tup(cx.interner(), sig.clone().inputs().as_slice()), sig.output())
@@ -465,7 +467,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<
                 // coroutine upvars respecting the closure kind.
                 nested.push(
                     ty::TraitRef::new(
-                        cx,
+                        cx.interner(),
                         cx.require_lang_item(TraitSolverLangItem::AsyncFnKindHelper),
                         [kind_ty, Ty::from_closure_kind(cx.interner(), goal_kind)],
                     )
@@ -493,15 +495,15 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<
         }
 
         ty::FnDef(def_id, _) => {
-            let sig = self_ty.fn_sig(cx);
-            if sig.is_fn_trait_compatible() && !cx.has_target_features(def_id) {
+            let sig = self_ty.fn_sig(cx.interner());
+            if sig.is_fn_trait_compatible() && !cx.interner().has_target_features(def_id) {
                 fn_item_to_async_callable(cx, sig)
             } else {
                 Err(NoSolution)
             }
         }
         ty::FnPtr(..) => {
-            let sig = self_ty.fn_sig(cx);
+            let sig = self_ty.fn_sig(cx.interner());
             if sig.is_fn_trait_compatible() {
                 fn_item_to_async_callable(cx, sig)
             } else {
@@ -518,7 +520,9 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<
             // implements `Future`.
             let mut nested = vec![
                 bound_sig
-                    .rebind(ty::TraitRef::new(cx, future_trait_def_id, [sig.clone().output()]))
+                    .rebind(ty::TraitRef::new(cx.interner(), future_trait_def_id, [sig
+                        .clone()
+                        .output()]))
                     .upcast(cx.interner()),
             ];
 
@@ -540,7 +544,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<
                 // will project to the right upvars for the generator, appending the inputs and
                 // coroutine upvars respecting the closure kind.
                 nested.push(
-                    ty::TraitRef::new(cx, async_fn_kind_trait_def_id, [
+                    ty::TraitRef::new(cx.interner(), async_fn_kind_trait_def_id, [
                         kind_ty,
                         Ty::from_closure_kind(cx.interner(), goal_kind),
                     ])
@@ -550,7 +554,7 @@ pub(in crate::solve) fn extract_tupled_inputs_and_output_from_async_callable<
 
             let future_output_def_id = cx.require_lang_item(TraitSolverLangItem::FutureOutput);
             let future_output_ty =
-                Ty::new_projection(cx, future_output_def_id, [sig.clone().output()]);
+                Ty::new_projection(cx.interner(), future_output_def_id, [sig.clone().output()]);
             Ok((
                 bound_sig.rebind(AsyncCallableRelevantTypes {
                     tupled_inputs_ty: sig.clone().inputs().get(0).unwrap(),
@@ -603,11 +607,12 @@ fn fn_item_to_async_callable<Ir: RustIr<Interner = I>, I: Interner>(
     let nested = vec![
         bound_sig
             .clone()
-            .rebind(ty::TraitRef::new(cx, future_trait_def_id, [sig.clone().output()]))
+            .rebind(ty::TraitRef::new(cx.interner(), future_trait_def_id, [sig.clone().output()]))
             .upcast(cx.interner()),
     ];
     let future_output_def_id = cx.require_lang_item(TraitSolverLangItem::FutureOutput);
-    let future_output_ty = Ty::new_projection(cx, future_output_def_id, [sig.clone().output()]);
+    let future_output_ty =
+        Ty::new_projection(cx.interner(), future_output_def_id, [sig.clone().output()]);
     Ok((
         bound_sig.rebind(AsyncCallableRelevantTypes {
             tupled_inputs_ty: Ty::new_tup(cx.interner(), sig.clone().inputs().as_slice()),
@@ -631,7 +636,7 @@ fn coroutine_closure_to_certain_coroutine<Ir: RustIr<Interner = I>, I: Interner>
     sig.to_coroutine_given_kind_and_upvars(
         cx.interner(),
         args.clone().parent_args(),
-        cx.coroutine_for_closure(def_id),
+        cx.interner().coroutine_for_closure(def_id),
         goal_kind,
         goal_region,
         args.clone().tupled_upvars_ty(),
@@ -653,7 +658,7 @@ fn coroutine_closure_to_ambiguous_coroutine<Ir: RustIr<Interner = I>, I: Interne
     sig: ty::CoroutineClosureSignature<I>,
 ) -> I::Ty {
     let upvars_projection_def_id = cx.require_lang_item(TraitSolverLangItem::AsyncFnKindUpvars);
-    let tupled_upvars_ty = Ty::new_projection(cx, upvars_projection_def_id, [
+    let tupled_upvars_ty = Ty::new_projection(cx.interner(), upvars_projection_def_id, [
         I::GenericArg::from(args.clone().kind_ty()),
         Ty::from_closure_kind(cx.interner(), goal_kind).into(),
         goal_region.into(),
@@ -665,7 +670,7 @@ fn coroutine_closure_to_ambiguous_coroutine<Ir: RustIr<Interner = I>, I: Interne
         cx.interner(),
         args.parent_args(),
         Ty::from_closure_kind(cx.interner(), goal_kind),
-        cx.coroutine_for_closure(def_id),
+        cx.interner().coroutine_for_closure(def_id),
         tupled_upvars_ty,
     )
 }
@@ -685,10 +690,10 @@ pub(in crate::solve) fn extract_fn_def_from_const_callable<
 ) -> Result<(ty::Binder<I, (I::FnInputTys, I::Ty)>, I::DefId, I::GenericArgs), NoSolution> {
     match self_ty.clone().kind() {
         ty::FnDef(def_id, args) => {
-            let sig = cx.fn_sig(def_id);
+            let sig = cx.interner().fn_sig(def_id);
             if sig.clone().skip_binder().is_fn_trait_compatible()
-                && !cx.has_target_features(def_id)
-                && cx.fn_is_const(def_id)
+                && !cx.interner().has_target_features(def_id)
+                && cx.interner().fn_is_const(def_id)
             {
                 Ok((
                     sig.clone()
@@ -759,7 +764,7 @@ pub(in crate::solve) fn const_conditions_for_destruct<Ir: RustIr>(
                 .clone()
                 .all_field_tys(cx)
                 .iter_instantiated(cx.interner(), args)
-                .map(|field_ty| ty::TraitRef::new(cx, destruct_def_id, [field_ty]))
+                .map(|field_ty| ty::TraitRef::new(cx.interner(), destruct_def_id, [field_ty]))
                 .collect();
             match adt_def.clone().destructor(cx) {
                 // `Drop` impl exists, but it's not const. Type cannot be `~const Destruct`.
@@ -767,7 +772,7 @@ pub(in crate::solve) fn const_conditions_for_destruct<Ir: RustIr>(
                 // `Drop` impl exists, and it's const. Require `Ty: ~const Drop` to hold.
                 Some(AdtDestructorKind::Const) => {
                     let drop_def_id = cx.require_lang_item(TraitSolverLangItem::Drop);
-                    let drop_trait_ref = ty::TraitRef::new(cx, drop_def_id, [self_ty]);
+                    let drop_trait_ref = ty::TraitRef::new(cx.interner(), drop_def_id, [self_ty]);
                     const_conditions.push(drop_trait_ref);
                 }
                 // No `Drop` impl, no need to require anything else.
@@ -777,12 +782,12 @@ pub(in crate::solve) fn const_conditions_for_destruct<Ir: RustIr>(
         }
 
         ty::Array(ty, _) | ty::Pat(ty, _) | ty::Slice(ty) => {
-            Ok(vec![ty::TraitRef::new(cx, destruct_def_id, [ty])])
+            Ok(vec![ty::TraitRef::new(cx.interner(), destruct_def_id, [ty])])
         }
 
         ty::Tuple(tys) => Ok(tys
             .iter()
-            .map(|field_ty| ty::TraitRef::new(cx, destruct_def_id, [field_ty]))
+            .map(|field_ty| ty::TraitRef::new(cx.interner(), destruct_def_id, [field_ty]))
             .collect()),
 
         // Trivially implement `~const Destruct`
@@ -868,7 +873,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     let cx = ecx.cx();
     let mut requirements = vec![];
@@ -880,15 +884,16 @@ where
     // FIXME(-Znext-solver=coinductive): Adding supertraits here can be removed once we
     // make impls coinductive always, since they'll always need to prove their supertraits.
     requirements.extend(elaborate::elaborate(
-        cx,
-        cx.explicit_super_predicates_of(trait_ref.def_id)
+        cx.interner(),
+        cx.interner()
+            .explicit_super_predicates_of(trait_ref.def_id)
             .iter_instantiated(cx.interner(), trait_ref.args.clone())
             .map(|(pred, _)| pred),
     ));
 
     // FIXME(associated_const_equality): Also add associated consts to
     // the requirements here.
-    for associated_type_def_id in cx.associated_type_def_ids(trait_ref.def_id) {
+    for associated_type_def_id in cx.interner().associated_type_def_ids(trait_ref.def_id) {
         // associated types that require `Self: Sized` do not show up in the built-in
         // implementation of `Trait for dyn Trait`, and can be dropped here.
         if cx.generics_require_sized_self(associated_type_def_id) {
@@ -904,7 +909,7 @@ where
     let mut replace_projection_with = HashMap::default();
     for bound in object_bounds.iter() {
         if let ty::ExistentialPredicate::Projection(proj) = bound.clone().skip_binder() {
-            let proj = proj.with_self_ty(cx, trait_ref.self_ty());
+            let proj = proj.with_self_ty(cx.interner(), trait_ref.self_ty());
             let old_ty =
                 replace_projection_with.insert(proj.def_id(), bound.clone().rebind(proj.clone()));
             assert_eq!(
@@ -947,7 +952,6 @@ struct ReplaceProjectionWith<'a, D: SolverDelegate<Interner = I>, I: Interner> {
 impl<D: SolverDelegate<Interner = I>, I: Interner> TypeFolder<I> for ReplaceProjectionWith<'_, D, I>
 where
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     fn cx(&self) -> I {
         self.ecx.cx().interner()
@@ -966,7 +970,7 @@ where
                         .eq_and_get_goals(
                             self.param_env.clone(),
                             alias_ty,
-                            proj.projection_term.expect_ty(self.ecx.cx()),
+                            proj.projection_term.expect_ty(self.ecx.cx().interner()),
                         )
                         .expect(
                             "expected to be able to unify goal projection with dyn's projection",

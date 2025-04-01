@@ -179,36 +179,6 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     {
         self.mk_args_from_iter(args)
     }
-}
-
-impl<'tcx> RustIr for TyCtxt<'tcx> {
-    type Interner = Self;
-
-    fn interner(self) -> Self::Interner {
-        self
-    }
-
-    fn with_cached_task<T>(self, task: impl FnOnce() -> T) -> (T, DepNodeIndex) {
-        self.dep_graph.with_anon_task(self, crate::dep_graph::dep_kinds::TraitSelect, task)
-    }
-
-    fn mk_tracked<T: fmt::Debug + Clone>(
-        self,
-        data: T,
-        dep_node: DepNodeIndex,
-    ) -> <Self::Interner as Interner>::Tracked<T> {
-        WithDepNode::new(dep_node, data)
-    }
-    fn get_tracked<T: fmt::Debug + Clone>(
-        self,
-        tracked: &<Self::Interner as Interner>::Tracked<T>,
-    ) -> T {
-        tracked.get(self)
-    }
-
-    fn with_global_cache<R>(self, f: impl FnOnce(&mut search_graph::GlobalCache<Self>) -> R) -> R {
-        f(&mut *self.new_solver_evaluation_cache.lock())
-    }
 
     fn evaluation_is_concurrent(&self) -> bool {
         self.sess.threads() > 1
@@ -222,7 +192,7 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
         self.generics_of(def_id)
     }
 
-    fn variances_of(self, def_id: DefId) -> <Self::Interner as Interner>::VariancesOf {
+    fn variances_of(self, def_id: DefId) -> Self::VariancesOf {
         self.variances_of(def_id)
     }
 
@@ -230,7 +200,7 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
         self.type_of(def_id)
     }
 
-    fn adt_def(self, adt_def_id: DefId) -> <Self::Interner as Interner>::AdtDef {
+    fn adt_def(self, adt_def_id: DefId) -> Self::AdtDef {
         self.adt_def(adt_def_id)
     }
 
@@ -298,8 +268,8 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
     /// a dummy self type and forward to `debug_assert_args_compatible`.
     fn debug_assert_existential_args_compatible(
         self,
-        def_id: <Self::Interner as Interner>::DefId,
-        args: <Self::Interner as Interner>::GenericArgs,
+        def_id: Self::DefId,
+        args: Self::GenericArgs,
     ) {
         // FIXME: We could perhaps add a `skip: usize` to `debug_assert_args_compatible`
         // to avoid needing to reintern the set of args...
@@ -329,7 +299,7 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
         self.recursion_limit().0
     }
 
-    fn features(self) -> <Self::Interner as Interner>::Features {
+    fn features(self) -> Self::Features {
         self.features()
     }
 
@@ -350,17 +320,6 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
 
     fn coroutine_for_closure(self, def_id: DefId) -> DefId {
         self.coroutine_for_closure(def_id)
-    }
-
-    fn generics_require_sized_self(self, def_id: DefId) -> bool {
-        self.generics_require_sized_self(def_id)
-    }
-
-    fn item_bounds(
-        self,
-        def_id: DefId,
-    ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = ty::Clause<'tcx>>> {
-        self.item_bounds(def_id).map_bound(IntoIterator::into_iter)
     }
 
     fn predicates_of(
@@ -432,6 +391,137 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
         !self.codegen_fn_attrs(def_id).target_features.is_empty()
     }
 
+    fn associated_type_def_ids(self, def_id: DefId) -> impl IntoIterator<Item = DefId> {
+        self.associated_items(def_id)
+            .in_definition_order()
+            .filter(|assoc_item| matches!(assoc_item.kind, ty::AssocKind::Type))
+            .map(|assoc_item| assoc_item.def_id)
+    }
+
+    fn has_item_definition(self, def_id: DefId) -> bool {
+        self.defaultness(def_id).has_value()
+    }
+
+    fn impl_is_default(self, impl_def_id: DefId) -> bool {
+        self.defaultness(impl_def_id).is_default()
+    }
+
+    fn impl_trait_ref(self, impl_def_id: DefId) -> ty::EarlyBinder<'tcx, ty::TraitRef<'tcx>> {
+        self.impl_trait_ref(impl_def_id).unwrap()
+    }
+
+    fn impl_polarity(self, impl_def_id: DefId) -> ty::ImplPolarity {
+        self.impl_polarity(impl_def_id)
+    }
+
+    fn trait_is_auto(self, trait_def_id: DefId) -> bool {
+        self.trait_is_auto(trait_def_id)
+    }
+
+    fn trait_is_alias(self, trait_def_id: DefId) -> bool {
+        self.trait_is_alias(trait_def_id)
+    }
+
+    fn trait_is_dyn_compatible(self, trait_def_id: DefId) -> bool {
+        self.is_dyn_compatible(trait_def_id)
+    }
+
+    fn trait_is_fundamental(self, def_id: DefId) -> bool {
+        self.trait_def(def_id).is_fundamental
+    }
+
+    fn trait_may_be_implemented_via_object(self, trait_def_id: DefId) -> bool {
+        self.trait_def(trait_def_id).implement_via_object
+    }
+
+    fn is_impl_trait_in_trait(self, def_id: DefId) -> bool {
+        self.is_impl_trait_in_trait(def_id)
+    }
+
+    fn delay_bug(self, msg: impl ToString) -> ErrorGuaranteed {
+        self.dcx().span_delayed_bug(DUMMY_SP, msg.to_string())
+    }
+
+    fn is_general_coroutine(self, coroutine_def_id: DefId) -> bool {
+        self.is_general_coroutine(coroutine_def_id)
+    }
+
+    fn coroutine_is_async(self, coroutine_def_id: DefId) -> bool {
+        self.coroutine_is_async(coroutine_def_id)
+    }
+
+    fn coroutine_is_gen(self, coroutine_def_id: DefId) -> bool {
+        self.coroutine_is_gen(coroutine_def_id)
+    }
+
+    fn coroutine_is_async_gen(self, coroutine_def_id: DefId) -> bool {
+        self.coroutine_is_async_gen(coroutine_def_id)
+    }
+
+    fn unsizing_params_for_adt(self, adt_def_id: DefId) -> Self::UnsizingParams {
+        self.unsizing_params_for_adt(adt_def_id)
+    }
+
+    fn find_const_ty_from_env(
+        self,
+        param_env: &ty::ParamEnv<'tcx>,
+        placeholder: Self::PlaceholderConst,
+    ) -> Ty<'tcx> {
+        placeholder.find_const_ty_from_env(param_env)
+    }
+
+    fn anonymize_bound_vars<T: TypeFoldable<TyCtxt<'tcx>>>(
+        self,
+        binder: ty::Binder<'tcx, T>,
+    ) -> ty::Binder<'tcx, T> {
+        self.anonymize_bound_vars(binder)
+    }
+
+    fn opaque_types_defined_by(self, defining_anchor: LocalDefId) -> Self::DefiningOpaqueTypes {
+        self.opaque_types_defined_by(defining_anchor)
+    }
+}
+
+impl<'tcx> RustIr for TyCtxt<'tcx> {
+    type Interner = Self;
+
+    fn interner(self) -> Self::Interner {
+        self
+    }
+
+    fn with_cached_task<T>(self, task: impl FnOnce() -> T) -> (T, DepNodeIndex) {
+        self.dep_graph.with_anon_task(self, crate::dep_graph::dep_kinds::TraitSelect, task)
+    }
+
+    fn mk_tracked<T: fmt::Debug + Clone>(
+        self,
+        data: T,
+        dep_node: DepNodeIndex,
+    ) -> <Self::Interner as Interner>::Tracked<T> {
+        WithDepNode::new(dep_node, data)
+    }
+    fn get_tracked<T: fmt::Debug + Clone>(
+        self,
+        tracked: &<Self::Interner as Interner>::Tracked<T>,
+    ) -> T {
+        tracked.get(self)
+    }
+
+    fn with_global_cache<R>(self, f: impl FnOnce(&mut search_graph::GlobalCache<Self>) -> R) -> R {
+        f(&mut *self.new_solver_evaluation_cache.lock())
+    }
+
+    fn generics_require_sized_self(self, def_id: DefId) -> bool {
+        self.generics_require_sized_self(def_id)
+    }
+
+    fn item_bounds(
+        self,
+        def_id: DefId,
+    ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = ty::Clause<'tcx>>> {
+        self.item_bounds(def_id).map_bound(IntoIterator::into_iter)
+    }
+
     fn require_lang_item(self, lang_item: TraitSolverLangItem) -> DefId {
         self.require_lang_item(trait_lang_item_to_lang_item(lang_item), None)
     }
@@ -442,13 +532,6 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
 
     fn as_lang_item(self, def_id: DefId) -> Option<TraitSolverLangItem> {
         lang_item_to_trait_lang_item(self.lang_items().from_def_id(def_id)?)
-    }
-
-    fn associated_type_def_ids(self, def_id: DefId) -> impl IntoIterator<Item = DefId> {
-        self.associated_items(def_id)
-            .in_definition_order()
-            .filter(|assoc_item| matches!(assoc_item.kind, ty::AssocKind::Type))
-            .map(|assoc_item| assoc_item.def_id)
     }
 
     // This implementation is a bit different from `TyCtxt::for_each_relevant_impl`,
@@ -566,95 +649,6 @@ impl<'tcx> RustIr for TyCtxt<'tcx> {
         for &impl_def_id in trait_impls.blanket_impls() {
             f(impl_def_id);
         }
-    }
-
-    fn has_item_definition(self, def_id: DefId) -> bool {
-        self.defaultness(def_id).has_value()
-    }
-
-    fn impl_is_default(self, impl_def_id: DefId) -> bool {
-        self.defaultness(impl_def_id).is_default()
-    }
-
-    fn impl_trait_ref(self, impl_def_id: DefId) -> ty::EarlyBinder<'tcx, ty::TraitRef<'tcx>> {
-        self.impl_trait_ref(impl_def_id).unwrap()
-    }
-
-    fn impl_polarity(self, impl_def_id: DefId) -> ty::ImplPolarity {
-        self.impl_polarity(impl_def_id)
-    }
-
-    fn trait_is_auto(self, trait_def_id: DefId) -> bool {
-        self.trait_is_auto(trait_def_id)
-    }
-
-    fn trait_is_alias(self, trait_def_id: DefId) -> bool {
-        self.trait_is_alias(trait_def_id)
-    }
-
-    fn trait_is_dyn_compatible(self, trait_def_id: DefId) -> bool {
-        self.is_dyn_compatible(trait_def_id)
-    }
-
-    fn trait_is_fundamental(self, def_id: DefId) -> bool {
-        self.trait_def(def_id).is_fundamental
-    }
-
-    fn trait_may_be_implemented_via_object(self, trait_def_id: DefId) -> bool {
-        self.trait_def(trait_def_id).implement_via_object
-    }
-
-    fn is_impl_trait_in_trait(self, def_id: DefId) -> bool {
-        self.is_impl_trait_in_trait(def_id)
-    }
-
-    fn delay_bug(self, msg: impl ToString) -> ErrorGuaranteed {
-        self.dcx().span_delayed_bug(DUMMY_SP, msg.to_string())
-    }
-
-    fn is_general_coroutine(self, coroutine_def_id: DefId) -> bool {
-        self.is_general_coroutine(coroutine_def_id)
-    }
-
-    fn coroutine_is_async(self, coroutine_def_id: DefId) -> bool {
-        self.coroutine_is_async(coroutine_def_id)
-    }
-
-    fn coroutine_is_gen(self, coroutine_def_id: DefId) -> bool {
-        self.coroutine_is_gen(coroutine_def_id)
-    }
-
-    fn coroutine_is_async_gen(self, coroutine_def_id: DefId) -> bool {
-        self.coroutine_is_async_gen(coroutine_def_id)
-    }
-
-    fn unsizing_params_for_adt(
-        self,
-        adt_def_id: DefId,
-    ) -> <Self::Interner as Interner>::UnsizingParams {
-        self.unsizing_params_for_adt(adt_def_id)
-    }
-
-    fn find_const_ty_from_env(
-        self,
-        param_env: &ty::ParamEnv<'tcx>,
-        placeholder: <Self::Interner as Interner>::PlaceholderConst,
-    ) -> Ty<'tcx> {
-        placeholder.find_const_ty_from_env(param_env)
-    }
-
-    fn anonymize_bound_vars<T: TypeFoldable<TyCtxt<'tcx>>>(
-        self,
-        binder: ty::Binder<'tcx, T>,
-    ) -> ty::Binder<'tcx, T> {
-        self.anonymize_bound_vars(binder)
-    }
-
-    fn opaque_types_defined_by(
-        self,
-        defining_anchor: LocalDefId,
-    ) -> <Self::Interner as Interner>::DefiningOpaqueTypes {
-        self.opaque_types_defined_by(defining_anchor)
     }
 }
 

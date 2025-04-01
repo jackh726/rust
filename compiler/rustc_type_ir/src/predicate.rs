@@ -11,7 +11,7 @@ use crate::ir_print::IrPrint;
 use crate::lift::Lift;
 use crate::upcast::{Upcast, UpcastFrom};
 use crate::visit::TypeVisitableExt as _;
-use crate::{self as ty, Interner, RustIr};
+use crate::{self as ty, Interner};
 
 /// `A: 'region`
 #[derive_where(Clone; I: Interner, A: Clone)]
@@ -62,44 +62,37 @@ pub struct TraitRef<I: Interner> {
 }
 
 impl<I: Interner> TraitRef<I> {
-    pub fn new_from_args<Ir: RustIr<Interner = I>>(
-        ir: Ir,
-        trait_def_id: I::DefId,
-        args: I::GenericArgs,
-    ) -> Self {
-        ir.debug_assert_args_compatible(trait_def_id, args.clone());
+    pub fn new_from_args(interner: I, trait_def_id: I::DefId, args: I::GenericArgs) -> Self {
+        interner.debug_assert_args_compatible(trait_def_id, args.clone());
         Self { def_id: trait_def_id, args, _use_trait_ref_new_instead: () }
     }
 
-    pub fn new<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    pub fn new(
+        interner: I,
         trait_def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> Self {
-        let args = ir.interner().mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(ir, trait_def_id, args)
+        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
+        Self::new_from_args(interner, trait_def_id, args)
     }
 
-    pub fn from_method<Ir: RustIr<Interner = I>>(
-        ir: Ir,
-        trait_id: I::DefId,
-        args: I::GenericArgs,
-    ) -> TraitRef<I> {
-        let generics = ir.generics_of(trait_id);
-        TraitRef::new(ir, trait_id, args.iter().take(generics.count()))
+    pub fn from_method(interner: I, trait_id: I::DefId, args: I::GenericArgs) -> TraitRef<I> {
+        let generics = interner.generics_of(trait_id);
+        TraitRef::new(interner, trait_id, args.iter().take(generics.count()))
     }
 
     /// Returns a `TraitRef` of the form `P0: Foo<P1..Pn>` where `Pi`
     /// are the parameters defined on trait.
-    pub fn identity<Ir: RustIr<Interner = I>>(ir: Ir, def_id: I::DefId) -> TraitRef<I>
-    where
-        I::GenericArgs: IrGenericArgs<I, Ir>,
-    {
-        TraitRef::new_from_args(ir, def_id, IrGenericArgs::identity_for_item(ir, def_id))
+    pub fn identity(interner: I, def_id: I::DefId) -> TraitRef<I> {
+        TraitRef::new_from_args(interner, def_id, GenericArgs::identity_for_item(interner, def_id))
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> Self {
-        TraitRef::new(ir, self.def_id, [self_ty.into()].into_iter().chain(self.args.iter().skip(1)))
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+        TraitRef::new(
+            interner,
+            self.def_id,
+            [self_ty.into()].into_iter().chain(self.args.iter().skip(1)),
+        )
     }
 
     #[inline]
@@ -143,8 +136,8 @@ pub struct TraitPredicate<I: Interner> {
 }
 
 impl<I: Interner> TraitPredicate<I> {
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> Self {
-        Self { trait_ref: self.trait_ref.with_self_ty(ir, self_ty), polarity: self.polarity }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+        Self { trait_ref: self.trait_ref.with_self_ty(interner, self_ty), polarity: self.polarity }
     }
 
     pub fn def_id(&self) -> I::DefId {
@@ -267,16 +260,11 @@ impl<I: Interner> ty::Binder<I, ExistentialPredicate<I>> {
     /// Given an existential predicate like `?Self: PartialEq<u32>` (e.g., derived from `dyn PartialEq<u32>`),
     /// and a concrete type `self_ty`, returns a full predicate where the existentially quantified variable `?Self`
     /// has been replaced with `self_ty` (e.g., `self_ty: PartialEq<u32>`, in our example).
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(&self, cx: Ir, self_ty: I::Ty) -> I::Clause
-    where
-        I::GenericArgs: IrGenericArgs<I, Ir>,
-    {
+    pub fn with_self_ty(&self, cx: I, self_ty: I::Ty) -> I::Clause {
         match self.clone().skip_binder() {
-            ExistentialPredicate::Trait(tr) => {
-                self.rebind(tr).with_self_ty(cx, self_ty).upcast(cx.interner())
-            }
+            ExistentialPredicate::Trait(tr) => self.rebind(tr).with_self_ty(cx, self_ty).upcast(cx),
             ExistentialPredicate::Projection(p) => {
-                self.rebind(p.with_self_ty(cx, self_ty)).upcast(cx.interner())
+                self.rebind(p.with_self_ty(cx, self_ty)).upcast(cx)
             }
             ExistentialPredicate::AutoTrait(did) => {
                 let generics = cx.generics_of(did);
@@ -285,10 +273,10 @@ impl<I: Interner> ty::Binder<I, ExistentialPredicate<I>> {
                 } else {
                     // If this is an ill-formed auto trait, then synthesize
                     // new error args for the missing generics.
-                    let err_args = IrGenericArgs::extend_with_error(cx, did, &[self_ty.into()]);
+                    let err_args = GenericArgs::extend_with_error(cx, did, &[self_ty.into()]);
                     ty::TraitRef::new_from_args(cx, did, err_args)
                 };
-                self.rebind(trait_ref).upcast(cx.interner())
+                self.rebind(trait_ref).upcast(cx)
             }
         }
     }
@@ -314,22 +302,18 @@ pub struct ExistentialTraitRef<I: Interner> {
 }
 
 impl<I: Interner> ExistentialTraitRef<I> {
-    pub fn new_from_args<Ir: RustIr<Interner = I>>(
-        ir: Ir,
-        trait_def_id: I::DefId,
-        args: I::GenericArgs,
-    ) -> Self {
-        ir.debug_assert_existential_args_compatible(trait_def_id, args.clone());
+    pub fn new_from_args(interner: I, trait_def_id: I::DefId, args: I::GenericArgs) -> Self {
+        interner.debug_assert_existential_args_compatible(trait_def_id, args.clone());
         Self { def_id: trait_def_id, args, _use_existential_trait_ref_new_instead: () }
     }
 
-    pub fn new<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    pub fn new(
+        interner: I,
         trait_def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> Self {
-        let args = ir.interner().mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(ir, trait_def_id, args)
+        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
+        Self::new_from_args(interner, trait_def_id, args)
     }
 
     pub fn erase_self_ty(interner: I, trait_ref: TraitRef<I>) -> ExistentialTraitRef<I> {
@@ -347,11 +331,11 @@ impl<I: Interner> ExistentialTraitRef<I> {
     /// we convert the principal trait-ref into a normal trait-ref,
     /// you must give *some* self type. A common choice is `mk_err()`
     /// or some placeholder type.
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> TraitRef<I> {
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> TraitRef<I> {
         // otherwise the escaping vars would be captured by the binder
         // debug_assert!(!self_ty.has_escaping_bound_vars());
 
-        TraitRef::new(ir, self.def_id, [self_ty.into()].into_iter().chain(self.args.iter()))
+        TraitRef::new(interner, self.def_id, [self_ty.into()].into_iter().chain(self.args.iter()))
     }
 }
 
@@ -364,11 +348,7 @@ impl<I: Interner> ty::Binder<I, ExistentialTraitRef<I>> {
     /// we convert the principal trait-ref into a normal trait-ref,
     /// you must give *some* self type. A common choice is `mk_err()`
     /// or some placeholder type.
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(
-        &self,
-        cx: Ir,
-        self_ty: I::Ty,
-    ) -> ty::Binder<I, TraitRef<I>> {
+    pub fn with_self_ty(&self, cx: I, self_ty: I::Ty) -> ty::Binder<I, TraitRef<I>> {
         self.clone().map_bound(|trait_ref| trait_ref.with_self_ty(cx, self_ty))
     }
 }
@@ -389,48 +369,44 @@ pub struct ExistentialProjection<I: Interner> {
 }
 
 impl<I: Interner> ExistentialProjection<I> {
-    pub fn new_from_args<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    pub fn new_from_args(
+        interner: I,
         def_id: I::DefId,
         args: I::GenericArgs,
         term: I::Term,
     ) -> ExistentialProjection<I> {
-        ir.debug_assert_existential_args_compatible(def_id, args.clone());
+        interner.debug_assert_existential_args_compatible(def_id, args.clone());
         Self { def_id, args, term, use_existential_projection_new_instead: () }
     }
 
-    pub fn new<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    pub fn new(
+        interner: I,
         def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
         term: I::Term,
     ) -> ExistentialProjection<I> {
-        let args = ir.interner().mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(ir, def_id, args, term)
+        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
+        Self::new_from_args(interner, def_id, args, term)
     }
 
     /// Extracts the underlying existential trait reference from this projection.
     /// For example, if this is a projection of `exists T. <T as Iterator>::Item == X`,
     /// then this function would return an `exists T. T: Iterator` existential trait
     /// reference.
-    pub fn trait_ref<Ir: RustIr<Interner = I>>(&self, ir: Ir) -> ExistentialTraitRef<I> {
-        let def_id = ir.parent(self.def_id);
-        let args_count = ir.generics_of(def_id).count() - 1;
-        let args = ir.interner().mk_args(&self.args.as_slice()[..args_count]);
+    pub fn trait_ref(&self, interner: I) -> ExistentialTraitRef<I> {
+        let def_id = interner.parent(self.def_id);
+        let args_count = interner.generics_of(def_id).count() - 1;
+        let args = interner.mk_args(&self.args.as_slice()[..args_count]);
         ExistentialTraitRef { def_id, args, _use_existential_trait_ref_new_instead: () }
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(
-        &self,
-        ir: Ir,
-        self_ty: I::Ty,
-    ) -> ProjectionPredicate<I> {
+    pub fn with_self_ty(&self, interner: I, self_ty: I::Ty) -> ProjectionPredicate<I> {
         // otherwise the escaping regions would be captured by the binders
         debug_assert!(!self_ty.has_escaping_bound_vars());
 
         ProjectionPredicate {
             projection_term: AliasTerm::new(
-                ir,
+                interner,
                 self.def_id,
                 [self_ty.into()].iter().chain(self.args.clone().iter()),
             ),
@@ -452,11 +428,7 @@ impl<I: Interner> ExistentialProjection<I> {
 }
 
 impl<I: Interner> ty::Binder<I, ExistentialProjection<I>> {
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(
-        &self,
-        cx: Ir,
-        self_ty: I::Ty,
-    ) -> ty::Binder<I, ProjectionPredicate<I>> {
+    pub fn with_self_ty(&self, cx: I, self_ty: I::Ty) -> ty::Binder<I, ProjectionPredicate<I>> {
         self.clone().map_bound(|p| p.with_self_ty(cx, self_ty))
     }
 
@@ -543,28 +515,23 @@ impl<I: Interner> fmt::Debug for AliasTerm<I> {
     }
 }
 
-
 impl<I: Interner> AliasTerm<I> {
-    pub fn new_from_args<Ir: RustIr<Interner = I>>(
-        ir: Ir,
-        def_id: I::DefId,
-        args: I::GenericArgs,
-    ) -> AliasTerm<I> {
-        ir.debug_assert_args_compatible(def_id, args.clone());
+    pub fn new_from_args(interner: I, def_id: I::DefId, args: I::GenericArgs) -> AliasTerm<I> {
+        interner.debug_assert_args_compatible(def_id, args.clone());
         AliasTerm { def_id, args, _use_alias_term_new_instead: () }
     }
 
-    pub fn new<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    pub fn new(
+        interner: I,
         def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> AliasTerm<I> {
-        let args = ir.interner().mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(ir, def_id, args)
+        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
+        Self::new_from_args(interner, def_id, args)
     }
 
-    pub fn expect_ty<Ir: RustIr<Interner = I>>(self, ir: Ir) -> ty::AliasTy<I> {
-        match self.clone().kind(ir) {
+    pub fn expect_ty(self, interner: I) -> ty::AliasTy<I> {
+        match self.clone().kind(interner) {
             AliasTermKind::ProjectionTy
             | AliasTermKind::InherentTy
             | AliasTermKind::OpaqueTy
@@ -576,14 +543,14 @@ impl<I: Interner> AliasTerm<I> {
         ty::AliasTy { def_id: self.def_id, args: self.args, _use_alias_ty_new_instead: () }
     }
 
-    pub fn kind<Ir: RustIr<Interner = I>>(self, ir: Ir) -> AliasTermKind {
-        ir.alias_term_kind(self)
+    pub fn kind(self, interner: I) -> AliasTermKind {
+        interner.alias_term_kind(self)
     }
 
-    pub fn to_term<Ir: RustIr<Interner = I>>(self, ir: Ir) -> I::Term {
-        match self.clone().kind(ir) {
+    pub fn to_term(self, interner: I) -> I::Term {
+        match self.clone().kind(interner) {
             AliasTermKind::ProjectionTy => {
-                Ty::new_alias(ir.interner(), ty::AliasTyKind::Projection, ty::AliasTy {
+                Ty::new_alias(interner, ty::AliasTyKind::Projection, ty::AliasTy {
                     def_id: self.def_id,
                     args: self.args,
                     _use_alias_ty_new_instead: (),
@@ -591,7 +558,7 @@ impl<I: Interner> AliasTerm<I> {
                 .into()
             }
             AliasTermKind::InherentTy => {
-                Ty::new_alias(ir.interner(), ty::AliasTyKind::Inherent, ty::AliasTy {
+                Ty::new_alias(interner, ty::AliasTyKind::Inherent, ty::AliasTy {
                     def_id: self.def_id,
                     args: self.args,
                     _use_alias_ty_new_instead: (),
@@ -599,24 +566,22 @@ impl<I: Interner> AliasTerm<I> {
                 .into()
             }
             AliasTermKind::OpaqueTy => {
-                Ty::new_alias(ir.interner(), ty::AliasTyKind::Opaque, ty::AliasTy {
+                Ty::new_alias(interner, ty::AliasTyKind::Opaque, ty::AliasTy {
                     def_id: self.def_id,
                     args: self.args,
                     _use_alias_ty_new_instead: (),
                 })
                 .into()
             }
-            AliasTermKind::WeakTy => {
-                Ty::new_alias(ir.interner(), ty::AliasTyKind::Weak, ty::AliasTy {
-                    def_id: self.def_id,
-                    args: self.args,
-                    _use_alias_ty_new_instead: (),
-                })
-                .into()
-            }
+            AliasTermKind::WeakTy => Ty::new_alias(interner, ty::AliasTyKind::Weak, ty::AliasTy {
+                def_id: self.def_id,
+                args: self.args,
+                _use_alias_ty_new_instead: (),
+            })
+            .into(),
             AliasTermKind::UnevaluatedConst | AliasTermKind::ProjectionConst => {
                 I::Const::new_unevaluated(
-                    ir.interner(),
+                    interner,
                     ty::UnevaluatedConst::new(self.def_id, self.args),
                 )
                 .into()
@@ -631,34 +596,31 @@ impl<I: Interner> AliasTerm<I> {
         self.args.type_at(0)
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> Self {
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
         AliasTerm::new(
-            ir,
+            interner,
             self.def_id,
             [self_ty.into()].into_iter().chain(self.args.iter().skip(1)),
         )
     }
 
-    pub fn trait_def_id<Ir: RustIr<Interner = I>>(&self, ir: Ir) -> I::DefId {
+    pub fn trait_def_id(&self, interner: I) -> I::DefId {
         assert!(
             matches!(
-                self.clone().kind(ir),
+                self.clone().kind(interner),
                 AliasTermKind::ProjectionTy | AliasTermKind::ProjectionConst
             ),
             "expected a projection"
         );
-        ir.parent(self.def_id)
+        interner.parent(self.def_id)
     }
 
     /// Extracts the underlying trait reference and own args from this projection.
     /// For example, if this is a projection of `<T as StreamingIterator>::Item<'a>`,
     /// then this function would return a `T: StreamingIterator` trait reference and
     /// `['a]` as the own args.
-    pub fn trait_ref_and_own_args<Ir: RustIr<Interner = I>>(
-        self,
-        ir: Ir,
-    ) -> (TraitRef<I>, I::GenericArgsSlice) {
-        ir.trait_ref_and_own_args_for_alias(self.def_id, self.args)
+    pub fn trait_ref_and_own_args(self, interner: I) -> (TraitRef<I>, I::GenericArgsSlice) {
+        interner.trait_ref_and_own_args_for_alias(self.def_id, self.args)
     }
 
     /// Extracts the underlying trait reference from this projection.
@@ -668,8 +630,8 @@ impl<I: Interner> AliasTerm<I> {
     /// WARNING: This will drop the args for generic associated types
     /// consider calling [Self::trait_ref_and_own_args] to get those
     /// as well.
-    pub fn trait_ref<Ir: RustIr<Interner = I>>(self, ir: Ir) -> TraitRef<I> {
-        self.trait_ref_and_own_args(ir).0
+    pub fn trait_ref(self, interner: I) -> TraitRef<I> {
+        self.trait_ref_and_own_args(interner).0
     }
 }
 
@@ -711,16 +673,12 @@ impl<I: Interner> ProjectionPredicate<I> {
         self.projection_term.self_ty()
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(
-        self,
-        ir: Ir,
-        self_ty: I::Ty,
-    ) -> ProjectionPredicate<I> {
-        Self { projection_term: self.projection_term.with_self_ty(ir, self_ty), ..self }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> ProjectionPredicate<I> {
+        Self { projection_term: self.projection_term.with_self_ty(interner, self_ty), ..self }
     }
 
-    pub fn trait_def_id<Ir: RustIr<Interner = I>>(&self, ir: Ir) -> I::DefId {
-        self.projection_term.trait_def_id(ir)
+    pub fn trait_def_id(&self, interner: I) -> I::DefId {
+        self.projection_term.trait_def_id(interner)
     }
 
     pub fn def_id(&self) -> I::DefId {
@@ -731,7 +689,7 @@ impl<I: Interner> ProjectionPredicate<I> {
 impl<I: Interner> ty::Binder<I, ProjectionPredicate<I>> {
     /// Returns the `DefId` of the trait of the associated item being projected.
     #[inline]
-    pub fn trait_def_id<Ir: RustIr<Interner = I>>(&self, cx: Ir) -> I::DefId {
+    pub fn trait_def_id(&self, cx: I) -> I::DefId {
         self.clone().skip_binder().projection_term.trait_def_id(cx)
     }
 
@@ -771,12 +729,12 @@ impl<I: Interner> NormalizesTo<I> {
         self.alias.clone().self_ty()
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> NormalizesTo<I> {
-        Self { alias: self.alias.with_self_ty(ir, self_ty), ..self }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> NormalizesTo<I> {
+        Self { alias: self.alias.with_self_ty(interner, self_ty), ..self }
     }
 
-    pub fn trait_def_id<Ir: RustIr<Interner = I>>(&self, ir: Ir) -> I::DefId {
-        self.alias.trait_def_id(ir)
+    pub fn trait_def_id(&self, interner: I) -> I::DefId {
+        self.alias.trait_def_id(interner)
     }
 
     pub fn def_id(&self) -> I::DefId {
@@ -804,8 +762,8 @@ impl<I: Interner> HostEffectPredicate<I> {
         self.trait_ref.self_ty()
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> Self {
-        Self { trait_ref: self.trait_ref.with_self_ty(ir, self_ty), ..self }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+        Self { trait_ref: self.trait_ref.with_self_ty(interner, self_ty), ..self }
     }
 
     pub fn def_id(&self) -> I::DefId {

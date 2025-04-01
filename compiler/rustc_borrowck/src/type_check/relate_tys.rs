@@ -308,7 +308,6 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
 
 impl<'b, 'tcx> TypeRelation for NllTypeRelating<'_, 'b, 'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.type_checker.infcx.tcx
     }

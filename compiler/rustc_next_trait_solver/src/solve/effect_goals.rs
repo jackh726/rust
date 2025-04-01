@@ -19,21 +19,20 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     fn self_ty(&self) -> I::Ty {
         self.self_ty()
     }
 
-    fn trait_ref(self, _: D::Ir) -> ty::TraitRef<I> {
+    fn trait_ref(self, _: I) -> ty::TraitRef<I> {
         self.trait_ref
     }
 
-    fn with_self_ty(self, cx: D::Ir, self_ty: I::Ty) -> Self {
+    fn with_self_ty(self, cx: I, self_ty: I::Ty) -> Self {
         self.with_self_ty(cx, self_ty)
     }
 
-    fn trait_def_id(&self, _: D::Ir) -> I::DefId {
+    fn trait_def_id(&self, _: I) -> I::DefId {
         self.def_id()
     }
 
@@ -86,13 +85,14 @@ where
         let cx = ecx.cx();
         let mut candidates = vec![];
 
-        if !cx.alias_has_const_conditions(alias_ty.def_id) {
+        if !cx.interner().alias_has_const_conditions(alias_ty.def_id) {
             return vec![];
         }
 
         for clause in elaborate::elaborate(
-            cx,
-            cx.explicit_implied_const_bounds(alias_ty.def_id)
+            cx.interner(),
+            cx.interner()
+                .explicit_implied_const_bounds(alias_ty.def_id)
                 .iter_instantiated(cx.interner(), alias_ty.args.clone())
                 .map(|trait_ref| {
                     trait_ref.to_host_effect_clause(cx.interner(), goal.predicate.constness)
@@ -107,7 +107,8 @@ where
                     // Const conditions must hold for the implied const bound to hold.
                     ecx.add_goals(
                         GoalSource::Misc,
-                        cx.const_conditions(alias_ty.def_id)
+                        cx.interner()
+                            .const_conditions(alias_ty.def_id)
                             .iter_instantiated(cx.interner(), alias_ty.args.clone())
                             .map(|trait_ref| {
                                 goal.clone().with(
@@ -134,7 +135,7 @@ where
     ) -> Result<Candidate<I>, NoSolution> {
         let cx = ecx.cx();
 
-        let impl_trait_ref = cx.impl_trait_ref(impl_def_id);
+        let impl_trait_ref = cx.interner().impl_trait_ref(impl_def_id);
         if !DeepRejectCtxt::relate_rigid_infer(cx.interner()).args_may_unify(
             goal.predicate.trait_ref.args.clone(),
             impl_trait_ref.clone().skip_binder().args,
@@ -142,7 +143,7 @@ where
             return Err(NoSolution);
         }
 
-        let impl_polarity = cx.impl_polarity(impl_def_id);
+        let impl_polarity = cx.interner().impl_polarity(impl_def_id);
         match impl_polarity {
             ty::ImplPolarity::Negative => return Err(NoSolution),
             ty::ImplPolarity::Reservation => {
@@ -151,7 +152,7 @@ where
             ty::ImplPolarity::Positive => {}
         };
 
-        if !cx.impl_is_const(impl_def_id) {
+        if !cx.interner().impl_is_const(impl_def_id) {
             return Err(NoSolution);
         }
 
@@ -162,6 +163,7 @@ where
 
             ecx.eq(goal.param_env.clone(), goal.predicate.trait_ref.clone(), impl_trait_ref)?;
             let where_clause_bounds = cx
+                .interner()
                 .predicates_of(impl_def_id)
                 .iter_instantiated(cx.interner(), impl_args.clone())
                 .map(|pred| goal.clone().with(cx.interner(), pred));
@@ -169,6 +171,7 @@ where
 
             // For this impl to be `const`, we need to check its `~const` bounds too.
             let const_conditions = cx
+                .interner()
                 .const_conditions(impl_def_id)
                 .iter_instantiated(cx.interner(), impl_args)
                 .map(|bound_trait_ref| {
@@ -241,9 +244,12 @@ where
         // A built-in `Fn` impl only holds if the output is sized.
         // (FIXME: technically we only need to check this if the type is a fn ptr...)
         let output_is_sized_pred = inputs_and_output.clone().map_bound(|(_, output)| {
-            ty::TraitRef::new(cx, cx.require_lang_item(TraitSolverLangItem::Sized), [output])
+            ty::TraitRef::new(cx.interner(), cx.require_lang_item(TraitSolverLangItem::Sized), [
+                output,
+            ])
         });
         let requirements = cx
+            .interner()
             .const_conditions(def_id)
             .iter_instantiated(cx.interner(), args)
             .map(|trait_ref| {
@@ -263,7 +269,7 @@ where
         let pred = inputs_and_output
             .clone()
             .map_bound(|(inputs, _)| {
-                ty::TraitRef::new(cx, goal.predicate.def_id(), [
+                ty::TraitRef::new(cx.interner(), goal.predicate.def_id(), [
                     goal.predicate.self_ty(),
                     Ty::new_tup(cx.interner(), inputs.as_slice()),
                 ])
@@ -401,7 +407,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self))]
     pub(super) fn compute_host_effect_goal(

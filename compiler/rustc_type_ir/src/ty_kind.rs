@@ -15,7 +15,7 @@ use self::TyKind::*;
 pub use self::closure::*;
 use crate::inherent::*;
 use crate::ir_print::IrPrint;
-use crate::{self as ty, DebruijnIndex, Interner, RustIr};
+use crate::{self as ty, DebruijnIndex, Interner};
 
 mod closure;
 
@@ -370,35 +370,31 @@ impl<I: Interner> fmt::Debug for AliasTy<I> {
 }
 
 impl<I: Interner> AliasTy<I> {
-    pub fn new_from_args<Ir: RustIr<Interner = I>>(
-        ir: Ir,
-        def_id: I::DefId,
-        args: I::GenericArgs,
-    ) -> AliasTy<I> {
-        ir.debug_assert_args_compatible(def_id, args.clone());
+    pub fn new_from_args(interner: I, def_id: I::DefId, args: I::GenericArgs) -> AliasTy<I> {
+        interner.debug_assert_args_compatible(def_id, args.clone());
         AliasTy { def_id, args, _use_alias_ty_new_instead: () }
     }
 
-    pub fn new<Ir: RustIr<Interner = I>>(
-        ir: Ir,
+    pub fn new(
+        interner: I,
         def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> AliasTy<I> {
-        let args = ir.interner().mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(ir, def_id, args)
+        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
+        Self::new_from_args(interner, def_id, args)
     }
 
-    pub fn kind<Ir: RustIr<Interner = I>>(self, ir: Ir) -> AliasTyKind {
-        ir.alias_ty_kind(self)
+    pub fn kind(self, interner: I) -> AliasTyKind {
+        interner.alias_ty_kind(self)
     }
 
     /// Whether this alias type is an opaque.
-    pub fn is_opaque<Ir: RustIr<Interner = I>>(self, ir: Ir) -> bool {
-        matches!(self.kind(ir), AliasTyKind::Opaque)
+    pub fn is_opaque(self, interner: I) -> bool {
+        matches!(self.kind(interner), AliasTyKind::Opaque)
     }
 
-    pub fn to_ty<Ir: RustIr<Interner = I>>(self, ir: Ir) -> I::Ty {
-        Ty::new_alias(ir.interner(), self.clone().kind(ir), self)
+    pub fn to_ty(self, interner: I) -> I::Ty {
+        Ty::new_alias(interner, self.clone().kind(interner), self)
     }
 }
 
@@ -408,25 +404,26 @@ impl<I: Interner> AliasTy<I> {
         self.args.clone().type_at(0)
     }
 
-    pub fn with_self_ty<Ir: RustIr<Interner = I>>(self, ir: Ir, self_ty: I::Ty) -> Self {
-        AliasTy::new(ir, self.def_id, [self_ty.into()].into_iter().chain(self.args.iter().skip(1)))
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+        AliasTy::new(
+            interner,
+            self.def_id,
+            [self_ty.into()].into_iter().chain(self.args.iter().skip(1)),
+        )
     }
 
-    pub fn trait_def_id<Ir: RustIr<Interner = I>>(&self, ir: Ir) -> I::DefId {
-        assert_eq!(self.clone().kind(ir), AliasTyKind::Projection, "expected a projection");
-        ir.parent(self.def_id)
+    pub fn trait_def_id(&self, interner: I) -> I::DefId {
+        assert_eq!(self.clone().kind(interner), AliasTyKind::Projection, "expected a projection");
+        interner.parent(self.def_id)
     }
 
     /// Extracts the underlying trait reference and own args from this projection.
     /// For example, if this is a projection of `<T as StreamingIterator>::Item<'a>`,
     /// then this function would return a `T: StreamingIterator` trait reference and
     /// `['a]` as the own args.
-    pub fn trait_ref_and_own_args<Ir: RustIr<Interner = I>>(
-        self,
-        ir: Ir,
-    ) -> (ty::TraitRef<I>, I::GenericArgsSlice) {
-        debug_assert_eq!(self.clone().kind(ir), AliasTyKind::Projection);
-        ir.trait_ref_and_own_args_for_alias(self.def_id, self.args)
+    pub fn trait_ref_and_own_args(self, interner: I) -> (ty::TraitRef<I>, I::GenericArgsSlice) {
+        debug_assert_eq!(self.clone().kind(interner), AliasTyKind::Projection);
+        interner.trait_ref_and_own_args_for_alias(self.def_id, self.args)
     }
 
     /// Extracts the underlying trait reference from this projection.
@@ -436,8 +433,8 @@ impl<I: Interner> AliasTy<I> {
     /// WARNING: This will drop the args for generic associated types
     /// consider calling [Self::trait_ref_and_own_args] to get those
     /// as well.
-    pub fn trait_ref<Ir: RustIr<Interner = I>>(self, ir: Ir) -> ty::TraitRef<I> {
-        self.trait_ref_and_own_args(ir).0
+    pub fn trait_ref(self, interner: I) -> ty::TraitRef<I> {
+        self.trait_ref_and_own_args(interner).0
     }
 }
 
@@ -453,13 +450,13 @@ impl<I: Interner> AliasTy<I> {
     ///     I_i impl args
     ///     P_j GAT args
     /// ```
-    pub fn rebase_inherent_args_onto_impl<Ir: RustIr<Interner = I>>(
+    pub fn rebase_inherent_args_onto_impl(
         self,
         impl_args: I::GenericArgs,
-        ir: Ir,
+        interner: I,
     ) -> I::GenericArgs {
-        debug_assert_eq!(self.clone().kind(ir), AliasTyKind::Inherent);
-        ir.interner().mk_args_from_iter(impl_args.iter().chain(self.args.iter().skip(1)))
+        debug_assert_eq!(self.clone().kind(interner), AliasTyKind::Inherent);
+        interner.mk_args_from_iter(impl_args.iter().chain(self.args.iter().skip(1)))
     }
 }
 

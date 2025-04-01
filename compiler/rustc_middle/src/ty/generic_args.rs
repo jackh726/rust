@@ -116,11 +116,7 @@ impl<'tcx> rustc_type_ir::inherent::GenericArgs<TyCtxt<'tcx>> for ty::GenericArg
             _ => bug!("coroutine args missing synthetics"),
         }
     }
-}
 
-impl<'tcx> rustc_type_ir::inherent::IrGenericArgs<TyCtxt<'tcx>, TyCtxt<'tcx>>
-    for ty::GenericArgsRef<'tcx>
-{
     fn rebase_onto(
         self,
         tcx: TyCtxt<'tcx>,

@@ -77,7 +77,6 @@ impl<'infcx, 'tcx> TypeRelating<'infcx, 'tcx> {
 
 impl<'tcx> TypeRelation for TypeRelating<'_, 'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.infcx.tcx
     }

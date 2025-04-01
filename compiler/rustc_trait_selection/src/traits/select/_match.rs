@@ -33,7 +33,6 @@ impl<'tcx> MatchAgainstFreshVars<'tcx> {
 
 impl<'tcx> TypeRelation for MatchAgainstFreshVars<'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.tcx
     }

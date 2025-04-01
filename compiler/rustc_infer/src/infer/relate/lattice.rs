@@ -72,7 +72,6 @@ impl<'infcx, 'tcx> LatticeOp<'infcx, 'tcx> {
 
 impl<'tcx> TypeRelation for LatticeOp<'_, 'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.infcx.tcx
     }

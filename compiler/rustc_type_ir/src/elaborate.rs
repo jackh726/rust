@@ -5,7 +5,7 @@ use smallvec::smallvec;
 use crate::data_structures::HashSet;
 use crate::inherent::*;
 use crate::outlives::{Component, push_outlives_components};
-use crate::{self as ty, Interner, RustIr, Upcast as _};
+use crate::{self as ty, Interner, Upcast as _};
 
 /// "Elaboration" is the process of identifying all the predicates that
 /// are implied by a source predicate. Currently, this basically means
@@ -13,8 +13,8 @@ use crate::{self as ty, Interner, RustIr, Upcast as _};
 /// if we know that `T: Ord`, the elaborator would deduce that `T: PartialOrd`
 /// holds as well. Similarly, if we have `trait Foo: 'static`, and we know that
 /// `T: Foo`, then we know that `T: 'static`.
-pub struct Elaborator<Ir: RustIr<Interner = I>, I: Interner, O> {
-    cx: Ir,
+pub struct Elaborator<I: Interner, O> {
+    cx: I,
     stack: Vec<O>,
     visited: HashSet<ty::Binder<I, ty::PredicateKind<I>>>,
     mode: Filter,
@@ -88,17 +88,17 @@ impl<I: Interner> Elaboratable<I> for ClauseWithSupertraitSpan<I> {
     }
 }
 
-pub fn elaborate<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>>(
-    cx: Ir,
+pub fn elaborate<I: Interner, O: Elaboratable<I>>(
+    cx: I,
     obligations: impl IntoIterator<Item = O>,
-) -> Elaborator<Ir, I, O> {
+) -> Elaborator<I, O> {
     let mut elaborator =
         Elaborator { cx, stack: Vec::new(), visited: HashSet::default(), mode: Filter::All };
     elaborator.extend_deduped(obligations);
     elaborator
 }
 
-impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Elaborator<Ir, I, O> {
+impl<I: Interner, O: Elaboratable<I>> Elaborator<I, O> {
     fn extend_deduped(&mut self, obligations: impl IntoIterator<Item = O>) {
         // Only keep those bounds that we haven't already seen.
         // This is necessary to prevent infinite recursion in some
@@ -136,7 +136,7 @@ impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Elaborator<Ir, I
                     |(index, (clause, span)): (usize, (I::Clause, I::Span))| {
                         elaboratable.child_with_derived_cause(
                             clause.instantiate_supertrait(
-                                cx.interner(),
+                                cx,
                                 bound_clause.clone().rebind(data.trait_ref.clone()),
                             ),
                             span,
@@ -167,9 +167,9 @@ impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Elaborator<Ir, I
                     |trait_ref| {
                         elaboratable.child(
                             trait_ref
-                                .to_host_effect_clause(cx.interner(), data.constness)
+                                .to_host_effect_clause(cx, data.constness)
                                 .instantiate_supertrait(
-                                    cx.interner(),
+                                    cx,
                                     bound_clause.rebind(data.trait_ref.clone()),
                                 ),
                         )
@@ -203,9 +203,7 @@ impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Elaborator<Ir, I
                         .filter_map(|component| {
                             elaborate_component_to_clause(cx, component, r_min.clone())
                         })
-                        .map(|clause| {
-                            elaboratable.child(bound_clause.rebind(clause).upcast(cx.interner()))
-                        }),
+                        .map(|clause| elaboratable.child(bound_clause.rebind(clause).upcast(cx))),
                 );
             }
             ty::ClauseKind::RegionOutlives(..) => {
@@ -229,8 +227,8 @@ impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Elaborator<Ir, I
     }
 }
 
-fn elaborate_component_to_clause<Ir: RustIr<Interner = I>, I: Interner>(
-    cx: Ir,
+fn elaborate_component_to_clause<I: Interner>(
+    interner: I,
     component: Component<I>,
     outlives_region: I::Region,
 ) -> Option<ty::ClauseKind<I>> {
@@ -244,12 +242,12 @@ fn elaborate_component_to_clause<Ir: RustIr<Interner = I>, I: Interner>(
         }
 
         Component::Param(p) => {
-            let ty = Ty::new_param(cx.interner(), p);
+            let ty = Ty::new_param(interner, p);
             Some(ty::ClauseKind::TypeOutlives(ty::OutlivesPredicate(ty, outlives_region)))
         }
 
         Component::Placeholder(p) => {
-            let ty = Ty::new_placeholder(cx.interner(), p);
+            let ty = Ty::new_placeholder(interner, p);
             Some(ty::ClauseKind::TypeOutlives(ty::OutlivesPredicate(ty, outlives_region)))
         }
 
@@ -259,7 +257,7 @@ fn elaborate_component_to_clause<Ir: RustIr<Interner = I>, I: Interner>(
             // We might end up here if we have `Foo<<Bar as Baz>::Assoc>: 'a`.
             // With this, we can deduce that `<Bar as Baz>::Assoc: 'a`.
             Some(ty::ClauseKind::TypeOutlives(ty::OutlivesPredicate(
-                alias_ty.to_ty(cx),
+                alias_ty.to_ty(interner),
                 outlives_region,
             )))
         }
@@ -272,7 +270,7 @@ fn elaborate_component_to_clause<Ir: RustIr<Interner = I>, I: Interner>(
     }
 }
 
-impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Iterator for Elaborator<Ir, I, O> {
+impl<I: Interner, O: Elaboratable<I>> Iterator for Elaborator<I, O> {
     type Item = O;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -298,8 +296,8 @@ impl<Ir: RustIr<Interner = I>, I: Interner, O: Elaboratable<I>> Iterator for Ela
 /// does not compute the full elaborated super-predicates but just the set of def-ids. It is used
 /// to identify which traits may define a given associated type to help avoid cycle errors,
 /// and to make size estimates for vtable layout computation.
-pub fn supertrait_def_ids<Ir: RustIr<Interner = I>, I: Interner>(
-    cx: Ir,
+pub fn supertrait_def_ids<I: Interner>(
+    interner: I,
     trait_def_id: I::DefId,
 ) -> impl Iterator<Item = I::DefId> {
     let mut set = HashSet::default();
@@ -310,7 +308,7 @@ pub fn supertrait_def_ids<Ir: RustIr<Interner = I>, I: Interner>(
     std::iter::from_fn(move || {
         let trait_def_id = stack.pop()?;
 
-        for (predicate, _) in cx.explicit_super_predicates_of(trait_def_id).iter_identity() {
+        for (predicate, _) in interner.explicit_super_predicates_of(trait_def_id).iter_identity() {
             if let ty::ClauseKind::Trait(data) = predicate.kind().skip_binder() {
                 if set.insert(data.clone().def_id()) {
                     stack.push(data.clone().def_id());
@@ -322,14 +320,14 @@ pub fn supertrait_def_ids<Ir: RustIr<Interner = I>, I: Interner>(
     })
 }
 
-pub fn supertraits<Ir: RustIr<Interner = I>, I: Interner>(
-    cx: Ir,
+pub fn supertraits<I: Interner>(
+    interner: I,
     trait_ref: ty::Binder<I, ty::TraitRef<I>>,
-) -> FilterToTraits<I, Elaborator<Ir, I, I::Clause>> {
-    elaborate(cx, [trait_ref.upcast(cx.interner())]).filter_only_self().filter_to_traits()
+) -> FilterToTraits<I, Elaborator<I, I::Clause>> {
+    elaborate(interner, [trait_ref.upcast(interner)]).filter_only_self().filter_to_traits()
 }
 
-impl<Ir: RustIr<Interner = I>, I: Interner> Elaborator<Ir, I, I::Clause> {
+impl<I: Interner> Elaborator<I, I::Clause> {
     fn filter_to_traits(self) -> FilterToTraits<I, Self> {
         FilterToTraits { _cx: PhantomData, base_iterator: self }
     }

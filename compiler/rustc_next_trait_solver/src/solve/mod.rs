@@ -75,7 +75,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     #[instrument(level = "trace", skip(self))]
     fn compute_type_outlives_goal(
@@ -120,7 +119,7 @@ where
     }
 
     fn compute_dyn_compatible_goal(&mut self, trait_def_id: I::DefId) -> QueryResult<I> {
-        if self.cx().trait_is_dyn_compatible(trait_def_id) {
+        if self.cx().interner().trait_is_dyn_compatible(trait_def_id) {
             self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
         } else {
             Err(NoSolution)
@@ -192,7 +191,7 @@ where
                 return self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes);
             }
             ty::ConstKind::Unevaluated(uv) => {
-                self.cx().type_of(uv.def).instantiate(self.cx().interner(), uv.args)
+                self.cx().interner().type_of(uv.def).instantiate(self.cx().interner(), uv.args)
             }
             ty::ConstKind::Expr(_) => unimplemented!(
                 "`feature(generic_const_exprs)` is not supported in the new trait solver"
@@ -203,7 +202,7 @@ where
             ty::ConstKind::Bound(_, _) => panic!("escaping bound vars in {:?}", ct),
             ty::ConstKind::Value(ty, _) => ty,
             ty::ConstKind::Placeholder(placeholder) => {
-                self.cx().find_const_ty_from_env(&goal.param_env, placeholder)
+                self.cx().interner().find_const_ty_from_env(&goal.param_env, placeholder)
             }
         };
 
@@ -217,7 +216,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     /// Try to merge multiple possible ways to prove a goal, if that is not possible returns `None`.
     ///

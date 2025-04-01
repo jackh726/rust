@@ -126,10 +126,9 @@ where
     Ir: RustIr,
 {
     type I = Ir::Interner;
-    type Ir = Ir;
 
-    fn cx(&self) -> Ir {
-        self.infcx.cx()
+    fn cx(&self) -> <Ir as RustIr>::Interner {
+        self.infcx.cx().interner()
     }
 
     fn relate_item_args(
@@ -173,7 +172,7 @@ where
         a: <Ir::Interner as Interner>::Ty,
         b: <Ir::Interner as Interner>::Ty,
     ) -> RelateResult<Ir::Interner, <Ir::Interner as Interner>::Ty> {
-        let cx = self.cx().interner();
+        let cx = self.cx();
 
         if a == b {
             return Ok(a);

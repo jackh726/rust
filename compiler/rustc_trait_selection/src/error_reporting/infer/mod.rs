@@ -2011,7 +2011,6 @@ struct SameTypeModuloInfer<'a, 'tcx>(&'a InferCtxt<'tcx>);
 
 impl<'tcx> TypeRelation for SameTypeModuloInfer<'_, 'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.0.tcx
     }

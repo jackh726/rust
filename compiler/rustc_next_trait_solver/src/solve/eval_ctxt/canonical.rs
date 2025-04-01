@@ -49,7 +49,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     /// Canonicalizes the goal remembering the original values
     /// for each bound variable.
@@ -187,7 +186,7 @@ where
                 .iter()
                 .filter(|c| !c.is_region() && c.is_existential())
                 .count();
-            if num_non_region_vars > self.cx().recursion_limit() {
+            if num_non_region_vars > self.cx().interner().recursion_limit() {
                 debug!(?num_non_region_vars, "too many inference variables -> overflow");
                 return Ok(self.make_ambiguous_response_no_constraints(MaybeCause::Overflow {
                     suggest_increasing_limit: true,
@@ -468,7 +467,6 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
     <I as Interner>::AdtDef: IrAdtDef<I, D::Ir>,
-    <I as Interner>::GenericArgs: IrGenericArgs<I, D::Ir>,
 {
     // In case any fresh inference variables have been created between `state`
     // and the previous instantiation, extend `orig_values` for it.

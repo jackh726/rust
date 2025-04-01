@@ -404,7 +404,6 @@ impl<'tcx> Generalizer<'_, 'tcx> {
 
 impl<'tcx> TypeRelation for Generalizer<'_, 'tcx> {
     type I = TyCtxt<'tcx>;
-    type Ir = TyCtxt<'tcx>;
     fn cx(&self) -> TyCtxt<'tcx> {
         self.infcx.tcx
     }
