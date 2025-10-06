@@ -26,38 +26,8 @@ pub(super) fn gather_member_constraints<'b, 'tcx>(
     defining_use.hidden_type.ty.visit_with(&mut visitor);
 }
 
-pub(super) fn apply_member_constraints<'tcx>(
-    rcx: &mut RegionCtxt<'_, 'tcx>,
-    member_constraints: FxHashMap<ConstraintSccIndex, Vec<Rc<Vec<RegionVid>>>>,
-) {
-    // Walk over the region graph, visiting the smallest regions first and then all
-    // regions which have to outlive that one.
-    //
-    // Whenever we encounter a member region, we mutate the value of this SCC. This is
-    // as if we'd introduce new outlives constraints. However, we discard these region
-    // values after we've inferred the hidden types of opaques and apply the region
-    // constraints by simply equating the actual hidden type with the inferred one.
-    debug!(?member_constraints);
-    for scc_a in rcx.constraint_sccs.all_sccs() {
-        debug!(?scc_a);
-        // Start by  adding the region values required by outlives constraints. This
-        // matches how we compute the final region values in `fn compute_regions`.
-        //
-        // We need to do this here to get a lower bound when applying member constraints.
-        // This propagates the region values added by previous member constraints.
-        for &scc_b in rcx.constraint_sccs.successors(scc_a) {
-            debug!(?scc_b);
-            rcx.scc_values.add_region(scc_a, scc_b);
-        }
-
-        for arg_regions in member_constraints.get(&scc_a).into_iter().flatten() {
-            apply_member_constraint(rcx, scc_a, arg_regions);
-        }
-    }
-}
-
 #[instrument(level = "debug", skip(rcx))]
-fn apply_member_constraint<'tcx>(
+pub(super) fn apply_member_constraint<'tcx>(
     rcx: &mut RegionCtxt<'_, 'tcx>,
     member: ConstraintSccIndex,
     arg_regions: &[RegionVid],
