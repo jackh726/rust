@@ -2,7 +2,7 @@ use std::iter;
 use std::rc::Rc;
 
 use rustc_data_structures::frozen::Frozen;
-use rustc_data_structures::fx::FxIndexMap;
+use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_infer::infer::{InferCtxt, NllRegionVariableOrigin, OpaqueTypeStorageEntries};
@@ -25,6 +25,7 @@ use tracing::{debug, instrument};
 
 use super::reverse_sccs::ReverseSccGraph;
 use crate::BorrowckInferCtxt;
+use crate::constraints::ConstraintSccIndex;
 use crate::consumers::RegionInferenceContext;
 use crate::session_diagnostics::LifetimeMismatchOpaqueParam;
 use crate::type_check::canonical::fully_perform_op_raw;
@@ -35,7 +36,7 @@ use crate::universal_regions::{RegionClassification, UniversalRegions};
 mod member_constraints;
 mod region_ctxt;
 
-use member_constraints::apply_member_constraints;
+use member_constraints::{apply_member_constraints, gather_member_constraints};
 use region_ctxt::RegionCtxt;
 
 /// We defer errors from [fn handle_opaque_type_uses] and only report them
@@ -161,7 +162,7 @@ struct DefiningUse<'tcx> {
     /// free regions and placeholders. This is necessary
     /// to interact with code outside of `rustc_borrowck`.
     opaque_type_key: OpaqueTypeKey<'tcx>,
-    arg_regions: Vec<RegionVid>,
+    arg_regions: Rc<Vec<RegionVid>>,
     hidden_type: OpaqueHiddenType<'tcx>,
 }
 
@@ -194,12 +195,13 @@ pub(crate) fn compute_definition_site_hidden_types<'tcx>(
     // We start by checking each use of an opaque type during type check and
     // check whether the generic arguments of the opaque type are fully
     // universal, if so, it's a defining use.
-    let defining_uses = collect_defining_uses(&mut rcx, hidden_types, opaque_types, &mut errors);
+    let (defining_uses, member_constraints) =
+        collect_defining_uses(&mut rcx, hidden_types, opaque_types, &mut errors);
 
     // We now compute and apply member constraints for all regions in the hidden
     // types of each defining use. This mutates the region values of the `rcx` which
     // is used when mapping the defining uses to the definition site.
-    apply_member_constraints(&mut rcx, &defining_uses);
+    apply_member_constraints(&mut rcx, member_constraints);
 
     // After applying member constraints, we now check whether all member regions ended
     // up equal to one of their choice regions and compute the actual hidden type of
@@ -219,9 +221,17 @@ fn collect_defining_uses<'tcx>(
     hidden_types: &mut DefinitionSiteHiddenTypes<'tcx>,
     opaque_types: &[(OpaqueTypeKey<'tcx>, OpaqueHiddenType<'tcx>)],
     errors: &mut Vec<DeferredOpaqueTypeError<'tcx>>,
-) -> Vec<DefiningUse<'tcx>> {
+) -> (Vec<DefiningUse<'tcx>>, FxHashMap<ConstraintSccIndex, Vec<Rc<Vec<RegionVid>>>>) {
     let infcx = rcx.infcx;
+
     let mut defining_uses = vec![];
+
+    // Start by collecting the member constraints of all defining uses.
+    //
+    // Applying member constraints can influence other member constraints,
+    // so we first collect and then apply them.
+    let mut member_constraints = Default::default();
+
     for &(opaque_type_key, hidden_type) in opaque_types {
         let non_nll_opaque_type_key = opaque_type_key.fold_captured_lifetime_args(infcx.tcx, |r| {
             nll_var_to_universal_region(&rcx, r.as_var()).unwrap_or(r)
@@ -259,14 +269,17 @@ fn collect_defining_uses<'tcx>(
                     .map(Region::as_var),
             )
             .collect();
-        defining_uses.push(DefiningUse {
+
+        let defining_use = DefiningUse {
             opaque_type_key: non_nll_opaque_type_key,
-            arg_regions,
+            arg_regions: Rc::new(arg_regions),
             hidden_type,
-        });
+        };
+        gather_member_constraints(rcx, &mut member_constraints, &defining_use);
+        defining_uses.push(defining_use);
     }
 
-    defining_uses
+    (defining_uses, member_constraints)
 }
 
 fn compute_definition_site_hidden_types_from_defining_uses<'tcx>(

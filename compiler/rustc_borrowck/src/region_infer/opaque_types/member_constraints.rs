@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def_id::DefId;
 use rustc_middle::bug;
@@ -11,25 +13,24 @@ use super::DefiningUse;
 use super::region_ctxt::RegionCtxt;
 use crate::constraints::ConstraintSccIndex;
 
+pub(super) fn gather_member_constraints<'b, 'tcx>(
+    rcx: &mut RegionCtxt<'_, 'tcx>,
+    member_constraints: &mut FxHashMap<ConstraintSccIndex, Vec<Rc<Vec<RegionVid>>>>,
+    defining_use: &'b DefiningUse<'tcx>,
+) {
+    let mut visitor = CollectMemberConstraintsVisitor {
+        rcx,
+        arg_regions: &defining_use.arg_regions,
+        member_constraints,
+    };
+    defining_use.hidden_type.ty.visit_with(&mut visitor);
+}
+
 pub(super) fn apply_member_constraints<'tcx>(
     rcx: &mut RegionCtxt<'_, 'tcx>,
-    defining_uses: &[DefiningUse<'tcx>],
+    member_constraints: FxHashMap<ConstraintSccIndex, Vec<Rc<Vec<RegionVid>>>>,
 ) {
-    // Start by collecting the member constraints of all defining uses.
-    //
-    // Applying member constraints can influence other member constraints,
-    // so we first collect and then apply them.
-    let mut member_constraints = Default::default();
-    for defining_use in defining_uses {
-        let mut visitor = CollectMemberConstraintsVisitor {
-            rcx,
-            defining_use,
-            member_constraints: &mut member_constraints,
-        };
-        defining_use.hidden_type.ty.visit_with(&mut visitor);
-    }
-
-    // Now walk over the region graph, visiting the smallest regions first and then all
+    // Walk over the region graph, visiting the smallest regions first and then all
     // regions which have to outlive that one.
     //
     // Whenever we encounter a member region, we mutate the value of this SCC. This is
@@ -49,8 +50,8 @@ pub(super) fn apply_member_constraints<'tcx>(
             rcx.scc_values.add_region(scc_a, scc_b);
         }
 
-        for defining_use in member_constraints.get(&scc_a).into_iter().flatten() {
-            apply_member_constraint(rcx, scc_a, &defining_use.arg_regions);
+        for arg_regions in member_constraints.get(&scc_a).into_iter().flatten() {
+            apply_member_constraint(rcx, scc_a, arg_regions);
         }
     }
 }
@@ -137,12 +138,12 @@ fn apply_member_constraint<'tcx>(
     rcx.scc_values.add_region(member, min_choice_scc);
 }
 
-struct CollectMemberConstraintsVisitor<'a, 'b, 'tcx> {
+struct CollectMemberConstraintsVisitor<'a, 'tcx> {
     rcx: &'a RegionCtxt<'a, 'tcx>,
-    defining_use: &'b DefiningUse<'tcx>,
-    member_constraints: &'a mut FxHashMap<ConstraintSccIndex, Vec<&'b DefiningUse<'tcx>>>,
+    arg_regions: &'a Rc<Vec<RegionVid>>,
+    member_constraints: &'a mut FxHashMap<ConstraintSccIndex, Vec<Rc<Vec<RegionVid>>>>,
 }
-impl<'tcx> CollectMemberConstraintsVisitor<'_, '_, 'tcx> {
+impl<'tcx> CollectMemberConstraintsVisitor<'_, 'tcx> {
     fn cx(&self) -> TyCtxt<'tcx> {
         self.rcx.infcx.tcx
     }
@@ -153,13 +154,13 @@ impl<'tcx> CollectMemberConstraintsVisitor<'_, '_, 'tcx> {
         }
     }
 }
-impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for CollectMemberConstraintsVisitor<'_, '_, 'tcx> {
+impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for CollectMemberConstraintsVisitor<'_, 'tcx> {
     fn visit_region(&mut self, r: Region<'tcx>) {
         match r.kind() {
             ty::ReBound(..) => return,
             ty::ReVar(vid) => {
                 let scc = self.rcx.constraint_sccs.scc(vid);
-                self.member_constraints.entry(scc).or_default().push(self.defining_use);
+                self.member_constraints.entry(scc).or_default().push(Rc::clone(self.arg_regions));
             }
             _ => unreachable!(),
         }
