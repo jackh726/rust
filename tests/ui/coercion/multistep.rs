@@ -14,6 +14,7 @@ pub type ArrayWrapper = Wrap<[i32; 0]>;
 pub struct IntWrapper;
 pub type UnsizedArray = Wrap<[i32]>;
 pub struct FinalType;
+pub struct TopTypeNoTrait;
 
 impl Deref for TopType {
     type Target = ArrayWrapper;
@@ -44,6 +45,14 @@ impl Deref for UnsizedArray {
     fn deref(&self) -> &Self::Target {
         unsafe { ACTIONS.push("deref UnsizedArray->FinalType"); }
         &FinalType
+    }
+}
+
+impl Deref for TopTypeNoTrait {
+    type Target = ArrayWrapper;
+    fn deref(&self) -> &Self::Target {
+        unsafe { ACTIONS.push("deref TopTypeNoTrait->ArrayWrapper"); }
+        &Wrap([])
     }
 }
 
@@ -164,15 +173,15 @@ fn order_dependence() {
 
 fn deref_to_dyn() {
     let x = match 0 {
-        0 => &TopType as &TopType,
-        1 => &TopType as &FinalType,
-        2 => &TopType as &FinalType as &dyn Trait,
+        0 => &TopTypeNoTrait as &TopTypeNoTrait,
+        1 => &TopTypeNoTrait as &FinalType,
+        2 => &TopTypeNoTrait as &FinalType as &dyn Trait,
         _ => loop {},
     };
     assert_eq!(
         x.complete(),
         vec![
-            "deref TopType->ArrayWrapper",
+            "deref TopTypeNoTrait->ArrayWrapper",
             "deref ArrayWrapper->IntWrapper",
             "deref IntWrapper->UnsizedArray",
             "deref UnsizedArray->FinalType",
