@@ -264,12 +264,14 @@ fn main() {
         ex1b_simple();
         ex1c_simple();
         ex2a_intermediate_type_guidance();
+        ex2b_intermediate_type_guidance();
         ex3a_intermediate_type_order_dependence();
         ex3b_intermediate_type_order_dependence();
         ex4a_required_intermediate_type_guidance();
         ex4b_required_intermediate_type_guidance();
         ex5b_lub_committment();
         ex6a_order_dependent_coercion();
+        ex6b_order_dependent_coercion();
         ex7a_assymetric_cycle_coercion();
         ex7b_assymetric_cycle_coercion();
         ex8b_multistep_unsizing_coercion();
@@ -282,8 +284,6 @@ fn main() {
     }
     #[cfg(ice)]
     {
-        ex2b_intermediate_type_guidance();
-        ex6b_order_dependent_coercion();
         ex8a_multistep_unsizing_coercion();
     }
 }
@@ -362,7 +362,7 @@ fn ex2a_intermediate_type_guidance() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex2b_intermediate_type_guidance() {
     assert_arms(
         0..=3,
@@ -532,7 +532,7 @@ fn ex6a_order_dependent_coercion() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex6b_order_dependent_coercion() {
     assert_arms(
         0..=3,

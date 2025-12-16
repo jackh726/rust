@@ -2,115 +2,19 @@ note: no errors encountered even though delayed bugs were created
 
 note: those delayed bugs will now be shown as internal compiler errors
 
-error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).21), kind: Cast(Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).22), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).23), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:370:19: 370:26 (#0), res: Def(Ctor(Struct, Const), DefId(0:20 ~ multistep[afa8]::TopType::{constructor#0})), segments: [PathSegment { ident: TopType#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).24), res: Def(Ctor(Struct, Const), DefId(0:20 ~ multistep[afa8]::TopType::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:370:19: 370:26 (#0) }), span: $DIR/multistep.rs:370:18: 370:26 (#0) }, Ty { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).28), span: $DIR/multistep.rs:370:37: 370:45 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).25), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).26), span: $DIR/multistep.rs:370:38: 370:45 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:370:38: 370:45 (#0), res: Def(Struct, DefId(0:19 ~ multistep[afa8]::TopType)), segments: [PathSegment { ident: TopType#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).27), res: Def(Struct, DefId(0:19 ~ multistep[afa8]::TopType)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep.rs:370:18: 370:45 (#0) }, can't compose [Deref(None) -> TopType, Deref(Some(OverloadedDeref { mutbl: Not, span: $DIR/multistep.rs:371:18: 371:50 (#0) })) -> Wrap<[i32; 0]>, Borrow(Ref(Not)) -> &Wrap<[i32; 0]>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap<[i32]>, Deref(Some(OverloadedDeref { mutbl: Not, span: $DIR/multistep.rs:374:18: 374:47 (#0) })) -> FinalType, Borrow(Ref(Not)) -> &FinalType]
-  --> $DIR/multistep.rs:370:18
-   |
-LL |             0 => &TopType        as &TopType,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:353:36 - disabled backtrace
-  --> $DIR/multistep.rs:370:18
-   |
-LL |             0 => &TopType        as &TopType,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).32), kind: Cast(Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).33), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).34), kind: Call(Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).35), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:371:19: 371:23 (#0), res: Def(Ctor(Struct, Fn), DefId(0:16 ~ multistep[afa8]::Wrap::{constructor#0})), segments: [PathSegment { ident: Wrap#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).36), res: Def(Ctor(Struct, Fn), DefId(0:16 ~ multistep[afa8]::Wrap::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:371:19: 371:23 (#0) }, [Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).37), kind: Array([]), span: $DIR/multistep.rs:371:24: 371:26 (#0) }]), span: $DIR/multistep.rs:371:19: 371:27 (#0) }), span: $DIR/multistep.rs:371:18: 371:27 (#0) }, Ty { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).41), span: $DIR/multistep.rs:371:37: 371:50 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).38), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).39), span: $DIR/multistep.rs:371:38: 371:50 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:371:38: 371:50 (#0), res: Def(TyAlias, DefId(0:21 ~ multistep[afa8]::ArrayWrapper)), segments: [PathSegment { ident: ArrayWrapper#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex2b_intermediate_type_guidance).40), res: Def(TyAlias, DefId(0:21 ~ multistep[afa8]::ArrayWrapper)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep.rs:371:18: 371:50 (#0) }, can't compose [Deref(None) -> Wrap<[i32; 0]>, Borrow(Ref(Not)) -> &Wrap<[i32; 0]>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap<[i32]>, Deref(Some(OverloadedDeref { mutbl: Not, span: $DIR/multistep.rs:374:18: 374:47 (#0) })) -> FinalType, Borrow(Ref(Not)) -> &FinalType]
-  --> $DIR/multistep.rs:371:18
-   |
-LL |             1 => &Wrap([])       as &ArrayWrapper,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:353:36 - disabled backtrace
-  --> $DIR/multistep.rs:371:18
-   |
-LL |             1 => &Wrap([])       as &ArrayWrapper,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).21), kind: Cast(Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).22), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).23), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:540:19: 540:20 (#0), res: Def(Ctor(Struct, Const), DefId(0:68 ~ multistep[afa8]::E::{constructor#0})), segments: [PathSegment { ident: E#0, hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).24), res: Def(Ctor(Struct, Const), DefId(0:68 ~ multistep[afa8]::E::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:540:19: 540:20 (#0) }), span: $DIR/multistep.rs:540:18: 540:20 (#0) }, Ty { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).28), span: $DIR/multistep.rs:540:33: 540:35 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).25), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).26), span: $DIR/multistep.rs:540:34: 540:35 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:540:34: 540:35 (#0), res: Def(Struct, DefId(0:67 ~ multistep[afa8]::E)), segments: [PathSegment { ident: E#0, hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).27), res: Def(Struct, DefId(0:67 ~ multistep[afa8]::E)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep.rs:540:18: 540:35 (#0) }, can't compose [Deref(None) -> E, Deref(Some(OverloadedDeref { mutbl: Not, span: $DIR/multistep.rs:541:18: 541:35 (#0) })) -> Wrap2<[i32; 0]>, Borrow(Ref(Not)) -> &Wrap2<[i32; 0]>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap2<[i32]>, Deref(Some(OverloadedDeref { mutbl: Not, span: $DIR/multistep.rs:543:18: 543:35 (#0) })) -> G, Borrow(Ref(Not)) -> &G]
-  --> $DIR/multistep.rs:540:18
-   |
-LL |             0 => &E          as &E,
-   |                  ^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:353:36 - disabled backtrace
-  --> $DIR/multistep.rs:540:18
-   |
-LL |             0 => &E          as &E,
-   |                  ^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).32), kind: Cast(Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).33), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).34), kind: Call(Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).35), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:541:19: 541:24 (#0), res: Def(Ctor(Struct, Fn), DefId(0:64 ~ multistep[afa8]::Wrap2::{constructor#0})), segments: [PathSegment { ident: Wrap2#0, hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).36), res: Def(Ctor(Struct, Fn), DefId(0:64 ~ multistep[afa8]::Wrap2::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:541:19: 541:24 (#0) }, [Expr { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).37), kind: Array([]), span: $DIR/multistep.rs:541:25: 541:27 (#0) }]), span: $DIR/multistep.rs:541:19: 541:28 (#0) }), span: $DIR/multistep.rs:541:18: 541:28 (#0) }, Ty { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).41), span: $DIR/multistep.rs:541:33: 541:35 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).38), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).39), span: $DIR/multistep.rs:541:34: 541:35 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:541:34: 541:35 (#0), res: Def(TyAlias, DefId(0:69 ~ multistep[afa8]::F)), segments: [PathSegment { ident: F#0, hir_id: HirId(DefId(0:126 ~ multistep[afa8]::ex6b_order_dependent_coercion).40), res: Def(TyAlias, DefId(0:69 ~ multistep[afa8]::F)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep.rs:541:18: 541:35 (#0) }, can't compose [Deref(None) -> Wrap2<[i32; 0]>, Borrow(Ref(Not)) -> &Wrap2<[i32; 0]>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap2<[i32]>, Deref(Some(OverloadedDeref { mutbl: Not, span: $DIR/multistep.rs:543:18: 543:35 (#0) })) -> G, Borrow(Ref(Not)) -> &G]
-  --> $DIR/multistep.rs:541:18
-   |
-LL |             1 => &Wrap2([])  as &F,
-   |                  ^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:353:36 - disabled backtrace
-  --> $DIR/multistep.rs:541:18
-   |
-LL |             1 => &Wrap2([])  as &F,
-   |                  ^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).7), kind: Cast(Expr { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).8), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).9), kind: Call(Expr { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).10), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:594:15: 594:20 (#0), res: Def(Ctor(Struct, Fn), DefId(0:98 ~ multistep[afa8]::Wrap4::{constructor#0})), segments: [PathSegment { ident: Wrap4#0, hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).11), res: Def(Ctor(Struct, Fn), DefId(0:98 ~ multistep[afa8]::Wrap4::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:594:15: 594:20 (#0) }, [Expr { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).12), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:594:21: 594:26 (#0), res: Def(Ctor(Struct, Const), DefId(0:11 ~ multistep[afa8]::Inner::{constructor#0})), segments: [PathSegment { ident: Inner#0, hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).13), res: Def(Ctor(Struct, Const), DefId(0:11 ~ multistep[afa8]::Inner::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:594:21: 594:26 (#0) }]), span: $DIR/multistep.rs:594:15: 594:27 (#0) }), span: $DIR/multistep.rs:594:14: 594:27 (#0) }, Ty { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).17), span: $DIR/multistep.rs:594:36: 594:38 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).14), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).15), span: $DIR/multistep.rs:594:37: 594:38 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:594:37: 594:38 (#0), res: Def(TyAlias, DefId(0:105 ~ multistep[afa8]::L)), segments: [PathSegment { ident: L#0, hir_id: HirId(DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).16), res: Def(TyAlias, DefId(0:105 ~ multistep[afa8]::L)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep.rs:594:14: 594:38 (#0) }, can't compose [Deref(None) -> Wrap4<Inner>, Borrow(Ref(Not)) -> &Wrap4<Inner>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap4<dyn Dynable + Send>, Borrow(Ref(Not)) -> &Wrap4<dyn Dynable + Send>, Pointer(Unsize) -> _]
+error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).7), kind: Cast(Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).8), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).9), kind: Call(Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).10), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:594:15: 594:20 (#0), res: Def(Ctor(Struct, Fn), DefId(0:98 ~ multistep[afa8]::Wrap4::{constructor#0})), segments: [PathSegment { ident: Wrap4#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).11), res: Def(Ctor(Struct, Fn), DefId(0:98 ~ multistep[afa8]::Wrap4::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:594:15: 594:20 (#0) }, [Expr { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).12), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:594:21: 594:26 (#0), res: Def(Ctor(Struct, Const), DefId(0:11 ~ multistep[afa8]::Inner::{constructor#0})), segments: [PathSegment { ident: Inner#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).13), res: Def(Ctor(Struct, Const), DefId(0:11 ~ multistep[afa8]::Inner::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep.rs:594:21: 594:26 (#0) }]), span: $DIR/multistep.rs:594:15: 594:27 (#0) }), span: $DIR/multistep.rs:594:14: 594:27 (#0) }, Ty { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).17), span: $DIR/multistep.rs:594:36: 594:38 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).14), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).15), span: $DIR/multistep.rs:594:37: 594:38 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep.rs:594:37: 594:38 (#0), res: Def(TyAlias, DefId(0:105 ~ multistep[afa8]::L)), segments: [PathSegment { ident: L#0, hir_id: HirId(DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion).16), res: Def(TyAlias, DefId(0:105 ~ multistep[afa8]::L)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep.rs:594:14: 594:38 (#0) }, can't compose [Deref(None) -> Wrap4<Inner>, Borrow(Ref(Not)) -> &Wrap4<Inner>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap4<dyn Dynable + Send>, Borrow(Ref(Not)) -> &Wrap4<dyn Dynable + Send>, Pointer(Unsize) -> _]
   --> $DIR/multistep.rs:594:14
    |
 LL |         0 => &Wrap4(Inner)      as &L,
    |              ^^^^^^^^^^^^^^^^^^^^^^^^
    |
-note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:353:36 - disabled backtrace
+note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:372:36 - disabled backtrace
   --> $DIR/multistep.rs:594:14
    |
 LL |         0 => &Wrap4(Inner)      as &L,
    |              ^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: internal compiler error: broken MIR in DefId(0:125 ~ multistep[afa8]::ex2b_intermediate_type_guidance::{closure#0}) (_11 = &(*_12)): bad assignment (&'?42 Wrap<[i32]> = &'?23 Wrap<[i32; 0_usize]>): NoSolution
-  --> $DIR/multistep.rs:371:18
-   |
-LL |             1 => &Wrap([])       as &ArrayWrapper,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_borrowck/src/type_check/mod.rs:676:21 - disabled backtrace
-  --> $DIR/multistep.rs:371:18
-   |
-LL |             1 => &Wrap([])       as &ArrayWrapper,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: broken MIR in DefId(0:125 ~ multistep[afa8]::ex2b_intermediate_type_guidance::{closure#0}) (_6 = &(*_7)): bad assignment (&'?38 Wrap<[i32]> = &'?27 TopType): NoSolution
-  --> $DIR/multistep.rs:370:18
-   |
-LL |             0 => &TopType        as &TopType,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_borrowck/src/type_check/mod.rs:676:21 - disabled backtrace
-  --> $DIR/multistep.rs:370:18
-   |
-LL |             0 => &TopType        as &TopType,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: broken MIR in DefId(0:127 ~ multistep[afa8]::ex6b_order_dependent_coercion::{closure#0}) (_11 = &(*_12)): bad assignment (&'?42 Wrap2<[i32]> = &'?23 Wrap2<[i32; 0_usize]>): NoSolution
-  --> $DIR/multistep.rs:541:18
-   |
-LL |             1 => &Wrap2([])  as &F,
-   |                  ^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_borrowck/src/type_check/mod.rs:676:21 - disabled backtrace
-  --> $DIR/multistep.rs:541:18
-   |
-LL |             1 => &Wrap2([])  as &F,
-   |                  ^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: broken MIR in DefId(0:127 ~ multistep[afa8]::ex6b_order_dependent_coercion::{closure#0}) (_6 = &(*_7)): bad assignment (&'?38 Wrap2<[i32]> = &'?27 E): NoSolution
-  --> $DIR/multistep.rs:540:18
-   |
-LL |             0 => &E          as &E,
-   |                  ^^^^^^^^^^^^^^^^^
-   |
-note: delayed at compiler/rustc_borrowck/src/type_check/mod.rs:676:21 - disabled backtrace
-  --> $DIR/multistep.rs:540:18
-   |
-LL |             0 => &E          as &E,
-   |                  ^^^^^^^^^^^^^^^^^
-
-error: internal compiler error: broken MIR in DefId(0:128 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion) (_3 = &(*_4)): bad assignment (&'?29 Wrap4<dyn [Binder { value: Trait(Dynable), bound_vars: [] }, Binder { value: AutoTrait(DefId(2:29131 ~ core[7e9d]::marker::Send)), bound_vars: [] }] + '?30> = &'?24 Wrap4<Inner>): NoSolution
+error: internal compiler error: broken MIR in DefId(0:124 ~ multistep[afa8]::ex8a_multistep_unsizing_coercion) (_3 = &(*_4)): bad assignment (&'?29 Wrap4<dyn [Binder { value: Trait(Dynable), bound_vars: [] }, Binder { value: AutoTrait(DefId(2:29131 ~ core[7e9d]::marker::Send)), bound_vars: [] }] + '?30> = &'?24 Wrap4<Inner>): NoSolution
   --> $DIR/multistep.rs:594:14
    |
 LL |         0 => &Wrap4(Inner)      as &L,
