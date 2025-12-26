@@ -1,0 +1,51 @@
+error[E0277]: the trait bound `TopTypeNoTrait: Dynable` is not satisfied
+  --> $DIR/multistep.rs:479:14
+   |
+LL |         1 => &TopTypeNoTrait as &FinalType as &dyn Dynable,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `Dynable` is not implemented for `TopTypeNoTrait`
+  --> $DIR/multistep.rs:76:1
+   |
+LL | struct TopTypeNoTrait;
+   | ^^^^^^^^^^^^^^^^^^^^^
+help: the following other types implement trait `Dynable`
+  --> $DIR/multistep.rs:41:1
+   |
+LL | impl Dynable for Inner {}
+   | ^^^^^^^^^^^^^^^^^^^^^^ `Inner`
+...
+LL | impl Dynable for FinalType {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ `FinalType`
+   = note: required for the cast from `&TopTypeNoTrait` to `&dyn Dynable`
+
+error[E0308]: `match` arms have incompatible types
+  --> $DIR/multistep.rs:489:14
+   |
+LL | /     match 0 {
+LL | |         0 => &A          as &A,
+   | |              ----------------- this is found to be of type `&B`
+LL | |         1 => &B          as &B,
+   | |              ----------------- this is found to be of type `&B`
+LL | |         2 => &C          as &C,
+   | |              ^^^^^^^^^^^^^^^^^ expected `&B`, found `&C`
+LL | |         3 => &D          as &D,
+LL | |         _ => loop {},
+LL | |     };
+   | |_____- `match` arms have incompatible types
+   |
+   = note: expected reference `&B`
+              found reference `&C`
+
+error[E0055]: reached the recursion limit while auto-dereferencing `P`
+  --> $DIR/multistep.rs:623:14
+   |
+LL |         1 => &P      as &P,
+   |              ^^^^^^^^^^^^^ deref recursion limit reached
+   |
+   = help: consider increasing the recursion limit by adding a `#![recursion_limit = "256"]` attribute to your crate (`multistep`)
+
+error: aborting due to 3 previous errors
+
+Some errors have detailed explanations: E0055, E0277, E0308.
+For more information about an error, try `rustc --explain E0055`.
