@@ -1,20 +1,67 @@
-//@run-pass
+//@ run-pass
 
 #![allow(static_mut_refs)]
 #![allow(dead_code)]
+#![allow(unused_macros)]
 use std::ops::Deref;
 
-pub static mut ACTIONS: Vec<&'static str> = Vec::new();
+static mut ACTIONS: Vec<&'static str> = Vec::new();
 
-pub struct Wrap<T: ?Sized>(T);
+trait Trait {
+    fn self_ty(&self);
+
+    fn complete(&self) -> Vec<&'static str> {
+        self.self_ty();
+        let actions = unsafe { ACTIONS.clone() };
+        unsafe { ACTIONS.clear() };
+        actions
+    }
+}
+
+macro_rules! do_trait_impl {
+    ($self:ident, $self_ty:literal) => {
+        impl Trait for $self {
+            fn self_ty(&self) {
+                unsafe { ACTIONS.push($self_ty); }
+            }
+        }
+    }    
+}
+
+trait Dynable: Trait {}
+struct Inner;
+do_trait_impl!(Inner, "self_ty Inner");
+impl Dynable for Inner {}
+
+#[track_caller]
+fn assert_arms(range: std::ops::RangeInclusive<usize>, f: impl Fn(usize) -> Vec<&'static str>, arm_coercions: &[&[&'static str]]) {
+    let mut coercions = vec![];
+    for i in range {
+        let c = f(i);
+        coercions.push(c);
+    }
+    for (i, (arm_coercion, coercion)) in std::iter::zip(arm_coercions.iter(), coercions.into_iter()).enumerate() {
+        assert_eq!(arm_coercion, &coercion, "Arm {i} didn't match expectation:\n expected {:?}\n got {:?}", arm_coercion, coercion);
+    }
+}
+
+struct Wrap<T: ?Sized>(T);
 
 // Deref Chain: FinalType <- UnsizedArray <- IntWrapper <- ArrayWrapper <- TopType
-pub struct TopType;
-pub type ArrayWrapper = Wrap<[i32; 0]>;
-pub struct IntWrapper;
-pub type UnsizedArray = Wrap<[i32]>;
-pub struct FinalType;
-pub struct TopTypeNoTrait;
+struct TopType;
+type ArrayWrapper = Wrap<[i32; 0]>;
+struct IntWrapper;
+type UnsizedArray = Wrap<[i32]>;
+struct FinalType;
+struct TopTypeNoTrait;
+
+do_trait_impl!(TopType, "self_ty TopType");
+do_trait_impl!(ArrayWrapper, "self_ty ArrayWrapper");
+do_trait_impl!(IntWrapper, "self_ty IntWrapper");
+do_trait_impl!(UnsizedArray, "self_ty UnsizedArray");
+do_trait_impl!(FinalType, "self_ty FinalType");
+do_trait_impl!(TopTypeNoTrait, "self_ty TopTypeNoTrait");
+impl Dynable for FinalType {}
 
 impl Deref for TopType {
     type Target = ArrayWrapper;
@@ -56,144 +103,95 @@ impl Deref for TopTypeNoTrait {
     }
 }
 
-trait Trait {
-    fn self_ty(&self);
-
-    fn complete(&self) -> Vec<&'static str> {
-        self.self_ty();
-        let actions = unsafe { ACTIONS.clone() };
-        unsafe { ACTIONS.clear() };
-        actions
-    }
-}
-
-impl Trait for TopType {
-    fn self_ty(&self) {
-        unsafe { ACTIONS.push("self_ty TopType"); }
-    }
-}
-
-impl Trait for ArrayWrapper {
-    fn self_ty(&self) {
-        unsafe { ACTIONS.push("self_ty ArrayWrapper"); }
-    }
-}
-
-impl Trait for IntWrapper {
-    fn self_ty(&self) {
-        unsafe { ACTIONS.push("self_ty IntWrapper"); }
-    }
-}
-
-impl Trait for UnsizedArray {
-    fn self_ty(&self) {
-        unsafe { ACTIONS.push("self_ty UnsizedArray"); }
-    }
-}
-
-impl Trait for FinalType {
-    fn self_ty(&self) {
-        unsafe { ACTIONS.push("self_ty FinalType"); }
-    }
-}
-
 fn simple() {
-    let x = match 0 {
-        0 => &Wrap([]) as &ArrayWrapper,
-        _ => &Wrap([]) as &UnsizedArray,
-    };
-    assert_eq!(x.complete(), vec!["self_ty UnsizedArray"]);
-}
-
-fn long_chain() {
-    let x = match 0 {
-        0 => &TopType      as &TopType,
-        1 => &Wrap([])     as &ArrayWrapper,
-        2 => &IntWrapper   as &IntWrapper,
-        3 => &Wrap([])     as &UnsizedArray,
-        4 => &FinalType    as &FinalType,
-        _ => loop {},
-    };
-    assert_eq!(
-        x.complete(),
-        vec![
-            "deref TopType->ArrayWrapper",
-            "deref ArrayWrapper->IntWrapper",
-            "deref IntWrapper->UnsizedArray",
-            "deref UnsizedArray->FinalType",
-            "self_ty FinalType",
+    assert_arms(
+        0..=1,
+        |i| match i {
+            0 => &Wrap([]) as &ArrayWrapper,
+            1 => &Wrap([]) as &UnsizedArray,
+            _ => loop {},
+        }.complete(),
+        &[
+            &["self_ty UnsizedArray"],
+            &["self_ty UnsizedArray"],
         ],
     );
 }
 
-fn mixed_coercion() {
-    let x = match 0 {
-        0 => &TopType      as &TopType,
-        1 => &Wrap([])     as &ArrayWrapper,
-        // IntWrapper arm removed
-        2 => &Wrap([])     as &UnsizedArray,
-        3 => &FinalType    as &FinalType,
-        _ => loop {},
-    };
-    assert_eq!(
-        x.complete(),
-        vec![
-            "deref TopType->ArrayWrapper",
-            "deref UnsizedArray->FinalType",
-            "self_ty FinalType",
-        ]
+fn long_chain() {
+    assert_arms(
+        0..=4,
+        |i| match i {
+            0 => &TopType        as &TopType,
+            1 => &Wrap([])       as &ArrayWrapper,
+            2 => &IntWrapper     as &IntWrapper,
+            3 => &Wrap([])       as &UnsizedArray,
+            4 => &FinalType      as &FinalType,
+            _ => loop {},
+        }.complete(),
+        &[
+            &["deref TopType->ArrayWrapper", "deref ArrayWrapper->IntWrapper", "deref IntWrapper->UnsizedArray", "deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["deref ArrayWrapper->IntWrapper", "deref IntWrapper->UnsizedArray", "deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["deref IntWrapper->UnsizedArray", "deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["self_ty FinalType"],
+        ],
+    );
+
+    assert_arms(
+        0..=3,
+        |i| match i {
+            0 => &TopType        as &TopType,
+            1 => &Wrap([])       as &ArrayWrapper,
+            // IntWrapper arm removed
+            2 => &Wrap([])       as &UnsizedArray,
+            3 => &FinalType      as &FinalType,
+            _ => loop {},
+        }.complete(),
+        &[
+            &["deref TopType->ArrayWrapper", "deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &["self_ty FinalType"],
+        ],
     );
 }
 
 fn order_dependence() {
-    let a = match 0 {
-        0 => &Wrap([])   as &ArrayWrapper,
-        1 => &IntWrapper as &IntWrapper,
-        2 => &Wrap([])   as &UnsizedArray,
-        _ => loop {},
-    };
-    assert_eq!(
-        a.complete(),
-        vec![
-            "deref ArrayWrapper->IntWrapper",
-            "deref IntWrapper->UnsizedArray",
-            "self_ty UnsizedArray",
+    assert_arms(
+        0..=2,
+        |i| match i {
+            0 => &Wrap([])   as &ArrayWrapper,
+            1 => &IntWrapper as &IntWrapper,
+            2 => &Wrap([])   as &UnsizedArray,
+            _ => loop {},
+        }.complete(),
+        &[
+            &["deref ArrayWrapper->IntWrapper", "deref IntWrapper->UnsizedArray", "self_ty UnsizedArray"],
+            &["deref IntWrapper->UnsizedArray", "self_ty UnsizedArray"],
+            &["self_ty UnsizedArray"],
         ],
     );
 
-    unsafe { ACTIONS.clear() }
-    let b = match 0 {
-        0 => &Wrap([])   as &ArrayWrapper,
-        1 => &Wrap([])   as &UnsizedArray,
-        2 => &IntWrapper as &IntWrapper,
-        _ => loop {},
-    };
-    assert_eq!(b.complete(), vec!["self_ty UnsizedArray"]);
-}
-
-fn deref_to_dyn() {
-    let x = match 0 {
-        0 => &TopTypeNoTrait as &TopTypeNoTrait,
-        1 => &TopTypeNoTrait as &FinalType,
-        2 => &TopTypeNoTrait as &FinalType as &dyn Trait,
-        _ => loop {},
-    };
-    assert_eq!(
-        x.complete(),
-        vec![
-            "deref TopTypeNoTrait->ArrayWrapper",
-            "deref ArrayWrapper->IntWrapper",
-            "deref IntWrapper->UnsizedArray",
-            "deref UnsizedArray->FinalType",
-            "self_ty FinalType",
+    assert_arms(
+        0..=2,
+        |i| match i {
+            0 => &Wrap([]) as &ArrayWrapper,
+            1 => &Wrap([]) as &UnsizedArray,
+            2 => &IntWrapper as &IntWrapper,
+            _ => loop {},
+        }.complete(),
+        &[
+            &["self_ty UnsizedArray"],
+            &["self_ty UnsizedArray"],
+            &["deref IntWrapper->UnsizedArray", "self_ty UnsizedArray"],
         ],
     );
 }
+
 
 fn main() {
     simple();
     long_chain();
-    mixed_coercion();
     order_dependence();
-    deref_to_dyn();
 }

@@ -1,0 +1,38 @@
+note: no errors encountered even though delayed bugs were created
+
+note: those delayed bugs will now be shown as internal compiler errors
+
+error: internal compiler error: while adjusting Expr { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).8), kind: Cast(Expr { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).9), kind: AddrOf(Ref, Not, Expr { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).10), kind: Call(Expr { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).11), kind: Path(Resolved(None, Path { span: $DIR/multistep4.rs:66:15: 66:20 (#0), res: Def(Ctor(Struct, Fn), DefId(0:15 ~ multistep4[0c69]::Wrap4::{constructor#0})), segments: [PathSegment { ident: Wrap4#0, hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).12), res: Def(Ctor(Struct, Fn), DefId(0:15 ~ multistep4[0c69]::Wrap4::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep4.rs:66:15: 66:20 (#0) }, [Expr { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).13), kind: Path(Resolved(None, Path { span: $DIR/multistep4.rs:66:21: 66:26 (#0), res: Def(Ctor(Struct, Const), DefId(0:10 ~ multistep4[0c69]::Inner::{constructor#0})), segments: [PathSegment { ident: Inner#0, hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).14), res: Def(Ctor(Struct, Const), DefId(0:10 ~ multistep4[0c69]::Inner::{constructor#0})), args: None, infer_args: true }] })), span: $DIR/multistep4.rs:66:21: 66:26 (#0) }]), span: $DIR/multistep4.rs:66:15: 66:27 (#0) }), span: $DIR/multistep4.rs:66:14: 66:27 (#0) }, Ty { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).18), span: $DIR/multistep4.rs:66:36: 66:38 (#0), kind: Ref(Lifetime { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).15), ident: '_#0, kind: Infer, source: Reference, syntax: Implicit }, MutTy { ty: Ty { hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).16), span: $DIR/multistep4.rs:66:37: 66:38 (#0), kind: Path(Resolved(None, Path { span: $DIR/multistep4.rs:66:37: 66:38 (#0), res: Def(TyAlias, DefId(0:22 ~ multistep4[0c69]::L)), segments: [PathSegment { ident: L#0, hir_id: HirId(DefId(0:25 ~ multistep4[0c69]::order_lub).17), res: Def(TyAlias, DefId(0:22 ~ multistep4[0c69]::L)), args: None, infer_args: false }] })) }, mutbl: Not }) }), span: $DIR/multistep4.rs:66:14: 66:38 (#0) }, can't compose [Deref(None) -> Wrap4<Inner>, Borrow(Ref(Not)) -> &Wrap4<Inner>, Pointer(Unsize) -> _] and [Deref(None) -> Wrap4<dyn Dynable + Send>, Borrow(Ref(Not)) -> &Wrap4<dyn Dynable + Send>, Pointer(Unsize) -> _]
+  --> $DIR/multistep4.rs:66:14
+   |
+LL |         0 => &Wrap4(Inner)      as &L,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: delayed at compiler/rustc_hir_typeck/src/fn_ctxt/_impl.rs:372:36 - disabled backtrace
+  --> $DIR/multistep4.rs:66:14
+   |
+LL |         0 => &Wrap4(Inner)      as &L,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: internal compiler error: broken MIR in DefId(0:25 ~ multistep4[0c69]::order_lub) (_3 = &(*_4)): bad assignment (&'?112 Wrap4<dyn [Binder { value: Trait(Dynable), bound_vars: [] }, Binder { value: AutoTrait(DefId(2:29128 ~ core[7e9d]::marker::Send)), bound_vars: [] }] + '?113> = &'?71 Wrap4<Inner>): NoSolution
+  --> $DIR/multistep4.rs:66:14
+   |
+LL |         0 => &Wrap4(Inner)      as &L,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: delayed at compiler/rustc_borrowck/src/type_check/mod.rs:676:21 - disabled backtrace
+  --> $DIR/multistep4.rs:66:14
+   |
+LL |         0 => &Wrap4(Inner)      as &L,
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^
+
+note: we would appreciate a bug report: https://github.com/rust-lang/rust/issues/new?labels=C-bug%2C+I-ICE%2C+T-compiler&template=ice.md
+
+note: please make sure that you have updated to the latest nightly
+
+note: rustc 1.94.0-dev running on aarch64-unknown-linux-gnu
+
+note: compiler flags: -Z threads=1 -Z simulate-remapped-rust-src-base=/rustc/FAKE_PREFIX -Z translate-remapped-path-to-local-path=no -Z ignore-directory-in-diagnostics-source-blocks=/home/gh-jackh726/.cargo -Z ignore-directory-in-diagnostics-source-blocks=/home/gh-jackh726/rust/vendor -C codegen-units=1 -Z ui-testing -Z deduplicate-diagnostics=no -Z write-long-types-to-disk=no -C strip=debuginfo -C prefer-dynamic -C rpath -C debuginfo=0
+
+query stack during panic:
+end of query stack
