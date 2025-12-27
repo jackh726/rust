@@ -1,9 +1,6 @@
-//@ revisions: pass fail ice
+//@ revisions: pass fail
 //@[pass] run-pass
 //@[fail] check-fail
-//@[ice] check-fail
-//@[ice] failure-status: 101
-//@[ice] rustc-env:RUST_BACKTRACE=0
 //@ known-bug: #148283
 #![feature(unsize, coerce_unsized)]
 #![allow(static_mut_refs)]
@@ -263,28 +260,25 @@ fn main() {
         ex1a_simple();
         ex1b_simple();
         ex1c_simple();
+        ex2a_intermediate_type_guidance();
+        ex2b_intermediate_type_guidance();
+        ex3a_intermediate_type_order_dependence();
         ex3b_intermediate_type_order_dependence();
         ex4a_required_intermediate_type_guidance();
         ex5b_lub_committment();
+        ex6a_order_dependent_coercion();
         ex7a_assymetric_cycle_coercion();
         ex7b_assymetric_cycle_coercion();
+        ex8a_multistep_unsizing_coercion();
         ex8b_multistep_unsizing_coercion();
     }
     #[cfg(fail)]
     {
+        ex4b_required_intermediate_type_guidance();
         ex4c_required_intermediate_type_guidance();
         ex5a_lub_committment();
-        ex9_cyclic_deref();
-    }
-    #[cfg(ice)]
-    {
-        ex2a_intermediate_type_guidance();
-        ex2b_intermediate_type_guidance();
-        ex3a_intermediate_type_order_dependence();
-        ex4b_required_intermediate_type_guidance();
-        ex6a_order_dependent_coercion();
         ex6b_order_dependent_coercion();
-        ex8a_multistep_unsizing_coercion();
+        ex9_cyclic_deref();
     }
 }
 
@@ -325,7 +319,7 @@ fn ex1c_simple() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex2a_intermediate_type_guidance() {
     assert_arms(
         0..=4,
@@ -362,7 +356,7 @@ fn ex2a_intermediate_type_guidance() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex2b_intermediate_type_guidance() {
     assert_arms(
         0..=3,
@@ -377,17 +371,24 @@ fn ex2b_intermediate_type_guidance() {
         &[
             &[
                 "deref TopType->ArrayWrapper",
+                "deref ArrayWrapper->IntWrapper",
+                "deref IntWrapper->UnsizedArray",
                 "deref UnsizedArray->FinalType",
                 "self_ty FinalType",
             ],
-            &["deref UnsizedArray->FinalType", "self_ty FinalType"],
+            &[
+                "deref ArrayWrapper->IntWrapper",
+                "deref IntWrapper->UnsizedArray",
+                "deref UnsizedArray->FinalType",
+                "self_ty FinalType",
+            ],
             &["deref UnsizedArray->FinalType", "self_ty FinalType"],
             &["self_ty FinalType"],
         ],
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex3a_intermediate_type_order_dependence() {
     assert_arms(
         0..=2,
@@ -398,11 +399,7 @@ fn ex3a_intermediate_type_order_dependence() {
             _ => loop {},
         }.complete(),
         &[
-            &[
-                "deref ArrayWrapper->IntWrapper",
-                "deref IntWrapper->UnsizedArray",
-                "self_ty UnsizedArray",
-            ],
+            &["self_ty UnsizedArray"],
             &["deref IntWrapper->UnsizedArray", "self_ty UnsizedArray"],
             &["self_ty UnsizedArray"],
         ],
@@ -442,7 +439,7 @@ fn ex4a_required_intermediate_type_guidance() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(fail)]
 fn ex4b_required_intermediate_type_guidance() {
     assert_arms(
         0..=1,
@@ -512,7 +509,7 @@ fn ex5b_lub_committment() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex6a_order_dependent_coercion() {
     assert_arms(
         0..=3,
@@ -532,7 +529,7 @@ fn ex6a_order_dependent_coercion() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(fail)]
 fn ex6b_order_dependent_coercion() {
     assert_arms(
         0..=3,
@@ -588,7 +585,7 @@ fn ex7b_assymetric_cycle_coercion() {
     );
 }
 
-#[cfg(ice)]
+#[cfg(pass)]
 fn ex8a_multistep_unsizing_coercion() {
     match 0 {
         0 => &Wrap4(Inner)      as &L,
