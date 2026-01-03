@@ -114,7 +114,7 @@ LL | |         }.complete(),
               found reference `&Wrap3<(dyn Dynable + Send + 'static)>`
 
 error[E0055]: reached the recursion limit while auto-dereferencing `P`
-  --> $DIR/multistep.rs:620:14
+  --> $DIR/multistep.rs:628:14
    |
 LL |         1 => &P      as &P,
    |              ^^^^^^^^^^^^^ deref recursion limit reached
@@ -122,7 +122,7 @@ LL |         1 => &P      as &P,
    = help: consider increasing the recursion limit by adding a `#![recursion_limit = "256"]` attribute to your crate (`multistep`)
 
 error[E0308]: `match` arms have incompatible types
-  --> $DIR/multistep.rs:621:14
+  --> $DIR/multistep.rs:629:14
    |
 LL | /     match 0 {
 LL | |         0 => &O      as &O,

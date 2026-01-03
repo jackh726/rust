@@ -587,12 +587,20 @@ fn ex7b_assymetric_cycle_coercion() {
 
 #[cfg(pass)]
 fn ex8a_multistep_unsizing_coercion() {
-    match 0 {
-        0 => &Wrap4(Inner)      as &L,
-        1 => &Wrap4(Inner)      as &M,
-        2 => &Wrap4(Inner)      as &N,
-        _ => loop {},
-    };
+    assert_arms(
+        0..=2,
+        |i| match i {
+            0 => &Wrap4(Inner)      as &L,
+            1 => &Wrap4(Inner)      as &M,
+            2 => &Wrap4(Inner)      as &N,
+            _ => loop {},
+        }.complete(),
+        &[
+            &["self_ty N"],
+            &["self_ty N"],
+            &["self_ty N"],
+        ],
+    );
 }
 
 #[cfg(pass)]
