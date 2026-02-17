@@ -1825,9 +1825,7 @@ impl<'tcx> CoerceMany<'tcx> {
                     fcx.set_adjustments(expr, adjustments);
                 }
             }
-            Ok(expression_ty)
 
-            /*
             fcx.at(cause, fcx.param_env)
                 .eq(
                     // needed for tests/ui/type-alias-impl-trait/issue-65679-inst-opaque-ty-from-val-twice.rs
@@ -1839,7 +1837,6 @@ impl<'tcx> CoerceMany<'tcx> {
                     fcx.register_infer_ok_obligations(infer_ok);
                     expression_ty
                 })
-            */
         };
 
         debug!(?result);
@@ -1863,6 +1860,7 @@ impl<'tcx> CoerceMany<'tcx> {
         }
     }
 
+    #[tracing::instrument(skip(self, fcx, augment_error), level = "debug")]
     fn report_coercion_error(
         &self,
         fcx: &FnCtxt<'_, 'tcx>,
@@ -2084,6 +2082,7 @@ impl<'tcx> CoerceMany<'tcx> {
         err.subdiagnostic(SuggestBoxingForReturnImplTrait::BoxReturnExpr { starts, ends });
     }
 
+    #[tracing::instrument(skip(self, fcx), level = "debug")]
     fn report_return_mismatched_types<'infcx>(
         &self,
         cause: &ObligationCause<'tcx>,
@@ -2098,6 +2097,7 @@ impl<'tcx> CoerceMany<'tcx> {
             fcx.err_ctxt().report_mismatched_types(cause, fcx.param_env, expected, found, ty_err);
 
         let due_to_block = matches!(fcx.tcx.hir_node(block_or_return_id), hir::Node::Block(..));
+        tracing::debug!(?due_to_block);
         let parent = fcx.tcx.parent_hir_node(block_or_return_id);
         if let Some(expr) = expression
             && let hir::Node::Expr(&hir::Expr {
