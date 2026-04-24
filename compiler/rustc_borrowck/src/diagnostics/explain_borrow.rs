@@ -651,7 +651,13 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         // ensure that we don't emit live boring locals as explanations.
         let is_local_boring = |local| {
             if let Some(polonius_context) = self.polonius_context {
-                polonius_context.boring_nll_locals.contains(&local)
+                let (_, boring_nll_locals) =
+                    crate::type_check::liveness::compute_relevant_live_locals(
+                        tcx,
+                        &polonius_context.regions_outliving_free_regions,
+                        body,
+                    );
+                boring_nll_locals.contains(&local)
             } else {
                 assert!(!tcx.sess.opts.unstable_opts.polonius.is_next_enabled());
 

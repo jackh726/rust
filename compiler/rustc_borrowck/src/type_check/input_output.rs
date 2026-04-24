@@ -26,6 +26,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     /// e.g., `|x: FxIndexMap<_, &'static u32>| ...`.
     #[instrument(skip(self), level = "debug")]
     pub(super) fn check_signature_annotation(&mut self) {
+        let _timer = self.infcx.tcx.prof.generic_activity("check_signature_annotation");
         let mir_def_id = self.body.source.def_id().expect_local();
 
         if !self.tcx().is_closure_like(mir_def_id.to_def_id()) {
@@ -154,6 +155,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     /// [#136547]: <https://www.github.com/rust-lang/rust/issues/136547>
     #[instrument(skip(self), level = "debug")]
     pub(super) fn equate_inputs_and_outputs(&mut self, normalized_inputs_and_output: &[Ty<'tcx>]) {
+        let _timer = self.infcx.tcx.prof.generic_activity("equate_inputs_and_outputs");
         let (&normalized_output_ty, normalized_input_tys) =
             normalized_inputs_and_output.split_last().unwrap();
 

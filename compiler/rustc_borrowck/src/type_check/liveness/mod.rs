@@ -32,6 +32,10 @@ pub(super) fn generate<'tcx>(
     move_data: &MoveData<'tcx>,
 ) {
     debug!("liveness::generate");
+    let _timer = typeck.tcx().prof.generic_activity_with_arg(
+        "liveness::generate",
+        format!("{:?}", typeck.body.source.def_id()),
+    );
 
     let mut free_regions = regions_that_outlive_free_regions(
         typeck.infcx.num_region_vars(),
@@ -43,13 +47,10 @@ pub(super) fn generate<'tcx>(
     // location-insensitive, but that doesn't work in polonius: locals whose type contains a region
     // that outlives a free region are not necessarily live everywhere in a flow-sensitive setting,
     // unlike NLLs.
-    // We do record these regions in the polonius context, since they're used to differentiate
-    // relevant and boring locals, which is a key distinction used later in diagnostics.
+    // We store this set for later use diagnostics.
     if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled() {
-        let (_, boring_locals) =
-            compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
-        typeck.polonius_context.as_mut().unwrap().boring_nll_locals =
-            boring_locals.into_iter().collect();
+        typeck.polonius_context.as_mut().unwrap().regions_outliving_free_regions =
+            free_regions.clone();
         free_regions = typeck.universal_regions.universal_regions_iter().collect();
     }
     let (relevant_live_locals, boring_locals) =
@@ -73,7 +74,7 @@ pub(super) fn generate<'tcx>(
 // to compute whether a variable `X` is live if that variable contains
 // some region `R` in its type where `R` is not known to outlive a free
 // region (i.e., where `R` may be valid for just a subset of the fn body).
-fn compute_relevant_live_locals<'tcx>(
+pub(crate) fn compute_relevant_live_locals<'tcx>(
     tcx: TyCtxt<'tcx>,
     free_regions: &FxHashSet<RegionVid>,
     body: &Body<'tcx>,

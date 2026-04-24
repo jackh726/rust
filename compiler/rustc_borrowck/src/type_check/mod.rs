@@ -106,6 +106,10 @@ pub(crate) fn type_check<'tcx>(
     move_data: &MoveData<'tcx>,
     location_map: Rc<DenseLocationMap>,
 ) -> MirTypeckResults<'tcx> {
+    let _timer = infcx
+        .tcx
+        .prof
+        .generic_activity_with_arg("type_check", format!("{:?}", body.source.def_id()));
     let mut constraints = MirTypeckRegionConstraints {
         placeholder_indices: PlaceholderIndices::default(),
         placeholder_index_to_region: IndexVec::default(),
@@ -377,6 +381,7 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     /// Equate the inferred type and the annotated type for user type annotations
     #[instrument(skip(self), level = "debug")]
     fn check_user_type_annotations(&mut self) {
+        let _timer = self.infcx.tcx.prof.generic_activity("check_user_type_annotations");
         debug!(?self.user_type_annotations);
         for user_annotation in self.user_type_annotations {
             let CanonicalUserTypeAnnotation { span, ref user_ty, inferred_ty } = *user_annotation;
@@ -558,6 +563,7 @@ impl<'a, 'tcx> Visitor<'tcx> for TypeChecker<'a, 'tcx> {
 
     #[instrument(skip(self, body), level = "debug")]
     fn visit_body(&mut self, body: &Body<'tcx>) {
+        let _timer = self.infcx.tcx.prof.generic_activity("visit_body");
         debug_assert!(std::ptr::eq(self.body, body));
 
         for (local, local_decl) in body.local_decls.iter_enumerated() {

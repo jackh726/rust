@@ -89,6 +89,9 @@ pub struct RegionInferenceContext<'tcx> {
     /// the entire CFG and `end(R)`.
     liveness_constraints: LivenessValues,
 
+    /// When using `-Zpolonius=next`, the set of loans that are live at a given point in the CFG.
+    live_loans: Option<LiveLoans>,
+
     /// The outlives constraints computed by the type-check.
     constraints: Frozen<OutlivesConstraintSet<'tcx>>,
 
@@ -330,6 +333,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         let mut result = Self {
             definitions,
             liveness_constraints,
+            live_loans: None,
             constraints: outlives_constraints,
             constraint_graph,
             constraint_sccs,
@@ -1904,7 +1908,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     /// When using `-Zpolonius=next`, records the given live loans for the loan scopes and active
     /// loans dataflow computations.
     pub(crate) fn record_live_loans(&mut self, live_loans: LiveLoans) {
-        self.liveness_constraints.record_live_loans(live_loans);
+        self.live_loans = Some(live_loans);
     }
 
     /// Returns whether the `loan_idx` is live at the given `location`: whether its issuing
@@ -1912,7 +1916,10 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     /// Note: for now, the sets of live loans is only available when using `-Zpolonius=next`.
     pub(crate) fn is_loan_live_at(&self, loan_idx: BorrowIndex, location: Location) -> bool {
         let point = self.liveness_constraints.point_from_location(location);
-        self.liveness_constraints.is_loan_live_at(loan_idx, point)
+        self.live_loans
+            .as_ref()
+            .expect("Accessing live loans requires `-Zpolonius=next`")
+            .contains(point, loan_idx)
     }
 }
 

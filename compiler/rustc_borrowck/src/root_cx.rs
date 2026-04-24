@@ -266,6 +266,10 @@ impl<'tcx> BorrowCheckRootCtxt<'tcx> {
             .iter()
             .chain(std::iter::once(self.root_def_id));
         for def_id in all_bodies {
+            let _timer = self
+                .tcx
+                .prof
+                .generic_activity_with_arg("do_mir_borrowck::body", format!("{:?}", def_id));
             let result = borrowck_collect_region_constraints(self, def_id);
             self.collect_region_constraints_results.insert(def_id, result);
         }

@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::SparseBitMatrix;
-use rustc_middle::mir::{Body, Local};
+use rustc_middle::mir::Body;
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::PointIndex;
 
@@ -69,9 +69,10 @@ pub(crate) struct PoloniusContext {
 
     /// The regions that outlive free regions are used to distinguish relevant live locals from
     /// boring locals. A boring local is one whose type contains only such regions. Polonius
-    /// currently has more boring locals than NLLs so we record the latter to use in errors and
-    /// diagnostics, to focus on the locals we consider relevant and match NLL diagnostics.
-    pub(crate) boring_nll_locals: FxHashSet<Local>,
+    /// currently has more boring locals than NLLs so we record these regions so that we can later
+    /// distinguish boring locals in diagnostics, if needed in order to focus on the locals
+    /// we consider relevant and match NLL diagnostics.
+    pub(crate) regions_outliving_free_regions: FxHashSet<RegionVid>,
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
