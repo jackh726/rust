@@ -12,6 +12,7 @@ mod fulfill;
 pub mod misc;
 pub mod normalize;
 pub mod outlives_bounds;
+pub mod outlives_for_liveness;
 pub mod project;
 pub mod query;
 #[allow(hidden_glob_reexports)]
@@ -935,6 +936,7 @@ pub fn provide(providers: &mut Providers) {
         specialization_enabled_in: specialize::specialization_enabled_in,
         instantiate_and_check_impossible_predicates,
         is_impossible_associated_item,
+        opaque_live_args: outlives_for_liveness::opaque_live_args,
         ..*providers
     };
 }

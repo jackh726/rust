@@ -2147,6 +2147,12 @@ rustc_queries! {
         desc { "listing captured lifetimes for opaque `{}`", tcx.def_path_str(def_id) }
     }
 
+    query opaque_live_args(def_id: DefId) -> &'tcx ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>> {
+        arena_cache
+        desc { "identifying live args for opaque `{}`", tcx.def_path_str(def_id) }
+        separate_provide_extern
+    }
+
     /// Computes the visibility of the provided `def_id`.
     ///
     /// If the item from the `def_id` doesn't have a visibility, it will panic. For example

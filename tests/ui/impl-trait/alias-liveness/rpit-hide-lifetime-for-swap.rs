@@ -2,8 +2,6 @@
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ [edition2015] edition: 2015
 //@ [edition2024] edition: 2024
-//@ [polonius_alpha] known-bug: #153215
-//@ [polonius_alpha] check-pass
 //@ [polonius_alpha] edition: 2024
 //@ [polonius_alpha] compile-flags: -Zpolonius=next
 
@@ -31,7 +29,7 @@ fn dangle() -> &'static [i32; 3] {
     let long = Rc::new(RefCell::new(&[4, 5, 6]));
     let x = [1, 2, 3];
     let short = Rc::new(RefCell::new(&x));
-    //[edition2024]~^ ERROR `x` does not live long enough
+    //[edition2024,polonius_alpha]~^ ERROR `x` does not live long enough
     hide(long.clone()).swap(hide(short));
     let res: &'static [i32; 3] = *long.borrow();
     res
