@@ -1,4 +1,4 @@
-//@ known-bug: #42940
+//@ check-pass
 
 trait Captures<'a> {}
 impl<T> Captures<'_> for T {}

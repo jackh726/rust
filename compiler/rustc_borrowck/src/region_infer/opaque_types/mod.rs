@@ -419,6 +419,7 @@ struct ToArgRegionsFolder<'a, 'tcx> {
     // See tests/ui/type-alias-impl-trait/closure_wf_outlives.rs for an example.
     erase_unknown_regions: bool,
     arg_regions: &'a [RegionVid],
+    live_args: Option<Vec<ty::GenericArg<'tcx>>>,
 }
 
 impl<'a, 'tcx> ToArgRegionsFolder<'a, 'tcx> {
@@ -426,7 +427,7 @@ impl<'a, 'tcx> ToArgRegionsFolder<'a, 'tcx> {
         rcx: &'a RegionCtxt<'a, 'tcx>,
         arg_regions: &'a [RegionVid],
     ) -> ToArgRegionsFolder<'a, 'tcx> {
-        ToArgRegionsFolder { rcx, erase_unknown_regions: false, arg_regions }
+        ToArgRegionsFolder { rcx, erase_unknown_regions: false, arg_regions, live_args: None }
     }
 
     fn fold_non_member_arg(&mut self, arg: GenericArg<'tcx>) -> GenericArg<'tcx> {
@@ -472,7 +473,11 @@ impl<'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for ToArgRegionsFolder<'_, 'tcx> {
                     .and_then(|r| nll_var_to_universal_region(self.rcx, r))
                 {
                     Ok(arg_region)
-                } else if self.erase_unknown_regions {
+                } else if self.erase_unknown_regions
+                    || self.live_args.as_ref().map_or(false, |live_args| {
+                        !live_args.contains(&ty::Region::new_var(self.cx(), r).into())
+                    })
+                {
                     Ok(self.cx().lifetimes.re_erased)
                 } else {
                     Err(r)
@@ -498,6 +503,51 @@ impl<'tcx> FallibleTypeFolder<TyCtxt<'tcx>> for ToArgRegionsFolder<'_, 'tcx> {
 
             ty::Coroutine(def_id, args) => {
                 Ty::new_coroutine(tcx, def_id, self.fold_closure_args(def_id, args)?)
+            }
+
+            ty::Alias(ty::AliasTy {
+                kind: kind @ ty::AliasTyKind::Opaque { def_id },
+                args,
+                ..
+            }) => {
+                tracing::debug!(?def_id);
+                let opaque_live_args = tcx.opaque_live_args(def_id);
+
+                match opaque_live_args {
+                    Some(opaque_live_args) => {
+                        let opaque_live_args =
+                            opaque_live_args.clone().instantiate(tcx, args).skip_normalization();
+                        self.live_args = Some(opaque_live_args);
+                        let variances = tcx.variances_of(def_id);
+                        tracing::debug!(?variances);
+                        let args = tcx.mk_args_from_iter(
+                            std::iter::zip(variances, args.iter()).map(|(&v, s)| {
+                                if v == ty::Bivariant {
+                                    Ok(self.fold_non_member_arg(s))
+                                } else {
+                                    s.try_fold_with(self)
+                                }
+                            }),
+                        );
+                        self.live_args = None;
+                        let args = args?;
+                        ty::AliasTy::new_from_args(tcx, kind, args).to_ty(tcx)
+                    }
+                    None => {
+                        let variances = tcx.variances_of(def_id);
+                        tracing::debug!(?variances);
+                        let args = tcx.mk_args_from_iter(
+                            std::iter::zip(variances, args.iter()).map(|(&v, s)| {
+                                if v == ty::Bivariant {
+                                    Ok(self.fold_non_member_arg(s))
+                                } else {
+                                    s.try_fold_with(self)
+                                }
+                            }),
+                        )?;
+                        ty::AliasTy::new_from_args(tcx, kind, args).to_ty(tcx)
+                    }
+                }
             }
 
             ty::Alias(ty::AliasTy { kind, args, .. })
@@ -567,6 +617,7 @@ pub(crate) fn apply_definition_site_hidden_types<'tcx>(
             );
             continue;
         };
+        tracing::debug!(?expected);
 
         // We erase all non-member region of the opaque and need to treat these as existentials.
         let expected_ty = ty::fold_regions(

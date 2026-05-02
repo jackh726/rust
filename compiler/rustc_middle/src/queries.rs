@@ -2147,7 +2147,7 @@ rustc_queries! {
         desc { "listing captured lifetimes for opaque `{}`", tcx.def_path_str(def_id) }
     }
 
-    query opaque_live_args(def_id: DefId) -> &'tcx ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>> {
+    query opaque_live_args(def_id: DefId) -> &'tcx Option<ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>>> {
         arena_cache
         desc { "identifying live args for opaque `{}`", tcx.def_path_str(def_id) }
         separate_provide_extern

@@ -22,7 +22,7 @@ use crate::regions::InferCtxtRegionExt;
 pub(crate) fn opaque_live_args<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: LocalDefId,
-) -> ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>> {
+) -> Option<ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>>> {
     let self_identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
 
     // We first want to collect the outlives bounds of the opaque.
@@ -59,19 +59,12 @@ pub(crate) fn opaque_live_args<'tcx>(
     // optimization.
     if opaque_outlives_regions.contains(&tcx.lifetimes.re_static) {
         tracing::debug!("opaque has a 'static outlives bound, so skipping visiting any regions");
-        return ty::EarlyBinder::bind(vec![]);
+        return Some(ty::EarlyBinder::bind(vec![]));
     }
 
     // If there are no outlives bounds, then all (non-bivariant) args are potentially live.
     if opaque_outlives_regions.is_empty() {
-        let variances = tcx.variances_of(def_id);
-        let mut opaque_outlives_args = Vec::with_capacity(self_identity_args.len());
-        for (idx, s) in self_identity_args.iter().enumerate() {
-            if variances[idx] != ty::Bivariant {
-                opaque_outlives_args.push(s);
-            }
-        }
-        return ty::EarlyBinder::bind(opaque_outlives_args);
+        return None;
     }
 
     // Okay, so we know we have some outlives bounds, and that none of them are `'static`.
@@ -165,7 +158,7 @@ pub(crate) fn opaque_live_args<'tcx>(
     }
     tracing::debug!(?opaque_outlives_args);
 
-    ty::EarlyBinder::bind(opaque_outlives_args)
+    Some(ty::EarlyBinder::bind(opaque_outlives_args))
 }
 
 /// Visits free regions in the type that are relevant for liveness computation.
@@ -227,9 +220,23 @@ where
                 if let ty::AliasTyKind::Opaque { def_id } = kind {
                     let opaque_outlives_args = tcx.opaque_live_args(def_id);
 
-                    for r in opaque_outlives_args.as_ref().skip_binder() {
-                        let r = ty::EarlyBinder::bind(*r).instantiate(tcx, args).skip_norm_wip();
-                        r.visit_with(self);
+                    match opaque_outlives_args {
+                        Some(opaque_outlives_args) => {
+                            for r in opaque_outlives_args.as_ref().skip_binder() {
+                                let r = ty::EarlyBinder::bind(*r)
+                                    .instantiate(tcx, args)
+                                    .skip_norm_wip();
+                                r.visit_with(self);
+                            }
+                        }
+                        None => {
+                            let variances = tcx.variances_of(def_id);
+                            for (idx, s) in args.iter().enumerate() {
+                                if variances[idx] != ty::Bivariant {
+                                    s.visit_with(self);
+                                }
+                            }
+                        }
                     }
 
                     return;

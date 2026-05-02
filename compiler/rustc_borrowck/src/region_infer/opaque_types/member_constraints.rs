@@ -25,6 +25,7 @@ pub(super) fn apply_member_constraints<'tcx>(
             rcx,
             defining_use,
             member_constraints: &mut member_constraints,
+            live_args: None,
         };
         defining_use.hidden_type.ty.visit_with(&mut visitor);
     }
@@ -142,6 +143,7 @@ struct CollectMemberConstraintsVisitor<'a, 'b, 'tcx> {
     rcx: &'a RegionCtxt<'a, 'tcx>,
     defining_use: &'b DefiningUse<'tcx>,
     member_constraints: &'a mut FxHashMap<ConstraintSccIndex, Vec<&'b DefiningUse<'tcx>>>,
+    live_args: Option<Vec<ty::GenericArg<'tcx>>>,
 }
 impl<'tcx> CollectMemberConstraintsVisitor<'_, '_, 'tcx> {
     fn cx(&self) -> TyCtxt<'tcx> {
@@ -156,6 +158,11 @@ impl<'tcx> CollectMemberConstraintsVisitor<'_, '_, 'tcx> {
 }
 impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for CollectMemberConstraintsVisitor<'_, '_, 'tcx> {
     fn visit_region(&mut self, r: Region<'tcx>) {
+        if let Some(live_args) = self.live_args.as_ref()
+            && !live_args.contains(&r.into())
+        {
+            return;
+        }
         match r.kind() {
             ty::ReBound(..) => return,
             ty::ReVar(vid) => {
@@ -175,6 +182,38 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for CollectMemberConstraintsVisitor<'_, '_,
             ty::Closure(def_id, args)
             | ty::CoroutineClosure(def_id, args)
             | ty::Coroutine(def_id, args) => self.visit_closure_args(def_id, args),
+
+            ty::Alias(ty::AliasTy { kind: ty::AliasTyKind::Opaque { def_id }, args, .. }) => {
+                tracing::debug!(?def_id);
+                let opaque_live_args = self.cx().opaque_live_args(def_id);
+
+                match opaque_live_args {
+                    Some(opaque_live_args) => {
+                        let opaque_live_args = opaque_live_args
+                            .clone()
+                            .instantiate(self.cx(), args)
+                            .skip_normalization();
+                        self.live_args = Some(opaque_live_args);
+                        let variances = self.cx().variances_of(def_id);
+                        tracing::debug!(?variances);
+                        for (&v, arg) in std::iter::zip(variances, args.iter()) {
+                            if v != ty::Bivariant {
+                                arg.visit_with(self)
+                            }
+                        }
+                        self.live_args = None;
+                    }
+                    None => {
+                        let variances = self.cx().variances_of(def_id);
+                        tracing::debug!(?variances);
+                        for (&v, arg) in std::iter::zip(variances, args.iter()) {
+                            if v != ty::Bivariant {
+                                arg.visit_with(self)
+                            }
+                        }
+                    }
+                }
+            }
 
             ty::Alias(ty::AliasTy { kind, args, .. })
                 if let Some(variances) = self.cx().opt_alias_variances(kind) =>
