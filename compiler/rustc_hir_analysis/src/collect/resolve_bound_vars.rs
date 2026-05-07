@@ -531,7 +531,7 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
         let capture_all_in_scope_lifetimes = opaque_captures_all_in_scope_lifetimes(opaque);
         if capture_all_in_scope_lifetimes {
             let tcx = self.tcx;
-            let lifetime_ident = |def_id: LocalDefId| {
+            let ident = |def_id: LocalDefId| {
                 let name = tcx.item_name(def_id.to_def_id());
                 let span = tcx.def_span(def_id);
                 Ident::new(name, span)
@@ -546,12 +546,10 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
             loop {
                 match *scope {
                     Scope::Binder { ref bound_vars, scope_type, s, .. } => {
-                        for (&original_lifetime, &def) in bound_vars.iter().rev() {
-                            if let DefKind::LifetimeParam = self.tcx.def_kind(original_lifetime) {
-                                let def = def.shifted(late_depth);
-                                let ident = lifetime_ident(original_lifetime);
-                                self.remap_opaque_captures(&opaque_capture_scopes, def, ident);
-                            }
+                        for (&org_def_id, &def) in bound_vars.iter().rev() {
+                            let def = def.shifted(late_depth);
+                            let ident = ident(org_def_id);
+                            self.remap_opaque_captures(&opaque_capture_scopes, def, ident);
                         }
                         match scope_type {
                             BinderScopeType::Normal => late_depth += 1,
@@ -564,11 +562,9 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                         while let Some(parent_item) = opt_parent_item {
                             let parent_generics = self.tcx.generics_of(parent_item);
                             for param in parent_generics.own_params.iter().rev() {
-                                if let ty::GenericParamDefKind::Lifetime = param.kind {
-                                    let def = ResolvedArg::EarlyBound(param.def_id.expect_local());
-                                    let ident = lifetime_ident(param.def_id.expect_local());
-                                    self.remap_opaque_captures(&opaque_capture_scopes, def, ident);
-                                }
+                                let def = ResolvedArg::EarlyBound(param.def_id.expect_local());
+                                let ident = ident(param.def_id.expect_local());
+                                self.remap_opaque_captures(&opaque_capture_scopes, def, ident);
                             }
                             opt_parent_item = parent_generics.parent.and_then(DefId::as_local);
                         }
@@ -941,7 +937,7 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
 
     fn visit_generics(&mut self, generics: &'tcx hir::Generics<'tcx>) {
         let scope = Scope::TraitRefBoundary { s: self.scope };
-        self.with(scope, |this| {
+        self.with(scope, |this: &mut BoundVarContext<'_, 'tcx>| {
             walk_list!(this, visit_generic_param, generics.params);
             walk_list!(this, visit_where_predicate, generics.predicates);
         })
@@ -1426,13 +1422,13 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
     /// and ban them. Type variables instantiated inside binders aren't
     /// well-supported at the moment, so this doesn't work.
     /// In the future, this should be fixed and this error should be removed.
-    fn check_lifetime_is_capturable(
+    fn check_arg_is_capturable(
         &self,
         opaque_def_id: LocalDefId,
-        lifetime: ResolvedArg,
+        arg: ResolvedArg,
         capture_span: Span,
     ) -> Result<(), ErrorGuaranteed> {
-        let ResolvedArg::LateBound(_, _, lifetime_def_id) = lifetime else { return Ok(()) };
+        let ResolvedArg::LateBound(_, _, lifetime_def_id) = arg else { return Ok(()) };
         let lifetime_hir_id = self.tcx.local_def_id_to_hir_id(lifetime_def_id);
         let bad_place = match self.tcx.hir_node(self.tcx.parent_hir_id(lifetime_hir_id)) {
             // Opaques do not declare their own lifetimes, so if a lifetime comes from an opaque
@@ -1507,7 +1503,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
     ) -> ResolvedArg {
         if let Some(&(opaque_def_id, _)) = opaque_capture_scopes.last() {
             if let Err(guar) =
-                self.check_lifetime_is_capturable(opaque_def_id, lifetime, ident.span)
+                self.check_arg_is_capturable(opaque_def_id, lifetime, ident.span)
             {
                 lifetime = ResolvedArg::Error(guar);
             }

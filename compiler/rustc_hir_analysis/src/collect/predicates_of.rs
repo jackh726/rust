@@ -387,6 +387,9 @@ fn compute_bidirectional_outlives_predicates<'tcx>(
     predicates: &mut Vec<(ty::Clause<'tcx>, Span)>,
 ) {
     for param in opaque_own_params {
+        if !matches!(param.kind, ty::GenericParamDefKind::Lifetime { .. }) {
+            continue;
+        }
         let orig_lifetime = tcx.map_opaque_lifetime_to_parent_lifetime(param.def_id.expect_local());
         if let ty::ReEarlyParam(..) = orig_lifetime.kind() {
             let dup_lifetime = ty::Region::new_early_param(

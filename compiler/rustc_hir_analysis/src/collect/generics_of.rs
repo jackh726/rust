@@ -4,6 +4,7 @@ use std::ops::ControlFlow;
 use rustc_errors::{Diag, DiagCtxtHandle, Diagnostic, Level};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
+use rustc_hir::definitions::PerParentDisambiguatorState;
 use rustc_hir::intravisit::{self, Visitor, VisitorExt};
 use rustc_hir::{self as hir, AmbigArg, GenericParamKind, HirId, Node};
 use rustc_middle::span_bug;
@@ -68,6 +69,101 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
 
     let hir_id = tcx.local_def_id_to_hir_id(def_id);
     let node = tcx.hir_node(hir_id);
+
+    if let Node::OpaqueTy(&hir::OpaqueTy {
+        origin:
+            hir::OpaqueTyOrigin::FnReturn { parent: fn_def_id, in_trait_or_impl: None }
+            | hir::OpaqueTyOrigin::AsyncFn { parent: fn_def_id, in_trait_or_impl: None },
+        ..
+    }) = node {
+        assert_matches!(tcx.def_kind(fn_def_id), DefKind::AssocFn | DefKind::Fn);
+
+        let fn_generics = tcx.generics_of(fn_def_id);
+        let mut own_params = Vec::with_capacity(fn_generics.parent_count + fn_generics.own_params.len());
+
+        let lifetimes = tcx.opaque_captured_lifetimes(def_id);
+        debug!(?lifetimes);
+
+        let parent_count = fn_generics.parent.map_or(0, |parent| {
+            let parent = tcx.generics_of(parent);
+            parent.own_params.len() + parent.parent_count
+        });
+        let mut i: u32 = parent_count as u32;
+        let mut next_index = || {
+            let prev = i;
+            i += 1;
+            prev
+        };
+
+        own_params.extend(lifetimes.iter().map(|&(_, param)| ty::GenericParamDef {
+            name: tcx.item_name(param.to_def_id()),
+            index: next_index(),
+            def_id: param.to_def_id(),
+            pure_wrt_drop: false,
+            kind: ty::GenericParamDefKind::Lifetime,
+        }));
+
+        let disambiguator = &mut PerParentDisambiguatorState::new(def_id);
+        for param in &fn_generics.own_params {                
+            let param = match &param.kind {
+                t @ ty::GenericParamDefKind::Type { .. } => {
+                    let new_def_feed = tcx.create_def(
+                        def_id,
+                        Some(param.name),
+                        DefKind::TyParam,
+                        Some(definitions::DefPathData::TypeNs(param.name)),
+                        disambiguator,
+                    );
+                    let span = tcx.def_span(param.def_id);
+                    new_def_feed.def_span(span);
+                    new_def_feed.def_ident_span(Some(span));
+                    let new_def_id = new_def_feed.def_id();
+                    ty::GenericParamDef {
+                        name: param.name,
+                        index: next_index(),
+                        def_id: new_def_id.to_def_id(),
+                        pure_wrt_drop: false,
+                        kind: t.clone(),
+                    }
+                }
+                c @ ty::GenericParamDefKind::Const { .. } => {
+                    let new_def_feed = tcx.create_def(
+                        def_id,
+                        Some(param.name),
+                        DefKind::ConstParam,
+                        Some(definitions::DefPathData::ValueNs(param.name)),
+                        disambiguator,
+                    );
+                    let span = tcx.def_span(param.def_id);
+                    new_def_feed.def_span(span);
+                    new_def_feed.def_ident_span(Some(span));
+                    let new_def_id = new_def_feed.def_id();
+                    ty::GenericParamDef {
+                        name: param.name,
+                        index: next_index(),
+                        def_id: new_def_id.to_def_id(),
+                        pure_wrt_drop: false,
+                        kind: c.clone(),
+                    }
+                }
+                ty::GenericParamDefKind::Lifetime => continue,
+            };
+            own_params.push(param);
+        }
+
+        own_params.shrink_to_fit();
+        let param_def_id_to_index =
+            own_params.iter().map(|param| (param.def_id, param.index)).collect();
+
+        return ty::Generics {
+            parent: fn_generics.parent,
+            parent_count,
+            own_params,
+            param_def_id_to_index,
+            has_self: false,
+            has_late_bound_regions: None,
+        };
+    };
 
     let parent_def_id = match node {
         Node::ImplItem(_)

@@ -9,7 +9,7 @@ use super::{Clause, InstantiatedPredicates, ParamConst, ParamTy, Ty, TyCtxt, Unn
 use crate::ty;
 use crate::ty::{EarlyBinder, GenericArgsRef};
 
-#[derive(Clone, Debug, TyEncodable, TyDecodable, HashStable)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, TyEncodable, TyDecodable, HashStable)]
 pub enum GenericParamDefKind {
     Lifetime,
     Type { has_default: bool, synthetic: bool },

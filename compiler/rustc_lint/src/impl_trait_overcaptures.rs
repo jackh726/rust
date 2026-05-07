@@ -134,7 +134,7 @@ impl<'tcx> LateLintPass<'tcx> for ImplTraitOvercaptures {
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 enum ParamKind {
     // Early-bound var.
-    Early(Symbol, u32),
+    Early(Symbol, u32, ty::GenericParamDefKind),
     // Late-bound var on function, not within a binder. We can capture these.
     Free(DefId),
     // Late-bound var in a binder. We can't capture these yet.
@@ -150,7 +150,7 @@ fn check_fn(tcx: TyCtxt<'_>, parent_def_id: LocalDefId) {
     while let Some(def_id) = current_def_id {
         let generics = tcx.generics_of(def_id);
         for param in &generics.own_params {
-            in_scope_parameters.insert(param.def_id, ParamKind::Early(param.name, param.index));
+            in_scope_parameters.insert(param.def_id, ParamKind::Early(param.name, param.index, param.kind));
         }
         current_def_id = generics.parent;
     }
@@ -218,7 +218,7 @@ where
                 | ty::BoundVariableKind::Ty(ty::BoundTyKind::Param(def_id)) => {
                     added.push(def_id);
                     let unique = self.in_scope_parameters.insert(def_id, ParamKind::Late);
-                    assert_eq!(unique, None);
+                    assert!(unique.is_none());
                 }
                 _ => {
                     self.tcx.dcx().span_delayed_bug(
@@ -262,25 +262,40 @@ where
                 | hir::OpaqueTyOrigin::AsyncFn { parent, .. } = opaque.origin
             && parent == self.parent_def_id
         {
+            tracing::debug!(?opaque_ty_args);
             let opaque_span = self.tcx.def_span(opaque_def_id);
             let new_capture_rules = opaque_span.at_least_rust_2024();
             if !new_capture_rules
                 && !opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..)))
             {
                 // Compute the set of args that are captured by the opaque...
+                let parent_generics = self.tcx.generics_of(self.parent_def_id);
                 let mut captured = FxIndexSet::default();
                 let mut captured_regions = FxIndexSet::default();
+                let variances = self.tcx.variances_of(opaque_def_id);
+                for (idx, arg) in opaque_ty_args.iter().enumerate() {
+                    // A param is captured if it's invariant.
+                    if variances[idx] != ty::Invariant {
+                        continue;
+                    }
+                    captured.insert(extract_def_id_from_arg(self.tcx, parent_generics, arg));
+                    captured_regions.extend(arg.as_region());
+                }
+                /*
                 let variances = self.tcx.variances_of(opaque_def_id);
                 let mut current_def_id = Some(opaque_def_id.to_def_id());
                 while let Some(def_id) = current_def_id {
                     let generics = self.tcx.generics_of(def_id);
+                    tracing::debug!(?def_id, ?generics);
                     for param in &generics.own_params {
+                        tracing::debug!(?param);
                         // A param is captured if it's invariant.
                         if variances[param.index as usize] != ty::Invariant {
                             continue;
                         }
 
                         let arg = opaque_ty_args[param.index as usize];
+                        tracing::debug!(?arg);
                         // We need to turn all `ty::Param`/`ConstKind::Param` and
                         // `ReEarlyParam`/`ReBound` into def ids.
                         captured.insert(extract_def_id_from_arg(self.tcx, generics, arg));
@@ -289,16 +304,19 @@ where
                     }
                     current_def_id = generics.parent;
                 }
+                */
 
                 // Compute the set of in scope params that are not captured.
                 let mut uncaptured_args: FxIndexSet<_> = self
                     .in_scope_parameters
                     .iter()
-                    .filter(|&(def_id, _)| !captured.contains(def_id))
+                    .filter(|&(def_id, param)| !captured.contains(def_id) && (matches!(param, ParamKind::Early(_, _, ty::GenericParamDefKind::Lifetime { .. }) | ParamKind::Late | ParamKind::Free(_))))
                     .collect();
                 // Remove the set of lifetimes that are in-scope that outlive some other captured
                 // lifetime and are contravariant (i.e. covariant in argument position).
                 uncaptured_args.retain(|&(def_id, kind)| {
+                    tracing::debug!(variance = ?self.variances.get(def_id));
+                    tracing::debug!(?self.variances);
                     let Some(ty::Bivariant | ty::Contravariant) = self.variances.get(def_id) else {
                         // Keep all covariant/invariant args. Also if variance is `None`,
                         // then that means it's either not a lifetime, or it didn't show up
@@ -308,7 +326,7 @@ where
                     // We only computed variance of lifetimes...
                     debug_assert_matches!(self.tcx.def_kind(*def_id), DefKind::LifetimeParam);
                     let uncaptured = match *kind {
-                        ParamKind::Early(name, index) => ty::Region::new_early_param(
+                        ParamKind::Early(name, index, _) => ty::Region::new_early_param(
                             self.tcx,
                             ty::EarlyParamRegion { name, index },
                         ),
@@ -327,6 +345,7 @@ where
                             .sub_free_regions(self.tcx, *r, uncaptured)
                     })
                 });
+                tracing::debug!(?captured, ?captured_regions, ?uncaptured_args);
 
                 // If we have uncaptured args, and if the opaque doesn't already have
                 // `use<>` syntax on it, and we're < edition 2024, then warn the user.

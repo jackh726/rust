@@ -318,14 +318,44 @@ fn check_opaque_meets_bounds<'tcx>(
     let ocx = ObligationCtxt::new_with_diagnostics(&infcx);
 
     let args = match origin {
-        hir::OpaqueTyOrigin::FnReturn { parent, .. }
-        | hir::OpaqueTyOrigin::AsyncFn { parent, .. }
+        hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: Some(_) }
+        | hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: Some(_) }
         | hir::OpaqueTyOrigin::TyAlias { parent, .. } => GenericArgs::identity_for_item(
             tcx, parent,
         )
         .extend_to(tcx, def_id.to_def_id(), |param, _| {
             tcx.map_opaque_lifetime_to_parent_lifetime(param.def_id.expect_local()).into()
         }),
+        hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: None }
+        | hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
+            let lifetimes = tcx.opaque_captured_lifetimes(def_id);
+            debug!(?lifetimes);
+            let mut args = vec![];
+            let fn_generics = tcx.generics_of(parent);
+            if let Some(fn_parent) = fn_generics.parent {
+                for arg in ty::GenericArgs::identity_for_item(tcx, fn_parent) {
+                    args.push(arg);
+                }
+            }
+            args.extend(lifetimes.iter().map(|&(_, captured)| -> ty::GenericArg<'_> {
+                tcx.map_opaque_lifetime_to_parent_lifetime(captured).into()
+            }));
+
+            for param in &fn_generics.own_params {                
+                match &param.kind {
+                    ty::GenericParamDefKind::Type { .. } => {
+                        args.push(tcx.mk_param_from_def(param));
+                    }
+                    ty::GenericParamDefKind::Const { .. } => {
+                        args.push(tcx.mk_param_from_def(param));
+                    }
+                    ty::GenericParamDefKind::Lifetime => continue,
+                }
+            }
+    
+            let args = tcx.mk_args(&args);
+            args
+        }
     };
 
     let opaque_ty = Ty::new_opaque(tcx, def_id.to_def_id(), args);
@@ -572,6 +602,7 @@ fn check_opaque_precise_captures<'tcx>(tcx: TyCtxt<'tcx>, opaque_def_id: LocalDe
         // No precise capturing args; nothing to validate
         return;
     };
+    tracing::debug!(?precise_capturing_args);
 
     let mut expected_captures = UnordSet::default();
     let mut shadowed_captures = UnordSet::default();
@@ -612,6 +643,7 @@ fn check_opaque_precise_captures<'tcx>(tcx: TyCtxt<'tcx>, opaque_def_id: LocalDe
 
         match tcx.named_bound_var(hir_id) {
             Some(ResolvedArg::EarlyBound(def_id)) => {
+                tracing::debug!(?def_id);
                 expected_captures.insert(def_id.to_def_id());
 
                 // Make sure we allow capturing these lifetimes through `Self` and

@@ -3162,7 +3162,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                     | hir::OpaqueTyOrigin::TyAlias { .. } => None,
                 };
 
-                self.lower_opaque_ty(opaque_ty.def_id, in_trait)
+                self.lower_opaque_ty(opaque_ty.def_id, opaque_ty.origin, in_trait)
             }
             hir::TyKind::TraitAscription(hir_bounds) => {
                 // Impl trait in bindings lower as an infer var with additional
@@ -3520,7 +3520,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
 
     /// Lower an opaque type (i.e., an existential impl-Trait type) from the HIR.
     #[instrument(level = "debug", skip(self), ret)]
-    fn lower_opaque_ty(&self, def_id: LocalDefId, in_trait: Option<LocalDefId>) -> Ty<'tcx> {
+    fn lower_opaque_ty(&self, def_id: LocalDefId, origin: hir::OpaqueTyOrigin<LocalDefId>, in_trait: Option<LocalDefId>) -> Ty<'tcx> {
         let tcx = self.tcx();
 
         let lifetimes = tcx.opaque_captured_lifetimes(def_id);
@@ -3546,21 +3546,56 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
         let generics = tcx.generics_of(def_id);
         debug!(?generics);
 
-        // We use `generics.count() - lifetimes.len()` here instead of `generics.parent_count`
-        // since return-position impl trait in trait squashes all of the generics from its source fn
-        // into its own generics, so the opaque's "own" params isn't always just lifetimes.
-        let offset = generics.count() - lifetimes.len();
+        let args = match origin {
+            hir::OpaqueTyOrigin::FnReturn { in_trait_or_impl: Some(_), .. }
+            | hir::OpaqueTyOrigin::AsyncFn { in_trait_or_impl: Some(_), .. }
+            | hir::OpaqueTyOrigin::TyAlias {.. } => {
+                // We use `generics.count() - lifetimes.len()` here instead of `generics.parent_count`
+                // since return-position impl trait in trait squashes all of the generics from its source fn
+                // into its own generics, so the opaque's "own" params isn't always just lifetimes.
+                let offset = generics.count() - lifetimes.len();
 
-        let args = ty::GenericArgs::for_item(tcx, def_id, |param, _| {
-            if let Some(i) = (param.index as usize).checked_sub(offset) {
-                let (lifetime, _) = lifetimes[i];
-                // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
-                self.lower_resolved_lifetime(lifetime).into()
-            } else {
-                tcx.mk_param_from_def(param)
+                let args = ty::GenericArgs::for_item(tcx, def_id, |param, _| {
+                    if let Some(i) = (param.index as usize).checked_sub(offset) {
+                        let (lifetime, _) = lifetimes[i];
+                        // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
+                        self.lower_resolved_lifetime(lifetime).into()
+                    } else {
+                        tcx.mk_param_from_def(param)
+                    }
+                });
+                debug!(?args);
+                args
             }
-        });
-        debug!(?args);
+            hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: None }
+            | hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
+                let mut args = vec![];
+                let fn_generics = tcx.generics_of(parent);
+                if let Some(fn_parent) = fn_generics.parent {
+                    for arg in ty::GenericArgs::identity_for_item(tcx, fn_parent) {
+                        args.push(arg);
+                    }
+                }
+                args.extend(lifetimes.iter().map(|&(lifetime, _)| -> ty::GenericArg<'_> {
+                    // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
+                    self.lower_resolved_lifetime(lifetime).into()
+                }));
+                for param in &fn_generics.own_params {                
+                    match &param.kind {
+                        ty::GenericParamDefKind::Type { .. } => {
+                            args.push(tcx.mk_param_from_def(param));
+                        }
+                        ty::GenericParamDefKind::Const { .. } => {
+                            args.push(tcx.mk_param_from_def(param));
+                        }
+                        ty::GenericParamDefKind::Lifetime => continue,
+                    }
+                }
+        
+                let args = tcx.mk_args(&args);
+                args
+            }
+        };
 
         if in_trait.is_some() {
             Ty::new_projection_from_args(tcx, def_id, args)
