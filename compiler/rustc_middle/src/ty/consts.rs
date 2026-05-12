@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use rustc_data_structures::intern::Interned;
 use rustc_error_messages::MultiSpan;
+use rustc_hir::def_id::DefId;
 use rustc_macros::HashStable;
 use rustc_type_ir::walk::TypeWalker;
 use rustc_type_ir::{self as ir, TypeFlags, WithCachedTypeInfo};
@@ -330,5 +331,17 @@ impl<'tcx> Const<'tcx> {
     /// ```
     pub fn walk(self) -> TypeWalker<TyCtxt<'tcx>> {
         TypeWalker::new(self.into())
+    }
+
+    /// Given some item `binding_item`, check if this const is a generic parameter introduced by it
+    /// or one of the parent generics. Returns the `DefId` of the parameter definition if so.
+    pub fn opt_param_def_id(self, tcx: TyCtxt<'tcx>, binding_item: DefId) -> Option<DefId> {
+        match self.kind() {
+            ty::ConstKind::Param(param) => {
+                Some(tcx.generics_of(binding_item).const_param(param, tcx).def_id)
+            }
+            ty::ConstKind::Bound(_, ty::BoundConst { .. }) => todo!("We should be tracking def_id for BoundConst"),
+            _ => None,
+        }
     }
 }

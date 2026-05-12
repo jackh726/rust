@@ -1595,7 +1595,7 @@ impl<'tcx> TyCtxt<'tcx> {
             if self.def_kind(scope) == DefKind::OpaqueTy {
                 // Lifetime params of opaque types are synthetic and thus irrelevant to
                 // diagnostics. Map them back to their origin!
-                region = self.map_opaque_lifetime_to_parent_lifetime(def_id);
+                region = self.map_opaque_lifetime_to_parent_arg(def_id).expect_region();
                 continue;
             }
             break (scope, def_id.into());
@@ -2289,7 +2289,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 (ty::GenericParamDefKind::Type { .. }, ty::GenericArgKind::Type(_))
                 | (ty::GenericParamDefKind::Lifetime, ty::GenericArgKind::Lifetime(_))
                 | (ty::GenericParamDefKind::Const { .. }, ty::GenericArgKind::Const(_)) => {}
-                _ => return false,
+                _ => panic!("{:?} {:?}", param, arg.kind()),
             }
         }
 
@@ -2705,19 +2705,15 @@ impl<'tcx> TyCtxt<'tcx> {
     /// of the signature.
     // FIXME(RPITIT): if we ever synthesize new lifetimes for RPITITs and not just
     // re-use the generics of the opaque, this function will need to be tweaked slightly.
-    pub fn map_opaque_lifetime_to_parent_lifetime(
+    #[tracing::instrument(skip(self), ret)]
+    pub fn map_opaque_lifetime_to_parent_arg(
         self,
         mut opaque_lifetime_param_def_id: LocalDefId,
-    ) -> ty::Region<'tcx> {
-        debug_assert!(
-            matches!(self.def_kind(opaque_lifetime_param_def_id), DefKind::LifetimeParam),
-            "{opaque_lifetime_param_def_id:?} is a {}",
-            self.def_descr(opaque_lifetime_param_def_id.to_def_id())
-        );
-
+    ) -> ty::GenericArg<'tcx> {
         loop {
             let parent = self.local_parent(opaque_lifetime_param_def_id);
             let lifetime_mapping = self.opaque_captured_lifetimes(parent);
+            tracing::debug!(?lifetime_mapping);
 
             let Some((lifetime, _)) = lifetime_mapping
                 .iter()
@@ -2728,26 +2724,86 @@ impl<'tcx> TyCtxt<'tcx> {
 
             match *lifetime {
                 resolve_bound_vars::ResolvedArg::EarlyBound(ebv) => {
-                    let new_parent = self.local_parent(ebv);
+                    match self.def_kind(ebv) {
+                        DefKind::LifetimeParam => {
+                            let new_parent = self.local_parent(ebv);
+                            tracing::debug!(?ebv, ?new_parent);
 
-                    // If we map to another opaque, then it should be a parent
-                    // of the opaque we mapped from. Continue mapping.
-                    if matches!(self.def_kind(new_parent), DefKind::OpaqueTy) {
-                        debug_assert_eq!(self.local_parent(parent), new_parent);
-                        opaque_lifetime_param_def_id = ebv;
-                        continue;
+                            // If we map to another opaque, then it should be a parent
+                            // of the opaque we mapped from. Continue mapping.
+                            if matches!(self.def_kind(new_parent), DefKind::OpaqueTy) {
+                                debug_assert_eq!(self.local_parent(parent), new_parent);
+                                opaque_lifetime_param_def_id = ebv;
+                                continue;
+                            }
+
+                            let generics = self.generics_of(new_parent);
+                            return ty::Region::new_early_param(
+                                self,
+                                ty::EarlyParamRegion {
+                                    index: generics
+                                        .param_def_id_to_index(self, ebv.to_def_id())
+                                        .expect("early-bound var should be present in fn generics"),
+                                    name: self.item_name(ebv.to_def_id()),
+                                },
+                            ).into();
+                        }
+                        DefKind::TyParam => {
+                            let new_parent = self.local_parent(ebv);
+                            tracing::debug!(?ebv, ?new_parent);
+
+                            // If we map to another opaque, then it should be a parent
+                            // of the opaque we mapped from. Continue mapping.
+                            if matches!(self.def_kind(new_parent), DefKind::OpaqueTy) {
+                                debug_assert_eq!(self.local_parent(parent), new_parent);
+                                opaque_lifetime_param_def_id = ebv;
+                                continue;
+                            }
+
+                            let generics = self.generics_of(new_parent);
+                            return Ty::new_param(self, generics.param_def_id_to_index(self, ebv.to_def_id()).expect(
+                                "early-bound var should be present in fn generics",
+                            ), self.item_name(ebv.to_def_id())).into();
+                        }
+                        DefKind::ConstParam => {
+                            let new_parent = self.local_parent(ebv);
+                            tracing::debug!(?ebv, ?new_parent);
+
+                            // If we map to another opaque, then it should be a parent
+                            // of the opaque we mapped from. Continue mapping.
+                            if matches!(self.def_kind(new_parent), DefKind::OpaqueTy) {
+                                debug_assert_eq!(self.local_parent(parent), new_parent);
+                                opaque_lifetime_param_def_id = ebv;
+                                continue;
+                            }
+
+                            let generics = self.generics_of(new_parent);
+                            return ty::Const::new_param(
+                                self,
+                                ParamConst {
+                                    index: generics
+                                        .param_def_id_to_index(self, ebv.to_def_id())
+                                        .expect("early-bound var should be present in fn generics"),
+                                    name: self.item_name(ebv.to_def_id()),
+                                },
+                            ).into();
+                        }
+                        DefKind::Trait | DefKind::TraitAlias => {
+                            let new_parent = self.local_parent(ebv);
+                            tracing::debug!(?ebv, ?new_parent);
+
+                            // If we map to another opaque, then it should be a parent
+                            // of the opaque we mapped from. Continue mapping.
+                            if matches!(self.def_kind(new_parent), DefKind::OpaqueTy) {
+                                debug_assert_eq!(self.local_parent(parent), new_parent);
+                                opaque_lifetime_param_def_id = ebv;
+                                continue;
+                            }
+
+                            return Ty::new_param(self, 0, self.item_name(ebv.to_def_id())).into();
+                        }
+                        _ => bug!("early-bound var should be a lifetime, type, or const param"),
                     }
-
-                    let generics = self.generics_of(new_parent);
-                    return ty::Region::new_early_param(
-                        self,
-                        ty::EarlyParamRegion {
-                            index: generics
-                                .param_def_id_to_index(self, ebv.to_def_id())
-                                .expect("early-bound var should be present in fn generics"),
-                            name: self.item_name(ebv.to_def_id()),
-                        },
-                    );
                 }
                 resolve_bound_vars::ResolvedArg::LateBound(_, _, lbv) => {
                     let new_parent = self.local_parent(lbv);
@@ -2755,17 +2811,17 @@ impl<'tcx> TyCtxt<'tcx> {
                         self,
                         new_parent.to_def_id(),
                         ty::LateParamRegionKind::Named(lbv.to_def_id()),
-                    );
+                    ).into();
                 }
                 resolve_bound_vars::ResolvedArg::Error(guar) => {
-                    return ty::Region::new_error(self, guar);
+                    return ty::Region::new_error(self, guar).into();
                 }
                 _ => {
                     return ty::Region::new_error_with_message(
                         self,
                         self.def_span(opaque_lifetime_param_def_id),
                         "cannot resolve lifetime",
-                    );
+                    ).into();
                 }
             }
         }

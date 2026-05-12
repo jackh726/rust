@@ -542,6 +542,7 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
             // give, we will reverse the IndexMap after early captures.
             let mut late_depth = 0;
             let mut scope = self.scope;
+            tracing::debug!(?scope);
             let mut opaque_capture_scopes = vec![(opaque.def_id, &captures)];
             loop {
                 match *scope {
@@ -549,7 +550,9 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                         for (&org_def_id, &def) in bound_vars.iter().rev() {
                             let def = def.shifted(late_depth);
                             let ident = ident(org_def_id);
-                            self.remap_opaque_captures(&opaque_capture_scopes, def, ident);
+                            let kind = tcx.def_kind(org_def_id);
+                            tracing::debug!(?def, ?ident, ?kind);
+                            self.remap_opaque_captures(&opaque_capture_scopes, def, ident, kind);
                         }
                         match scope_type {
                             BinderScopeType::Normal => late_depth += 1,
@@ -561,10 +564,16 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                     Scope::Root { mut opt_parent_item } => {
                         while let Some(parent_item) = opt_parent_item {
                             let parent_generics = self.tcx.generics_of(parent_item);
+                            tracing::debug!(?parent_item, ?parent_generics);
                             for param in parent_generics.own_params.iter().rev() {
                                 let def = ResolvedArg::EarlyBound(param.def_id.expect_local());
                                 let ident = ident(param.def_id.expect_local());
-                                self.remap_opaque_captures(&opaque_capture_scopes, def, ident);
+                                let kind = match param.kind {
+                                    ty::GenericParamDefKind::Type { .. } => DefKind::TyParam,
+                                    ty::GenericParamDefKind::Const { .. } => DefKind::ConstParam,
+                                    ty::GenericParamDefKind::Lifetime => DefKind::LifetimeParam,
+                                };
+                                self.remap_opaque_captures(&opaque_capture_scopes, def, ident, kind);
                             }
                             opt_parent_item = parent_generics.parent.and_then(DefId::as_local);
                         }
@@ -675,7 +684,7 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
             hir::PreciseCapturingArg::Param(param) => match param.res {
                 Res::Def(DefKind::TyParam | DefKind::ConstParam, def_id)
                 | Res::SelfTyParam { trait_: def_id } => {
-                    self.resolve_type_ref(def_id.expect_local(), param.hir_id);
+                    self.resolve_type_ref(def_id.expect_local(), param.hir_id, param.ident);
                 }
                 Res::SelfTyAlias { alias_to, .. } => {
                     self.tcx.dcx().emit_err(errors::PreciseCaptureSelfAlias {
@@ -906,7 +915,7 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
             }
         }
         if let Res::Def(DefKind::TyParam | DefKind::ConstParam, param_def_id) = path.res {
-            self.resolve_type_ref(param_def_id.expect_local(), hir_id);
+            self.resolve_type_ref(param_def_id.expect_local(), hir_id, path.segments.last().unwrap().ident);
         }
     }
 
@@ -1020,7 +1029,7 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
     fn visit_generic_param(&mut self, p: &'tcx GenericParam<'tcx>) {
         match p.kind {
             GenericParamKind::Type { .. } | GenericParamKind::Const { .. } => {
-                self.resolve_type_ref(p.def_id, p.hir_id);
+                self.resolve_type_ref(p.def_id, p.hir_id, p.name.ident());
             }
             GenericParamKind::Lifetime { .. } => {
                 // No need to resolve lifetime params, we don't use them for things
@@ -1327,7 +1336,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
         };
 
         if let Some(mut def) = result {
-            def = self.remap_opaque_captures(&opaque_capture_scopes, def, lifetime_ref.ident);
+            def = self.remap_opaque_captures(&opaque_capture_scopes, def, lifetime_ref.ident, DefKind::LifetimeParam);
 
             if let ResolvedArg::EarlyBound(..) = def {
                 // Do not free early-bound regions, only late-bound ones.
@@ -1500,6 +1509,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
         opaque_capture_scopes: &Vec<(LocalDefId, &RefCell<FxIndexMap<ResolvedArg, LocalDefId>>)>,
         mut lifetime: ResolvedArg,
         ident: Ident,
+        kind: DefKind,
     ) -> ResolvedArg {
         if let Some(&(opaque_def_id, _)) = opaque_capture_scopes.last() {
             if let Err(guar) =
@@ -1519,7 +1529,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
                 let feed = self.tcx.create_def(
                     opaque_def_id,
                     None,
-                    DefKind::LifetimeParam,
+                    kind,
                     Some(DefPathData::OpaqueLifetime(ident.name)),
                     self.disambiguators.get_or_create(opaque_def_id),
                 );
@@ -1532,7 +1542,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
         lifetime
     }
 
-    fn resolve_type_ref(&mut self, param_def_id: LocalDefId, hir_id: HirId) {
+    fn resolve_type_ref(&mut self, param_def_id: LocalDefId, hir_id: HirId, ident: Ident) {
         // Walk up the scope chain, tracking the number of fn scopes
         // that we pass through, until we find a lifetime with the
         // given name or we run out of scopes.
@@ -1540,7 +1550,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
         let mut late_depth = 0;
         let mut scope = self.scope;
         let mut crossed_late_boundary = None;
-
+        let mut opaque_capture_scopes = vec![];
         let result = loop {
             match *scope {
                 Scope::Body { s, .. } => {
@@ -1570,8 +1580,13 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
                     scope = s;
                 }
 
+                Scope::Opaque { captures, def_id, s } => {
+                    opaque_capture_scopes.push((def_id, captures));
+                    late_depth = 0;
+                    scope = s;
+                }
+
                 Scope::ObjectLifetimeDefault { s, .. }
-                | Scope::Opaque { s, .. }
                 | Scope::Supertrait { s, .. }
                 | Scope::TraitRefBoundary { s, .. } => {
                     scope = s;
@@ -1584,7 +1599,9 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
             }
         };
 
-        if let Some(def) = result {
+        if let Some(mut def) = result {
+            def = self.remap_opaque_captures(&opaque_capture_scopes, def, ident, DefKind::TyParam);
+
             if let ResolvedArg::LateBound(..) = def
                 && let Some(what) = crossed_late_boundary
             {
@@ -2056,7 +2073,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
             }
         };
 
-        lifetime = self.remap_opaque_captures(&opaque_capture_scopes, lifetime, lifetime_ref.ident);
+        lifetime = self.remap_opaque_captures(&opaque_capture_scopes, lifetime, lifetime_ref.ident, DefKind::LifetimeParam);
 
         self.insert_lifetime(lifetime_ref, lifetime);
     }

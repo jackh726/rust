@@ -324,7 +324,7 @@ fn check_opaque_meets_bounds<'tcx>(
             tcx, parent,
         )
         .extend_to(tcx, def_id.to_def_id(), |param, _| {
-            tcx.map_opaque_lifetime_to_parent_lifetime(param.def_id.expect_local()).into()
+            tcx.map_opaque_lifetime_to_parent_arg(param.def_id.expect_local())
         }),
         hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: None }
         | hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
@@ -338,20 +338,8 @@ fn check_opaque_meets_bounds<'tcx>(
                 }
             }
             args.extend(lifetimes.iter().map(|&(_, captured)| -> ty::GenericArg<'_> {
-                tcx.map_opaque_lifetime_to_parent_lifetime(captured).into()
+                tcx.map_opaque_lifetime_to_parent_arg(captured)
             }));
-
-            for param in &fn_generics.own_params {                
-                match &param.kind {
-                    ty::GenericParamDefKind::Type { .. } => {
-                        args.push(tcx.mk_param_from_def(param));
-                    }
-                    ty::GenericParamDefKind::Const { .. } => {
-                        args.push(tcx.mk_param_from_def(param));
-                    }
-                    ty::GenericParamDefKind::Lifetime => continue,
-                }
-            }
     
             let args = tcx.mk_args(&args);
             args
@@ -653,7 +641,7 @@ fn check_opaque_precise_captures<'tcx>(tcx: TyCtxt<'tcx>, opaque_def_id: LocalDe
                 // feature -- see <https://github.com/rust-lang/rust/pull/115659>.
                 if let DefKind::LifetimeParam = tcx.def_kind(def_id)
                     && let Some(def_id) = tcx
-                        .map_opaque_lifetime_to_parent_lifetime(def_id)
+                        .map_opaque_lifetime_to_parent_arg(def_id)
                         .opt_param_def_id(tcx, tcx.parent(opaque_def_id.to_def_id()))
                 {
                     shadowed_captures.insert(def_id);
@@ -696,7 +684,8 @@ fn check_opaque_precise_captures<'tcx>(tcx: TyCtxt<'tcx>, opaque_def_id: LocalDe
                     if variances[param.index as usize] == ty::Invariant {
                         if let DefKind::OpaqueTy = tcx.def_kind(tcx.parent(param.def_id))
                             && let Some(def_id) = tcx
-                                .map_opaque_lifetime_to_parent_lifetime(param.def_id.expect_local())
+                                .map_opaque_lifetime_to_parent_arg(param.def_id.expect_local())
+                                .expect_region()
                                 .opt_param_def_id(tcx, tcx.parent(opaque_def_id.to_def_id()))
                         {
                             tcx.dcx().emit_err(errors::LifetimeNotCaptured {

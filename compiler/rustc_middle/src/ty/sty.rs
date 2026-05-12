@@ -2141,6 +2141,18 @@ impl<'tcx> Ty<'tcx> {
     pub fn walk(self) -> TypeWalker<TyCtxt<'tcx>> {
         TypeWalker::new(self.into())
     }
+
+    /// Given some item `binding_item`, check if this ty is a generic parameter introduced by it
+    /// or one of the parent generics. Returns the `DefId` of the parameter definition if so.
+    pub fn opt_param_def_id(self, tcx: TyCtxt<'tcx>, binding_item: DefId) -> Option<DefId> {
+        match self.kind() {
+            &ty::Param(param) => {
+                Some(tcx.generics_of(binding_item).type_param(param, tcx).def_id)
+            }
+            &ty::Bound(_, ty::BoundTy { kind: ty::BoundTyKind::Param(def_id), .. }) => Some(def_id),
+            _ => None,
+        }
+    }
 }
 
 impl<'tcx> rustc_type_ir::inherent::Tys<TyCtxt<'tcx>> for &'tcx ty::List<Ty<'tcx>> {

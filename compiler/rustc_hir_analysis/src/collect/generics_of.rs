@@ -7,7 +7,7 @@ use rustc_hir::def_id::LocalDefId;
 use rustc_hir::definitions::PerParentDisambiguatorState;
 use rustc_hir::intravisit::{self, Visitor, VisitorExt};
 use rustc_hir::{self as hir, AmbigArg, GenericParamKind, HirId, Node};
-use rustc_middle::span_bug;
+use rustc_middle::{bug, span_bug};
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_session::lint;
 use rustc_span::{Span, Symbol, kw};
@@ -95,14 +95,25 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             prev
         };
 
-        own_params.extend(lifetimes.iter().map(|&(_, param)| ty::GenericParamDef {
-            name: tcx.item_name(param.to_def_id()),
-            index: next_index(),
-            def_id: param.to_def_id(),
-            pure_wrt_drop: false,
-            kind: ty::GenericParamDefKind::Lifetime,
+        own_params.extend(lifetimes.iter().map(|&(_, param)| {
+            let kind = tcx.def_kind(param);
+            tracing::debug!(?param, ?kind);
+            let kind = match kind {
+                DefKind::TyParam => ty::GenericParamDefKind::Type { has_default: false, synthetic: true },
+                DefKind::ConstParam => ty::GenericParamDefKind::Const { has_default: false },
+                DefKind::LifetimeParam => ty::GenericParamDefKind::Lifetime,
+                _ => bug!("Captured param had wrong kind: {:?}", kind),
+            };
+            ty::GenericParamDef {
+                name: tcx.item_name(param.to_def_id()),
+                index: next_index(),
+                def_id: param.to_def_id(),
+                pure_wrt_drop: false,
+                kind,
+            }
         }));
 
+        /*
         let disambiguator = &mut PerParentDisambiguatorState::new(def_id);
         for param in &fn_generics.own_params {                
             let param = match &param.kind {
@@ -150,6 +161,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             };
             own_params.push(param);
         }
+        */
 
         own_params.shrink_to_fit();
         let param_def_id_to_index =
@@ -463,13 +475,23 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         let lifetimes = tcx.opaque_captured_lifetimes(def_id);
         debug!(?lifetimes);
 
-        own_params.extend(lifetimes.iter().map(|&(_, param)| ty::GenericParamDef {
-            name: tcx.item_name(param.to_def_id()),
-            index: next_index(),
-            def_id: param.to_def_id(),
-            pure_wrt_drop: false,
-            kind: ty::GenericParamDefKind::Lifetime,
-        }))
+        own_params.extend(lifetimes.iter().map(|&(_, param)| {
+            let kind = tcx.def_kind(param);
+            tracing::debug!(?param, ?kind);
+            let kind = match kind {
+                DefKind::TyParam => ty::GenericParamDefKind::Type { has_default: false, synthetic: true },
+                DefKind::ConstParam => ty::GenericParamDefKind::Const { has_default: false },
+                DefKind::LifetimeParam => ty::GenericParamDefKind::Lifetime,
+                _ => bug!("Captured param had wrong kind: {:?}", kind),
+            };
+            ty::GenericParamDef {
+                name: tcx.item_name(param.to_def_id()),
+                index: next_index(),
+                def_id: param.to_def_id(),
+                pure_wrt_drop: false,
+                kind,
+            }
+        }));
     }
 
     let param_def_id_to_index =

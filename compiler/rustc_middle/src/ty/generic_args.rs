@@ -315,6 +315,16 @@ impl<'tcx> GenericArg<'tcx> {
     pub fn walk(self) -> TypeWalker<TyCtxt<'tcx>> {
         TypeWalker::new(self)
     }
+ 
+    /// Given some item `binding_item`, check if this GenericArg is a generic parameter introduced by it
+    /// or one of the parent generics. Returns the `DefId` of the parameter definition if so.
+    pub fn opt_param_def_id(self, tcx: TyCtxt<'tcx>, binding_item: DefId) -> Option<DefId> {
+        match self.kind() {
+            GenericArgKind::Lifetime(lt) => lt.opt_param_def_id(tcx, binding_item),
+            GenericArgKind::Type(ty) => ty.opt_param_def_id(tcx, binding_item),
+            GenericArgKind::Const(ct) => ct.opt_param_def_id(tcx, binding_item),
+        }
+    }
 }
 
 impl<'a, 'tcx> Lift<TyCtxt<'tcx>> for GenericArg<'a> {

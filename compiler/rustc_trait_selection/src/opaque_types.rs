@@ -175,7 +175,7 @@ impl<'tcx> LazyOpaqueTyEnv<'tcx> {
             tcx,
             def_id.to_def_id(),
             |param, _| {
-                tcx.map_opaque_lifetime_to_parent_lifetime(param.def_id.expect_local()).into()
+                tcx.map_opaque_lifetime_to_parent_arg(param.def_id.expect_local())
             },
         );
 

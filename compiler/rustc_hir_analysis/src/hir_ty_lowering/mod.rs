@@ -3557,9 +3557,37 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
 
                 let args = ty::GenericArgs::for_item(tcx, def_id, |param, _| {
                     if let Some(i) = (param.index as usize).checked_sub(offset) {
-                        let (lifetime, _) = lifetimes[i];
-                        // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
-                        self.lower_resolved_lifetime(lifetime).into()
+                    let (arg, param) = lifetimes[i];
+                    let kind = tcx.def_kind(param);
+                    // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
+                    match kind {
+                        DefKind::TyParam => {
+                            match arg {
+                                rbv::ResolvedArg::EarlyBound(def_id) => {
+                                    let name = tcx.hir_ty_param_name(def_id);
+                                    let item_def_id = tcx.hir_ty_param_owner(def_id);
+                                    let generics = tcx.generics_of(item_def_id);
+                                    let index = generics.param_def_id_to_index[&def_id.to_def_id()];
+                                    Ty::new_param(tcx, index, name)
+                                }
+                                rbv::ResolvedArg::LateBound(debruijn, index, def_id) => {
+                                    let bt = ty::BoundTy {
+                                        var: ty::BoundVar::from_u32(index),
+                                        kind: ty::BoundTyKind::Param(def_id.to_def_id()),
+                                    };
+                                    Ty::new_bound(tcx, debruijn, bt)
+                                }
+                                rbv::ResolvedArg::Error(guar) => Ty::new_error(tcx, guar),
+                                rbv::ResolvedArg::Free(..) => bug!("Late-bound type not expected."),
+                                rbv::ResolvedArg::StaticLifetime => bug!("Expected type param, found static lifetime."),
+                            }.into()
+                        }
+                        DefKind::ConstParam => todo!(),
+                        DefKind::LifetimeParam => {
+                            self.lower_resolved_lifetime(arg).into()
+                        }
+                        _ => bug!("Unexpected DefKind for captured arg."),
+                    }
                     } else {
                         tcx.mk_param_from_def(param)
                     }
@@ -3576,21 +3604,38 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                         args.push(arg);
                     }
                 }
-                args.extend(lifetimes.iter().map(|&(lifetime, _)| -> ty::GenericArg<'_> {
+                args.extend(lifetimes.iter().map(|&(arg, param)| -> ty::GenericArg<'_> {
+                    let kind = tcx.def_kind(param);
                     // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
-                    self.lower_resolved_lifetime(lifetime).into()
-                }));
-                for param in &fn_generics.own_params {                
-                    match &param.kind {
-                        ty::GenericParamDefKind::Type { .. } => {
-                            args.push(tcx.mk_param_from_def(param));
+                    match kind {
+                        DefKind::TyParam => {
+                            match arg {
+                                rbv::ResolvedArg::EarlyBound(def_id) => {
+                                    let name = tcx.hir_ty_param_name(def_id);
+                                    let item_def_id = tcx.hir_ty_param_owner(def_id);
+                                    let generics = tcx.generics_of(item_def_id);
+                                    let index = generics.param_def_id_to_index[&def_id.to_def_id()];
+                                    Ty::new_param(tcx, index, name)
+                                }
+                                rbv::ResolvedArg::LateBound(debruijn, index, def_id) => {
+                                    let bt = ty::BoundTy {
+                                        var: ty::BoundVar::from_u32(index),
+                                        kind: ty::BoundTyKind::Param(def_id.to_def_id()),
+                                    };
+                                    Ty::new_bound(tcx, debruijn, bt)
+                                }
+                                rbv::ResolvedArg::Error(guar) => Ty::new_error(tcx, guar),
+                                rbv::ResolvedArg::Free(..) => bug!("Late-bound type not expected."),
+                                rbv::ResolvedArg::StaticLifetime => bug!("Expected type param, found static lifetime."),
+                            }.into()
                         }
-                        ty::GenericParamDefKind::Const { .. } => {
-                            args.push(tcx.mk_param_from_def(param));
+                        DefKind::ConstParam => todo!(),
+                        DefKind::LifetimeParam => {
+                            self.lower_resolved_lifetime(arg).into()
                         }
-                        ty::GenericParamDefKind::Lifetime => continue,
+                        _ => bug!("Unexpected DefKind for captured arg."),
                     }
-                }
+                }));
         
                 let args = tcx.mk_args(&args);
                 args

@@ -91,7 +91,7 @@ pub(crate) fn opaque_live_args<'tcx>(
                 .iter()
                 .find(|(_, opaque_r)| opaque_r.to_def_id() == region_def_id)
                 .unwrap();
-            let parent_region = tcx.map_opaque_lifetime_to_parent_lifetime(*opaque_region_def_id);
+            let parent_region = tcx.map_opaque_lifetime_to_parent_arg(*opaque_region_def_id).expect_region();
             tracing::debug!(?region_def_id, ?region_param, ?parent_region);
             parent_region
         })
@@ -101,7 +101,9 @@ pub(crate) fn opaque_live_args<'tcx>(
     let mut parent_captured_regions: Vec<(ty::Region<'tcx>, LocalDefId)> =
         Vec::with_capacity(opaque_captured_lifetimes.len());
     for (_, opaque_lt) in opaque_captured_lifetimes.iter() {
-        let parent_region = tcx.map_opaque_lifetime_to_parent_lifetime(*opaque_lt);
+        let Some(parent_region) = tcx.map_opaque_lifetime_to_parent_arg(*opaque_lt).as_region() else {
+            continue;
+        };
         parent_captured_regions.push((parent_region, *opaque_lt));
     }
     tracing::debug!(?parent_captured_regions);

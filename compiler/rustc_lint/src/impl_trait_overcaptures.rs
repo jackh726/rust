@@ -396,7 +396,7 @@ where
                             {
                                 let def_id = self
                                     .tcx
-                                    .map_opaque_lifetime_to_parent_lifetime(def_id)
+                                    .map_opaque_lifetime_to_parent_arg(def_id)
                                     .opt_param_def_id(self.tcx, self.parent_def_id.to_def_id())
                                     .expect("variable should have been duplicated from parent");
 

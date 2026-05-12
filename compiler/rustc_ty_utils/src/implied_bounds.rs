@@ -76,8 +76,10 @@ fn assumed_wf_types<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> &'tcx [(Ty<'
                     // the end of the list corresponding to the opaque's generics.
                     for param in &generics.own_params[tcx.generics_of(fn_def_id).own_params.len()..]
                     {
-                        let orig_lt =
-                            tcx.map_opaque_lifetime_to_parent_lifetime(param.def_id.expect_local());
+                        let Some(orig_lt) =
+                            tcx.map_opaque_lifetime_to_parent_arg(param.def_id.expect_local()).as_region() else {
+                                continue;
+                            };
                         if matches!(orig_lt.kind(), ty::ReLateParam(..)) {
                             mapping.insert(
                                 orig_lt,
