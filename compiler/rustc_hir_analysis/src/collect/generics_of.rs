@@ -321,7 +321,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
 
         Node::Synthetic => span_bug!(
             tcx.def_span(def_id),
-            "synthetic HIR should have its `generics_of` explicitly fed"
+            "synthetic HIR should have its `generics_of` explicitly fed (for {def_id:?})"
         ),
 
         _ => span_bug!(tcx.def_span(def_id), "generics_of: unexpected node kind {node:?}"),

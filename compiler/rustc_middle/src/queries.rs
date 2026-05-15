@@ -2124,6 +2124,7 @@ rustc_queries! {
     query object_lifetime_default(def_id: DefId) -> ObjectLifetimeDefault {
         desc { "looking up lifetime defaults for type parameter `{}`", tcx.def_path_str(def_id) }
         separate_provide_extern
+        feedable
     }
     query late_bound_vars_map(owner_id: hir::OwnerId)
         -> &'tcx SortedMap<ItemLocalId, Vec<ty::BoundVariableKind<'tcx>>> {

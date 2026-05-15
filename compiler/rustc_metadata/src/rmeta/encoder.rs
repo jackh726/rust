@@ -1247,7 +1247,8 @@ fn should_encode_type(tcx: TyCtxt<'_>, def_id: LocalDefId, def_kind: DefKind) ->
             }
         }
         DefKind::TyParam => {
-            let hir::Node::GenericParam(param) = tcx.hir_node_by_def_id(def_id) else { bug!() };
+            // For opaques, we generate synthetic params, these are not encoded
+            let hir::Node::GenericParam(param) = tcx.hir_node_by_def_id(def_id) else { return false; };
             let hir::GenericParamKind::Type { default, .. } = param.kind else { bug!() };
             default.is_some()
         }

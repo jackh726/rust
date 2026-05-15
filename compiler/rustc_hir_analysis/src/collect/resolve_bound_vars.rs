@@ -1535,6 +1535,22 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
                 );
                 feed.def_span(ident.span);
                 feed.def_ident_span(Some(ident.span));
+                match lifetime {
+                    ResolvedArg::EarlyBound(param) => {
+                        // FIXME: these need to be mapped
+                        feed.generics_of(self.tcx.generics_of(param).clone());
+                        // FIXME: We almost certainly want to preserve the original object lifetime default here,
+                        // but that is going to require us to delay the calculation until after we have mapped *all* the
+                        // parent params. That's a bigger refactor, so not doing that yet.
+                        feed.object_lifetime_default(ObjectLifetimeDefault::Static);
+                    }
+                    ResolvedArg::LateBound(_, _, param) => {
+                        // FIXME: these need to be mapped
+                        feed.generics_of(self.tcx.generics_of(param).clone());
+                    }
+                    _ => {}
+                }
+                feed.feed_hir();
                 feed.def_id()
             });
             lifetime = ResolvedArg::EarlyBound(remapped);
