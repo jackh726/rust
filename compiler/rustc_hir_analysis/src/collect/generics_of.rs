@@ -78,16 +78,16 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
     }) = node {
         assert_matches!(tcx.def_kind(fn_def_id), DefKind::AssocFn | DefKind::Fn);
 
+        // The opaque's parent is the fn itself (matching master). Its `own_params`
+        // are the captures, indexed after the fn's full generic count. The args
+        // built in `lower_opaque_ty` must mirror this: parent identity for indices
+        // `< parent_count`, captured arg values for indices `>= parent_count`.
         let fn_generics = tcx.generics_of(fn_def_id);
-        let mut own_params = Vec::with_capacity(fn_generics.parent_count + fn_generics.own_params.len());
+        let parent_count = fn_generics.count();
 
         let lifetimes = tcx.opaque_captured_lifetimes(def_id);
         debug!(?lifetimes);
 
-        let parent_count = fn_generics.parent.map_or(0, |parent| {
-            let parent = tcx.generics_of(parent);
-            parent.own_params.len() + parent.parent_count
-        });
         let mut i: u32 = parent_count as u32;
         let mut next_index = || {
             let prev = i;
@@ -95,6 +95,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             prev
         };
 
+        let mut own_params = Vec::with_capacity(lifetimes.len());
         own_params.extend(lifetimes.iter().map(|&(_, param)| {
             let kind = tcx.def_kind(param);
             tracing::debug!(?param, ?kind);
@@ -113,62 +114,12 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             }
         }));
 
-        /*
-        let disambiguator = &mut PerParentDisambiguatorState::new(def_id);
-        for param in &fn_generics.own_params {                
-            let param = match &param.kind {
-                t @ ty::GenericParamDefKind::Type { .. } => {
-                    let new_def_feed = tcx.create_def(
-                        def_id,
-                        Some(param.name),
-                        DefKind::TyParam,
-                        Some(definitions::DefPathData::TypeNs(param.name)),
-                        disambiguator,
-                    );
-                    let span = tcx.def_span(param.def_id);
-                    new_def_feed.def_span(span);
-                    new_def_feed.def_ident_span(Some(span));
-                    let new_def_id = new_def_feed.def_id();
-                    ty::GenericParamDef {
-                        name: param.name,
-                        index: next_index(),
-                        def_id: new_def_id.to_def_id(),
-                        pure_wrt_drop: false,
-                        kind: t.clone(),
-                    }
-                }
-                c @ ty::GenericParamDefKind::Const { .. } => {
-                    let new_def_feed = tcx.create_def(
-                        def_id,
-                        Some(param.name),
-                        DefKind::ConstParam,
-                        Some(definitions::DefPathData::ValueNs(param.name)),
-                        disambiguator,
-                    );
-                    let span = tcx.def_span(param.def_id);
-                    new_def_feed.def_span(span);
-                    new_def_feed.def_ident_span(Some(span));
-                    let new_def_id = new_def_feed.def_id();
-                    ty::GenericParamDef {
-                        name: param.name,
-                        index: next_index(),
-                        def_id: new_def_id.to_def_id(),
-                        pure_wrt_drop: false,
-                        kind: c.clone(),
-                    }
-                }
-                ty::GenericParamDefKind::Lifetime => continue,
-            };
-            own_params.push(param);
-        }
-        */
-
         own_params.shrink_to_fit();
         let param_def_id_to_index =
             own_params.iter().map(|param| (param.def_id, param.index)).collect();
 
         return ty::Generics {
-            parent: fn_generics.parent,
+            parent: Some(fn_def_id.to_def_id()),
             parent_count,
             own_params,
             param_def_id_to_index,

@@ -330,17 +330,16 @@ fn check_opaque_meets_bounds<'tcx>(
         | hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
             let lifetimes = tcx.opaque_captured_lifetimes(def_id);
             debug!(?lifetimes);
-            let mut args = vec![];
-            let fn_generics = tcx.generics_of(parent);
-            if let Some(fn_parent) = fn_generics.parent {
-                for arg in ty::GenericArgs::identity_for_item(tcx, fn_parent) {
-                    args.push(arg);
-                }
+            // The opaque's parent in `generics_of` is the fn itself, so the
+            // args layout is `[fn's full identity, captures...]`.
+            let mut args: Vec<ty::GenericArg<'_>> = vec![];
+            for arg in ty::GenericArgs::identity_for_item(tcx, parent) {
+                args.push(arg);
             }
             args.extend(lifetimes.iter().map(|&(_, captured)| -> ty::GenericArg<'_> {
                 tcx.map_opaque_lifetime_to_parent_arg(captured)
             }));
-    
+
             let args = tcx.mk_args(&args);
             args
         }

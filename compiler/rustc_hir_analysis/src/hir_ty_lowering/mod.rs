@@ -3597,12 +3597,11 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
             }
             hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: None }
             | hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
-                let mut args = vec![];
-                let fn_generics = tcx.generics_of(parent);
-                if let Some(fn_parent) = fn_generics.parent {
-                    for arg in ty::GenericArgs::identity_for_item(tcx, fn_parent) {
-                        args.push(arg);
-                    }
+                // The opaque's parent in `generics_of` is the fn itself, so the
+                // args layout is `[fn's full identity (parent_count of opaque) , captures...]`.
+                let mut args: Vec<ty::GenericArg<'_>> = vec![];
+                for arg in ty::GenericArgs::identity_for_item(tcx, parent) {
+                    args.push(arg);
                 }
                 args.extend(lifetimes.iter().map(|&(arg, param)| -> ty::GenericArg<'_> {
                     let kind = tcx.def_kind(param);

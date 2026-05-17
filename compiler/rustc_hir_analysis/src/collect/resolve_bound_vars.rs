@@ -317,17 +317,35 @@ fn generic_param_def_as_bound_arg<'tcx>(
     }
 }
 
+enum DefaultOpaqueCaptures {
+    All,
+    NonLifetimes,
+    None,
+}
+
 /// Whether this opaque always captures lifetimes in scope.
 /// Right now, this is all RPITIT and TAITs, and when the opaque
 /// is coming from a span corresponding to edition 2024.
-fn opaque_captures_all_in_scope_lifetimes<'tcx>(opaque: &'tcx hir::OpaqueTy<'tcx>) -> bool {
+fn opaque_captures_all_in_scope_lifetimes<'tcx>(
+    opaque: &'tcx hir::OpaqueTy<'tcx>,
+) -> DefaultOpaqueCaptures {
     match opaque.origin {
         // if the opaque has the `use<...>` syntax, the user is telling us that they only want
         // to account for those lifetimes, so do not try to be clever.
-        _ if opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..))) => false,
-        hir::OpaqueTyOrigin::AsyncFn { .. } | hir::OpaqueTyOrigin::TyAlias { .. } => true,
-        _ if opaque.span.at_least_rust_2024() => true,
-        hir::OpaqueTyOrigin::FnReturn { in_trait_or_impl, .. } => in_trait_or_impl.is_some(),
+        _ if opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..))) => {
+            DefaultOpaqueCaptures::None
+        }
+        hir::OpaqueTyOrigin::AsyncFn { .. } | hir::OpaqueTyOrigin::TyAlias { .. } => {
+            DefaultOpaqueCaptures::All
+        }
+        _ if opaque.span.at_least_rust_2024() => DefaultOpaqueCaptures::All,
+        hir::OpaqueTyOrigin::FnReturn { in_trait_or_impl, .. } => {
+            if in_trait_or_impl.is_some() {
+                DefaultOpaqueCaptures::All
+            } else {
+                DefaultOpaqueCaptures::NonLifetimes
+            }
+        }
     }
 }
 
@@ -529,7 +547,9 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
         let captures = RefCell::new(FxIndexMap::default());
 
         let capture_all_in_scope_lifetimes = opaque_captures_all_in_scope_lifetimes(opaque);
-        if capture_all_in_scope_lifetimes {
+        if !matches!(capture_all_in_scope_lifetimes, DefaultOpaqueCaptures::None) {
+            let captures_lifetimes =
+                matches!(capture_all_in_scope_lifetimes, DefaultOpaqueCaptures::All);
             let tcx = self.tcx;
             let ident = |def_id: LocalDefId| {
                 let name = tcx.item_name(def_id.to_def_id());
@@ -551,6 +571,10 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                             let def = def.shifted(late_depth);
                             let ident = ident(org_def_id);
                             let kind = tcx.def_kind(org_def_id);
+                            match kind {
+                                DefKind::LifetimeParam if !captures_lifetimes => continue,
+                                _ => {}
+                            }
                             tracing::debug!(?def, ?ident, ?kind);
                             self.remap_opaque_captures(&opaque_capture_scopes, def, ident, kind);
                         }
@@ -571,7 +595,10 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                                 let kind = match param.kind {
                                     ty::GenericParamDefKind::Type { .. } => DefKind::TyParam,
                                     ty::GenericParamDefKind::Const { .. } => DefKind::ConstParam,
-                                    ty::GenericParamDefKind::Lifetime => DefKind::LifetimeParam,
+                                    ty::GenericParamDefKind::Lifetime if captures_lifetimes => {
+                                        DefKind::LifetimeParam
+                                    }
+                                    ty::GenericParamDefKind::Lifetime => continue,
                                 };
                                 self.remap_opaque_captures(&opaque_capture_scopes, def, ident, kind);
                             }
@@ -618,7 +645,20 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
 
         self.emit_opaque_capture_errors();
 
-        let captures = captures.into_inner().into_iter().collect();
+        // Sort captures into canonical generic-arg order: lifetimes first, then
+        // type params, then const params. Stable sort preserves declaration
+        // order within each kind. Downstream consumers (`generics_of(opaque)`
+        // and `lower_opaque_ty`) walk this list to build `own_params` and to
+        // build the args vector — they must agree, so we canonicalize once
+        // here at the storage site.
+        let mut captures: Vec<(ResolvedArg, LocalDefId)> =
+            captures.into_inner().into_iter().collect();
+        captures.sort_by_key(|&(_, def_id)| match self.tcx.def_kind(def_id) {
+            DefKind::LifetimeParam => 0u8,
+            DefKind::TyParam => 1,
+            DefKind::ConstParam => 2,
+            other => bug!("unexpected capture DefKind: {other:?}"),
+        });
         debug!(?captures);
         self.rbv.opaque_captured_lifetimes.insert(opaque.def_id, captures);
     }
@@ -2563,7 +2603,10 @@ fn is_late_bound_map(
 
         fn visit_opaque_ty(&mut self, opaque: &'tcx hir::OpaqueTy<'tcx>) {
             if !self.has_fully_capturing_opaque {
-                self.has_fully_capturing_opaque = opaque_captures_all_in_scope_lifetimes(opaque);
+                self.has_fully_capturing_opaque = matches!(
+                    opaque_captures_all_in_scope_lifetimes(opaque),
+                    DefaultOpaqueCaptures::All
+                );
             }
             intravisit::walk_opaque_ty(self, opaque);
         }
