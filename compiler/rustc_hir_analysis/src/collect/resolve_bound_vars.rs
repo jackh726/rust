@@ -18,8 +18,10 @@ use rustc_hir::def_id::LocalDefIdMap;
 use rustc_hir::definitions::{DefPathData, PerParentDisambiguatorsMap};
 use rustc_hir::intravisit::{self, InferKind, Visitor, VisitorExt};
 use rustc_hir::{
-    self as hir, AmbigArg, GenericArg, GenericParam, GenericParamKind, HirId, LifetimeKind, Node,
+    self as hir, AmbigArg, GenericArg, GenericParam, GenericParamKind, HirId, ItemLocalId,
+    LifetimeKind, Node, OwnerId,
 };
+use rustc_index::IndexVec;
 use rustc_macros::extension;
 use rustc_middle::hir::nested_filter;
 use rustc_middle::middle::resolve_bound_vars::*;
@@ -147,8 +149,12 @@ enum Scope<'a, 'tcx> {
     Opaque {
         /// The opaque type we are traversing.
         def_id: LocalDefId,
-        /// Mapping from each captured lifetime `'a` to the duplicate generic parameter `'b`.
-        captures: &'a RefCell<FxIndexMap<ResolvedArg, LocalDefId>>,
+        /// Mapping from each captured arg (the original `'a`/`T`/`N`) to a `Feed`
+        /// for the synthetic duplicate generic param. We store a `Feed` rather
+        /// than a `LocalDefId` so that `finalize_opaque_hir` can re-acquire a
+        /// `TyCtxtFeed` to feed additional queries (e.g. `generics_of`,
+        /// `object_lifetime_default`) once all captures are known.
+        captures: &'a RefCell<FxIndexMap<ResolvedArg, ty::Feed<'tcx, LocalDefId>>>,
 
         s: ScopeRef<'a, 'tcx>,
     },
@@ -317,17 +323,27 @@ fn generic_param_def_as_bound_arg<'tcx>(
     }
 }
 
+enum DefaultOpaqueCaptures {
+    All,
+    NonLifetimes,
+    None,
+}
+
 /// Whether this opaque always captures lifetimes in scope.
 /// Right now, this is all RPITIT and TAITs, and when the opaque
 /// is coming from a span corresponding to edition 2024.
-fn opaque_captures_all_in_scope_lifetimes<'tcx>(opaque: &'tcx hir::OpaqueTy<'tcx>) -> bool {
+fn opaque_captures_all_in_scope_lifetimes<'tcx>(opaque: &'tcx hir::OpaqueTy<'tcx>) -> DefaultOpaqueCaptures {
     match opaque.origin {
         // if the opaque has the `use<...>` syntax, the user is telling us that they only want
         // to account for those lifetimes, so do not try to be clever.
-        _ if opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..))) => false,
-        hir::OpaqueTyOrigin::AsyncFn { .. } | hir::OpaqueTyOrigin::TyAlias { .. } => true,
-        _ if opaque.span.at_least_rust_2024() => true,
-        hir::OpaqueTyOrigin::FnReturn { in_trait_or_impl, .. } => in_trait_or_impl.is_some(),
+        _ if opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..))) => DefaultOpaqueCaptures::None,
+        hir::OpaqueTyOrigin::AsyncFn { .. } | hir::OpaqueTyOrigin::TyAlias { .. } => DefaultOpaqueCaptures::All,
+        _ if opaque.span.at_least_rust_2024() => DefaultOpaqueCaptures::All,
+        hir::OpaqueTyOrigin::FnReturn { in_trait_or_impl, .. } => if in_trait_or_impl.is_some() {
+            DefaultOpaqueCaptures::All
+        } else {
+            DefaultOpaqueCaptures::NonLifetimes
+        },
     }
 }
 
@@ -529,7 +545,8 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
         let captures = RefCell::new(FxIndexMap::default());
 
         let capture_all_in_scope_lifetimes = opaque_captures_all_in_scope_lifetimes(opaque);
-        if capture_all_in_scope_lifetimes {
+        if !matches!(capture_all_in_scope_lifetimes, DefaultOpaqueCaptures::None) {
+            let captures_lifetimes = matches!(capture_all_in_scope_lifetimes, DefaultOpaqueCaptures::All);
             let tcx = self.tcx;
             let ident = |def_id: LocalDefId| {
                 let name = tcx.item_name(def_id.to_def_id());
@@ -551,6 +568,10 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                             let def = def.shifted(late_depth);
                             let ident = ident(org_def_id);
                             let kind = tcx.def_kind(org_def_id);
+                            match kind {
+                                DefKind::LifetimeParam if !captures_lifetimes => continue,
+                                _ => {}
+                            }
                             tracing::debug!(?def, ?ident, ?kind);
                             self.remap_opaque_captures(&opaque_capture_scopes, def, ident, kind);
                         }
@@ -571,7 +592,8 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
                                 let kind = match param.kind {
                                     ty::GenericParamDefKind::Type { .. } => DefKind::TyParam,
                                     ty::GenericParamDefKind::Const { .. } => DefKind::ConstParam,
-                                    ty::GenericParamDefKind::Lifetime => DefKind::LifetimeParam,
+                                    ty::GenericParamDefKind::Lifetime if captures_lifetimes => DefKind::LifetimeParam,
+                                    ty::GenericParamDefKind::Lifetime => continue,
                                 };
                                 self.remap_opaque_captures(&opaque_capture_scopes, def, ident, kind);
                             }
@@ -618,9 +640,18 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
 
         self.emit_opaque_capture_errors();
 
-        let captures = captures.into_inner().into_iter().collect();
+        let captures = captures.into_inner();
         debug!(?captures);
-        self.rbv.opaque_captured_lifetimes.insert(opaque.def_id, captures);
+
+        // Build the synthetic HIR owner that hosts the captured params as real
+        // `Node::GenericParam` children. This also feeds `generics_of` /
+        // `object_lifetime_default` for each capture.
+        self.finalize_opaque_hir(opaque, &captures);
+
+        self.rbv.opaque_captured_lifetimes.insert(
+            opaque.def_id,
+            captures.into_iter().map(|(arg, feed)| (arg, feed.key())).collect(),
+        );
     }
 
     #[instrument(level = "debug", skip(self))]
@@ -1506,7 +1537,10 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
     #[instrument(level = "trace", skip(self, opaque_capture_scopes), ret)]
     fn remap_opaque_captures(
         &mut self,
-        opaque_capture_scopes: &Vec<(LocalDefId, &RefCell<FxIndexMap<ResolvedArg, LocalDefId>>)>,
+        opaque_capture_scopes: &Vec<(
+            LocalDefId,
+            &RefCell<FxIndexMap<ResolvedArg, ty::Feed<'tcx, LocalDefId>>>,
+        )>,
         mut lifetime: ResolvedArg,
         ident: Ident,
         kind: DefKind,
@@ -1521,7 +1555,7 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
 
         for &(opaque_def_id, captures) in opaque_capture_scopes.iter().rev() {
             let mut captures = captures.borrow_mut();
-            let remapped = *captures.entry(lifetime).or_insert_with(|| {
+            let remapped = captures.entry(lifetime).or_insert_with(|| {
                 // `opaque_def_id` is unique to the `BoundVarContext` pass which is executed once
                 // per `resolve_bound_vars` query. This is the only location that creates
                 // `OpaqueLifetime` paths. `<opaque_def_id>::OpaqueLifetime(..)` is thus unique
@@ -1535,27 +1569,233 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
                 );
                 feed.def_span(ident.span);
                 feed.def_ident_span(Some(ident.span));
-                match lifetime {
-                    ResolvedArg::EarlyBound(param) => {
-                        // FIXME: these need to be mapped
-                        feed.generics_of(self.tcx.generics_of(param).clone());
-                        // FIXME: We almost certainly want to preserve the original object lifetime default here,
-                        // but that is going to require us to delay the calculation until after we have mapped *all* the
-                        // parent params. That's a bigger refactor, so not doing that yet.
-                        feed.object_lifetime_default(ObjectLifetimeDefault::Static);
-                    }
-                    ResolvedArg::LateBound(_, _, param) => {
-                        // FIXME: these need to be mapped
-                        feed.generics_of(self.tcx.generics_of(param).clone());
-                    }
-                    _ => {}
-                }
-                feed.feed_hir();
-                feed.def_id()
-            });
+                feed.downgrade()
+            }).upgrade(self.tcx).def_id();
             lifetime = ResolvedArg::EarlyBound(remapped);
         }
         lifetime
+    }
+
+    /// Builds a synthetic HIR owner for `opaque` that hosts the captured generic
+    /// params as real `Node::GenericParam` children. After this:
+    ///
+    ///   - `tcx.hir_node_by_def_id(host_def_id)` returns `Node::Item(item)` where
+    ///     `item.kind` is `ItemKind::TyAlias(_, generics, &Ty { kind: OpaqueDef(opaque), .. })`
+    ///     and `generics.params` lists the captures.
+    ///   - `tcx.hir_node_by_def_id(capture_def_id)` returns a real
+    ///     `Node::GenericParam` — no more `Node::Synthetic` placeholders, and the
+    ///     `should_encode_type` / `type_of` / `is_const_param_default` paths can
+    ///     match on the HIR directly.
+    ///
+    /// FIXMEs surfaced by this sketch:
+    /// - `DefKind::TyAlias` causes `type_of`, `generics_of`, `predicates_of`
+    ///   providers to fire on the host. `type_of` and `generics_of` should work
+    ///   from HIR; `predicates_of` needs to either error here (and be handled at
+    ///   call sites) or be fed empty.
+    /// - For `DefKind::ConstParam` captures, the `GenericParamKind::Const { ty }`
+    ///   field is a cross-owner reference to the original capture's `Ty`; this
+    ///   should work but hasn't been audited.
+    /// - The host's `DefPathData::OpaqueLifetime(sym::empty)` is a placeholder —
+    ///   probably wants a dedicated `DefPathData` variant.
+    fn finalize_opaque_hir(
+        &mut self,
+        opaque: &'tcx hir::OpaqueTy<'tcx>,
+        captures: &FxIndexMap<ResolvedArg, ty::Feed<'tcx, LocalDefId>>,
+    ) {
+        if captures.is_empty() {
+            return;
+        }
+
+        let tcx = self.tcx;
+        let opaque_def_id = opaque.def_id;
+        let opaque_span = opaque.span;
+
+        // 1. Mint a fresh DefId for the synthetic host Item, parented to the
+        //    *parent of the opaque* (i.e., a sibling of the opaque). For
+        //    `fn foo() -> impl Trait`, the synthetic `type _ = impl Trait`
+        //    sits under `foo`, not under the opaque itself.
+        let parent_of_opaque = tcx.local_parent(opaque_def_id);
+        let host_feed = tcx.create_def(
+            parent_of_opaque,
+            None,
+            DefKind::TyAlias,
+            // FIXME: probably wants a dedicated `DefPathData` variant.
+            Some(DefPathData::OpaqueLifetime(sym::dummy)),
+            self.disambiguators.get_or_create(parent_of_opaque),
+        );
+        let host_def_id = host_feed.def_id();
+        let host_owner_id = OwnerId { def_id: host_def_id };
+        host_feed.def_span(opaque_span);
+        host_feed.def_ident_span(Some(opaque_span));
+        // `create_def` auto-feeds `visibility` only for `Closure`/`OpaqueTy`;
+        // our `DefKind::TyAlias` host doesn't, so feed it here (mirror the
+        // opaque's visibility, which is itself `Restricted(parent_mod)`).
+        host_feed.visibility(tcx.visibility(opaque_def_id.to_def_id()));
+        // The TyAlias host carries no predicates of its own. Without feeding,
+        // the `explicit_predicates_of` provider would re-enter `resolve_bound_vars`
+        // for the host's owner, which has no useful information.
+        let empty_preds = ty::GenericPredicates { parent: None, predicates: &[] };
+        host_feed.explicit_predicates_of(empty_preds);
+
+        // 2. Allocate one `hir::GenericParam` per capture, in the HIR arena.
+        //    Each param's `hir_id` points into the host's owner at local_id 1..=N.
+        let params: &'tcx [hir::GenericParam<'tcx>] =
+            tcx.hir_arena.alloc_from_iter(captures.iter().enumerate().map(
+                |(i, (resolved, feed))| {
+                    let feed = feed.upgrade(tcx);
+                    // `generics_of` / `object_lifetime_default` are fed *eagerly* here
+                    // (rather than in `finalize_opaque_hir`) because nested opaques can
+                    // capture the outer opaque's synthetic captures, and the inner's
+                    // own finalize queries `tcx.generics_of(<outer synthetic>)` to feed
+                    // its own captures' generics_of. The outer opaque's finalize runs
+                    // *after* the inner's, so eager feeding is required to break that
+                    // ordering dependency. The captures' `local_def_id_to_hir_id` is
+                    // still deferred — it must point into the host owner built in
+                    // `finalize_opaque_hir`.
+                    //
+                    // FIXME: these clone the *original* param's `generics_of` without
+                    // remapping any captured parents. Doing it correctly is the work
+                    // the user originally wanted to move to `finalize_opaque_hir`, but
+                    // that conflicts with the nested-opaque ordering above. Resolving
+                    // both will likely require either (a) staging the feeds in two
+                    // passes, or (b) computing `generics_of` from the host's real HIR.
+                    match *resolved {
+                        ResolvedArg::EarlyBound(param) => {
+                            feed.generics_of(tcx.generics_of(param).clone());
+                            feed.object_lifetime_default(ObjectLifetimeDefault::Static);
+                        }
+                        ResolvedArg::LateBound(_, _, param) => {
+                            feed.generics_of(tcx.generics_of(param).clone());
+                        }
+                        _ => {}
+                    }
+
+                    let capture_def_id = feed.key();
+                    let local_id = ItemLocalId::from_u32(1 + i as u32);
+                    let name = tcx.item_name(capture_def_id.to_def_id());
+                    let span = tcx.def_span(capture_def_id);
+                    let ident = Ident::new(name, span);
+                    let kind = match tcx.def_kind(capture_def_id) {
+                        DefKind::LifetimeParam => hir::GenericParamKind::Lifetime {
+                            kind: hir::LifetimeParamKind::Explicit,
+                        },
+                        DefKind::TyParam => hir::GenericParamKind::Type {
+                            default: None,
+                            // `synthetic: true` keeps the param out of user-facing
+                            // diagnostics in the few places that filter by it.
+                            synthetic: true,
+                        },
+                        DefKind::ConstParam => {
+                            // FIXME: cross-owner `&Ty` ref from the original capture.
+                            // Cloning the original `GenericParamKind::Const { ty }`
+                            // would be cleaner but requires the source HIR.
+                            let ty = tcx.hir_arena.alloc(hir::Ty {
+                                hir_id: HirId {
+                                    owner: host_owner_id,
+                                    local_id: ItemLocalId::from_u32(
+                                        2 + captures.len() as u32 + i as u32,
+                                    ),
+                                },
+                                span,
+                                kind: hir::TyKind::Never,
+                            });
+                            hir::GenericParamKind::Const { ty, default: None }
+                        }
+                        other => bug!("unexpected DefKind for opaque capture: {other:?}"),
+                    };
+                    hir::GenericParam {
+                        hir_id: HirId { owner: host_owner_id, local_id },
+                        def_id: capture_def_id,
+                        name: hir::ParamName::Plain(ident),
+                        span,
+                        pure_wrt_drop: false,
+                        kind,
+                        colon_span: None,
+                        source: hir::GenericParamSource::Generics,
+                    }
+                },
+            ));
+
+        // 3. Wrap the params in a `Generics`.
+        let generics: &'tcx hir::Generics<'tcx> = tcx.hir_arena.alloc(hir::Generics {
+            params,
+            predicates: &[],
+            has_where_clause_predicates: false,
+            where_clause_span: opaque_span.shrink_to_hi(),
+            span: opaque_span,
+        });
+
+        // 4. The TyAlias RHS is `impl Trait` — point back at the original
+        //    `OpaqueTy` node via `TyKind::OpaqueDef`. This is a cross-owner HIR
+        //    reference (the `OpaqueTy` lives in the parent fn's owner), which
+        //    `HirId` resolution should handle correctly.
+        let rhs_local_id = ItemLocalId::from_u32(1 + params.len() as u32);
+        let rhs_ty: &'tcx hir::Ty<'tcx> = tcx.hir_arena.alloc(hir::Ty {
+            hir_id: HirId { owner: host_owner_id, local_id: rhs_local_id },
+            span: opaque_span,
+            kind: hir::TyKind::OpaqueDef(opaque),
+        });
+
+        // 5. Build the host `Item`.
+        let host_ident = Ident::new(sym::dummy, opaque_span);
+        let item: &'tcx hir::Item<'tcx> = tcx.hir_arena.alloc(hir::Item {
+            owner_id: host_owner_id,
+            kind: hir::ItemKind::TyAlias(host_ident, generics, rhs_ty),
+            span: opaque_span,
+            vis_span: opaque_span.shrink_to_lo(),
+            has_delayed_lints: false,
+            eii: false,
+        });
+
+        // 6. Assemble the `OwnerNodes` table:
+        //      [0]:       Node::Item(item)            <- root
+        //      [1..=N]:   Node::GenericParam(...)     <- captures, parented to 0
+        //      [N+1]:     Node::Ty(rhs_ty)            <- TyAlias RHS, parented to 0
+        let mut nodes: IndexVec<ItemLocalId, hir::ParentedNode<'tcx>> = IndexVec::new();
+        nodes.push(hir::ParentedNode {
+            parent: ItemLocalId::INVALID,
+            node: hir::Node::Item(item),
+        });
+        for param in params.iter() {
+            nodes.push(hir::ParentedNode {
+                parent: ItemLocalId::ZERO,
+                node: hir::Node::GenericParam(param),
+            });
+        }
+        nodes.push(hir::ParentedNode {
+            parent: ItemLocalId::ZERO,
+            node: hir::Node::Ty(rhs_ty),
+        });
+
+        let attrs = hir::AttributeMap::EMPTY;
+        let rustc_middle::hir::Hashes { opt_hash_including_bodies, .. } = tcx.hash_owner_nodes(
+            hir::OwnerNode::Item(item),
+            &Default::default(),
+            &attrs.map,
+            attrs.define_opaque,
+        );
+
+        let owner_nodes: &'tcx hir::OwnerNodes<'tcx> = tcx.arena.alloc(hir::OwnerNodes {
+            opt_hash_including_bodies,
+            nodes,
+            bodies: Default::default(),
+        });
+
+        // 7. Feed the host's HIR queries. This is the equivalent of `feed_hir`,
+        //    but with a real `OwnerNode::Item` root instead of `OwnerNode::Synthetic`.
+        host_feed.local_def_id_to_hir_id(HirId::make_owner(host_def_id));
+        host_feed.opt_hir_owner_nodes(Some(owner_nodes));
+        host_feed.feed_owner_id().hir_attr_map(attrs);
+
+        // 8. Feed each capture's `local_def_id_to_hir_id` to point at its
+        //    `Node::GenericParam` slot inside the host owner. `generics_of`
+        //    and `object_lifetime_default` are already fed eagerly in
+        //    `remap_opaque_captures` (see comment there for why).
+        for (i, (_, feed)) in captures.iter().enumerate() {
+            let local_id = ItemLocalId::from_u32(1 + i as u32);
+            let cap = feed.upgrade(tcx);
+            cap.local_def_id_to_hir_id(HirId { owner: host_owner_id, local_id });
+        }
     }
 
     fn resolve_type_ref(&mut self, param_def_id: LocalDefId, hir_id: HirId, ident: Ident) {
@@ -2563,7 +2803,7 @@ fn is_late_bound_map(
 
         fn visit_opaque_ty(&mut self, opaque: &'tcx hir::OpaqueTy<'tcx>) {
             if !self.has_fully_capturing_opaque {
-                self.has_fully_capturing_opaque = opaque_captures_all_in_scope_lifetimes(opaque);
+                self.has_fully_capturing_opaque = matches!(opaque_captures_all_in_scope_lifetimes(opaque), DefaultOpaqueCaptures::All);
             }
             intravisit::walk_opaque_ty(self, opaque);
         }
