@@ -387,6 +387,10 @@ fn compute_bidirectional_outlives_predicates<'tcx>(
     opaque_own_params: &[ty::GenericParamDef],
     predicates: &mut Vec<(ty::Clause<'tcx>, Span)>,
 ) {
+    // FIXME: is this needed?
+    if true {
+        return;
+    }
     for param in opaque_own_params {
         tracing::debug!(?param.kind);
         if !matches!(param.kind, ty::GenericParamDefKind::Lifetime { .. }) {

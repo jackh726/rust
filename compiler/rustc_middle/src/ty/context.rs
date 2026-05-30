@@ -2289,7 +2289,7 @@ impl<'tcx> TyCtxt<'tcx> {
                 (ty::GenericParamDefKind::Type { .. }, ty::GenericArgKind::Type(_))
                 | (ty::GenericParamDefKind::Lifetime, ty::GenericArgKind::Lifetime(_))
                 | (ty::GenericParamDefKind::Const { .. }, ty::GenericArgKind::Const(_)) => {}
-                _ => panic!("{:?} {:?}", param, arg.kind()),
+                _ => return false,
             }
         }
 

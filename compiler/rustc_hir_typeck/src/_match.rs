@@ -531,7 +531,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expectation: Expectation<'tcx>,
     ) -> Option<LocalDefId> {
         let expected_ty = expectation.to_option(self)?;
-        let (def_id, args) = match *expected_ty.kind() {
+        let (def_id, _args) = match *expected_ty.kind() {
             // FIXME: Could also check that the RPIT is not defined
             ty::Alias(ty::AliasTy { kind: ty::Opaque { def_id }, args, .. }) => {
                 (def_id.as_local()?, args)
@@ -546,16 +546,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 .map(|(k, _)| (k.def_id, k.args))?,
             _ => return None,
         };
-        let hir::OpaqueTyOrigin::FnReturn { parent: parent_def_id, .. } =
-            self.tcx.local_opaque_ty_origin(def_id)
-        else {
-            return None;
-        };
-        if &args[0..self.tcx.generics_of(parent_def_id).count()]
-            != ty::GenericArgs::identity_for_item(self.tcx, parent_def_id).as_slice()
-        {
-            return None;
-        }
+        // FIXME: before, this checked if the parent args are identity instantiated (and returning `None` if not)
+        // Now, this is kind of "nonsense" because opaques have their own args
+        // I'm unsure *what* this is supposed to be checking.
         Some(def_id)
     }
 }

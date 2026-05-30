@@ -645,20 +645,22 @@ impl<'a, 'tcx> Visitor<'tcx> for BoundVarContext<'a, 'tcx> {
 
         self.emit_opaque_capture_errors();
 
+        let mut captures: Vec<(ResolvedArg, LocalDefId)> =
+            captures.into_inner().into_iter().collect();
+        /*
         // Sort captures into canonical generic-arg order: lifetimes first, then
         // type params, then const params. Stable sort preserves declaration
         // order within each kind. Downstream consumers (`generics_of(opaque)`
         // and `lower_opaque_ty`) walk this list to build `own_params` and to
         // build the args vector — they must agree, so we canonicalize once
         // here at the storage site.
-        let mut captures: Vec<(ResolvedArg, LocalDefId)> =
-            captures.into_inner().into_iter().collect();
         captures.sort_by_key(|&(_, def_id)| match self.tcx.def_kind(def_id) {
             DefKind::LifetimeParam => 0u8,
             DefKind::TyParam => 1,
             DefKind::ConstParam => 2,
             other => bug!("unexpected capture DefKind: {other:?}"),
         });
+        */
         debug!(?captures);
         self.rbv.opaque_captured_lifetimes.insert(opaque.def_id, captures);
     }
@@ -1559,6 +1561,12 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
             }
         }
 
+        let kind = match kind {
+            DefKind::TyParam | DefKind::Trait | DefKind::TraitAlias => DefKind::TyParam,
+            DefKind::ConstParam => DefKind::ConstParam,
+            DefKind::LifetimeParam => DefKind::LifetimeParam,
+            _ => bug!("unexpected kind {:?} for lifetime def", kind),
+        };
         for &(opaque_def_id, captures) in opaque_capture_scopes.iter().rev() {
             let mut captures = captures.borrow_mut();
             let remapped = *captures.entry(lifetime).or_insert_with(|| {
@@ -1579,6 +1587,11 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
                     ResolvedArg::EarlyBound(param) => {
                         // FIXME: these need to be mapped
                         feed.generics_of(self.tcx.generics_of(param).clone());
+                        if let DefKind::ConstParam = kind {
+                            // FIXME: I'm wondering if we need to map these?
+                            // For example, `<N: ConstParamty, M: N>` and `use<N, M>``
+                            feed.type_of(self.tcx.type_of(param));
+                        }
                         // FIXME: We almost certainly want to preserve the original object lifetime default here,
                         // but that is going to require us to delay the calculation until after we have mapped *all* the
                         // parent params. That's a bigger refactor, so not doing that yet.
@@ -1656,14 +1669,15 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
         };
 
         if let Some(mut def) = result {
-            def = self.remap_opaque_captures(&opaque_capture_scopes, def, ident, DefKind::TyParam);
+            let def_kind = self.tcx.def_kind(param_def_id);
+            def = self.remap_opaque_captures(&opaque_capture_scopes, def, ident, def_kind);
 
             if let ResolvedArg::LateBound(..) = def
                 && let Some(what) = crossed_late_boundary
             {
                 let use_span = self.tcx.hir_span(hir_id);
                 let def_span = self.tcx.def_span(param_def_id);
-                let guar = match self.tcx.def_kind(param_def_id) {
+                let guar = match def_kind {
                     DefKind::ConstParam => {
                         self.tcx.dcx().emit_err(errors::CannotCaptureLateBound::Const {
                             use_span,

@@ -333,9 +333,6 @@ fn check_opaque_meets_bounds<'tcx>(
             // The opaque's parent in `generics_of` is the fn itself, so the
             // args layout is `[fn's full identity, captures...]`.
             let mut args: Vec<ty::GenericArg<'_>> = vec![];
-            for arg in ty::GenericArgs::identity_for_item(tcx, parent) {
-                args.push(arg);
-            }
             args.extend(lifetimes.iter().map(|&(_, captured)| -> ty::GenericArg<'_> {
                 tcx.map_opaque_lifetime_to_parent_arg(captured)
             }));

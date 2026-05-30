@@ -88,7 +88,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         let lifetimes = tcx.opaque_captured_lifetimes(def_id);
         debug!(?lifetimes);
 
-        let mut i: u32 = parent_count as u32;
+        let mut i: u32 = 0;
         let mut next_index = || {
             let prev = i;
             i += 1;
@@ -96,11 +96,19 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         };
 
         let mut own_params = Vec::with_capacity(lifetimes.len());
-        own_params.extend(lifetimes.iter().map(|&(_, param)| {
+        own_params.extend(lifetimes.iter().map(|&(parent_arg, param)| {
+            let synthetic = match parent_arg {
+                rbv::ResolvedArg::EarlyBound(parent_param_def_id) => {
+                    let parent_idx = fn_generics.param_def_id_to_index(tcx, parent_param_def_id.to_def_id()).unwrap();
+                    let parent_param = fn_generics.param_at(parent_idx as usize, tcx);
+                    matches!(parent_param.kind, ty::GenericParamDefKind::Type { synthetic: true, .. })
+                }
+                _ => false,
+            };
             let kind = tcx.def_kind(param);
             tracing::debug!(?param, ?kind);
             let kind = match kind {
-                DefKind::TyParam => ty::GenericParamDefKind::Type { has_default: false, synthetic: true },
+                DefKind::TyParam => ty::GenericParamDefKind::Type { has_default: false, synthetic },
                 DefKind::ConstParam => ty::GenericParamDefKind::Const { has_default: false },
                 DefKind::LifetimeParam => ty::GenericParamDefKind::Lifetime,
                 _ => bug!("Captured param had wrong kind: {:?}", kind),
@@ -119,8 +127,8 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             own_params.iter().map(|param| (param.def_id, param.index)).collect();
 
         return ty::Generics {
-            parent: Some(fn_def_id.to_def_id()),
-            parent_count,
+            parent: None,
+            parent_count: 0,
             own_params,
             param_def_id_to_index,
             has_self: false,
@@ -430,7 +438,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             let kind = tcx.def_kind(param);
             tracing::debug!(?param, ?kind);
             let kind = match kind {
-                DefKind::TyParam => ty::GenericParamDefKind::Type { has_default: false, synthetic: true },
+                DefKind::TyParam => ty::GenericParamDefKind::Type { has_default: false, synthetic: false },
                 DefKind::ConstParam => ty::GenericParamDefKind::Const { has_default: false },
                 DefKind::LifetimeParam => ty::GenericParamDefKind::Lifetime,
                 _ => bug!("Captured param had wrong kind: {:?}", kind),

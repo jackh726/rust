@@ -3600,9 +3600,6 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 // The opaque's parent in `generics_of` is the fn itself, so the
                 // args layout is `[fn's full identity (parent_count of opaque) , captures...]`.
                 let mut args: Vec<ty::GenericArg<'_>> = vec![];
-                for arg in ty::GenericArgs::identity_for_item(tcx, parent) {
-                    args.push(arg);
-                }
                 args.extend(lifetimes.iter().map(|&(arg, param)| -> ty::GenericArg<'_> {
                     let kind = tcx.def_kind(param);
                     // FIXME(mgca): should we be calling self.check_params_use_if_mcg here too?
@@ -3628,7 +3625,24 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                                 rbv::ResolvedArg::StaticLifetime => bug!("Expected type param, found static lifetime."),
                             }.into()
                         }
-                        DefKind::ConstParam => todo!(),
+                        DefKind::ConstParam => {
+                            match arg {
+                                rbv::ResolvedArg::EarlyBound(def_id) => {
+                                    let name = tcx.hir_ty_param_name(def_id);
+                                    let item_def_id = tcx.hir_ty_param_owner(def_id);
+                                    let generics = tcx.generics_of(item_def_id);
+                                    let index = generics.param_def_id_to_index[&def_id.to_def_id()];
+                                    Const::new_param(tcx, ty::ParamConst { index, name })
+                                }
+                                rbv::ResolvedArg::LateBound(debruijn, index, _) => {
+                                    let bt = ty::BoundConst::new(ty::BoundVar::from_u32(index));
+                                    Const::new_bound(tcx, debruijn, bt)
+                                }
+                                rbv::ResolvedArg::Error(guar) => Const::new_error(tcx, guar),
+                                rbv::ResolvedArg::Free(..) => bug!("Late-bound type not expected."),
+                                rbv::ResolvedArg::StaticLifetime => bug!("Expected type param, found static lifetime."),
+                            }.into()
+                        }
                         DefKind::LifetimeParam => {
                             self.lower_resolved_lifetime(arg).into()
                         }

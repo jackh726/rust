@@ -1918,7 +1918,7 @@ pub fn impl_trait_overcapture_suggestion<'tcx>(
     fn_def_id: LocalDefId,
     captured_args: FxIndexSet<DefId>,
 ) -> Option<AddPreciseCapturingForOvercapture> {
-    let generics = tcx.generics_of(fn_def_id);
+    let generics = tcx.generics_of(opaque_def_id);
 
     let mut captured_lifetimes = FxIndexSet::default();
     let mut captured_non_lifetimes = FxIndexSet::default();
