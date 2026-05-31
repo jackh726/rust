@@ -1545,6 +1545,40 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
         Some(guar)
     }
 
+    /// Identifies whether `param_def_id` is a *trait-header* arg of the RPITIT
+    /// `opaque_def_id` — i.e. `Self` or a param declared on the method's parent
+    /// trait/impl (`ArgSource::FnParent`), as opposed to a method-own param
+    /// (`ArgSource::Fn`).
+    ///
+    /// Trait-header args don't need to be duplicated into the opaque's own
+    /// generics: they remain reachable through the opaque's `generics_of` parent
+    /// (the method `fn`), so the caller can keep a reference to the original param
+    /// rather than minting a fresh `OpaqueLifetime` param. (The caller currently
+    /// only acts on this for type/const args — see `remap_opaque_captures`.)
+    ///
+    /// For every other opaque (plain RPIT, async fn, TAIT) the opaque has no fn
+    /// parent whose args it can reuse, so this returns `false`.
+    fn param_needs_capture(
+        &self,
+        opaque_def_id: LocalDefId,
+        param_def_id: LocalDefId,
+    ) -> bool {
+        let parent_def_id = match self.tcx.local_opaque_ty_origin(opaque_def_id) {
+            // These don't have parent generics
+            hir::OpaqueTyOrigin::TyAlias { in_assoc_ty: false, .. }
+            | hir::OpaqueTyOrigin::FnReturn { in_trait_or_impl: None, .. }
+            | hir::OpaqueTyOrigin::AsyncFn { in_trait_or_impl: None, .. } => return true,
+            // These do
+            hir::OpaqueTyOrigin::TyAlias { parent, .. }
+            | hir::OpaqueTyOrigin::FnReturn { parent, .. }
+            | hir::OpaqueTyOrigin::AsyncFn { parent, .. } => {
+                parent
+            }
+        };
+
+        self.tcx.parent(param_def_id.to_def_id()) == parent_def_id.to_def_id()
+    }
+
     #[instrument(level = "trace", skip(self, opaque_capture_scopes), ret)]
     fn remap_opaque_captures(
         &mut self,
@@ -1568,6 +1602,16 @@ impl<'a, 'tcx> BoundVarContext<'a, 'tcx> {
             _ => bug!("unexpected kind {:?} for lifetime def", kind),
         };
         for &(opaque_def_id, captures) in opaque_capture_scopes.iter().rev() {
+            // We don't want to capture (duplicate) trait args, since they will be captured in parent generics of the
+            // opaque and are always *used* (i.e. not bivariant).
+            // FIXME: for now, we *do* still duplicate lifetimes, but this is just
+            // a legacy thing and should be removed.
+            if !matches!(kind, DefKind::LifetimeParam)
+                && let ResolvedArg::EarlyBound(param) = lifetime
+                && !self.param_needs_capture(opaque_def_id, param)
+            {
+                continue;
+            }
             let mut captures = captures.borrow_mut();
             let remapped = *captures.entry(lifetime).or_insert_with(|| {
                 // `opaque_def_id` is unique to the `BoundVarContext` pass which is executed once
