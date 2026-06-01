@@ -649,14 +649,27 @@ fn check_opaque_precise_captures<'tcx>(tcx: TyCtxt<'tcx>, opaque_def_id: LocalDe
             }
         }
     }
+    tracing::debug!(?expected_captures, ?shadowed_captures, ?seen_params);
 
+    let origin = tcx.local_opaque_ty_origin(opaque_def_id);
+    let parent = match origin {
+        rustc_hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: _ } => parent,
+        rustc_hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: _ } => parent,
+        rustc_hir::OpaqueTyOrigin::TyAlias { parent, in_assoc_ty: _ } => parent,
+    };
+
+    // TODO: we used to use variances, but now we don't even include the
+    // non-captured fn generics anymore, so we need to essentially rewrite
+    // `variance_of_opaque` now.
     let variances = tcx.variances_of(opaque_def_id);
-    let mut def_id = Some(opaque_def_id.to_def_id());
+    tracing::debug!(?variances);
+    let mut def_id = Some(parent.to_def_id());
     while let Some(generics) = def_id {
         let generics = tcx.generics_of(generics);
         def_id = generics.parent;
 
         for param in &generics.own_params {
+            tracing::debug!(?param);
             if expected_captures.contains(&param.def_id) {
                 assert_eq!(
                     variances[param.index as usize],
@@ -677,7 +690,7 @@ fn check_opaque_precise_captures<'tcx>(tcx: TyCtxt<'tcx>, opaque_def_id: LocalDe
                     let use_span = tcx.def_span(param.def_id);
                     let opaque_span = tcx.def_span(opaque_def_id);
                     // Check if the lifetime param was captured but isn't named in the precise captures list.
-                    if variances[param.index as usize] == ty::Invariant {
+                    if true || variances[param.index as usize] == ty::Invariant {
                         if let DefKind::OpaqueTy = tcx.def_kind(tcx.parent(param.def_id))
                             && let Some(def_id) = tcx
                                 .map_opaque_lifetime_to_parent_arg(param.def_id.expect_local())
