@@ -20,10 +20,10 @@ use crate::regions::InferCtxtRegionExt;
 /// 2. If there is a `'static` outlives bound, then we know that all regions are irrelevant, so we return an empty list.
 /// 3. If there are *any* outlives bounds, Then we find any args that outlive those bounds.
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
-pub(crate) fn live_args_for_opaque_from_outlives_bounds<'tcx>(
+pub(crate) fn live_regions_for_opaque_from_outlives_bounds<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: LocalDefId,
-) -> Option<ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>>> {
+) -> Option<ty::EarlyBinder<'tcx, Vec<ty::Region<'tcx>>>> {
     let self_identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
 
     // We first want to collect the outlives bounds of the opaque.
@@ -78,6 +78,7 @@ pub(crate) fn live_args_for_opaque_from_outlives_bounds<'tcx>(
     let opaque_captured_lifetimes = tcx.opaque_captured_lifetimes(def_id);
     tracing::debug!(?opaque_captured_lifetimes);
 
+    // Map the outlives regions to the parent regions
     let generics = tcx.generics_of(def_id);
     let parent_outlives_regions: Vec<_> = opaque_outlives_regions
         .iter()
@@ -99,6 +100,7 @@ pub(crate) fn live_args_for_opaque_from_outlives_bounds<'tcx>(
         .collect();
     tracing::debug!(?parent_outlives_regions);
 
+    // Map the captured regions to the parent regions
     let mut parent_captured_regions: Vec<(ty::Region<'tcx>, LocalDefId)> =
         Vec::with_capacity(opaque_captured_lifetimes.len());
     for (_, opaque_lt) in opaque_captured_lifetimes.iter() {
@@ -124,9 +126,10 @@ pub(crate) fn live_args_for_opaque_from_outlives_bounds<'tcx>(
         rustc_hir::OpaqueTyOrigin::TyAlias { parent, .. } => (parent, IndexSet::default()),
     };
 
+    // Find all the opaque's captured regions that outlive the outlives bounds using the implied bounds
     let parent_param_env = tcx.param_env(parent_def_id);
     tracing::debug!(?parent_param_env);
-    let mut opaque_outlives_args = Vec::with_capacity(parent_outlives_regions.len());
+    let mut opaque_live_regions = Vec::with_capacity(parent_outlives_regions.len());
     for (parent_captured_region, opaque_captured_def_id) in parent_captured_regions.iter() {
         let mut all_outlives = true;
         for parent_outlives_region in parent_outlives_regions.iter() {
@@ -153,13 +156,12 @@ pub(crate) fn live_args_for_opaque_from_outlives_bounds<'tcx>(
                 .unwrap();
             let opaque_region =
                 ty::Region::new_early_param(tcx, param.to_early_bound_region_data());
-            let opaque_arg: ty::GenericArg<'tcx> = opaque_region.into();
-            opaque_outlives_args.push(opaque_arg);
+            opaque_live_regions.push(opaque_region);
         }
     }
-    tracing::debug!(?opaque_outlives_args);
+    tracing::debug!(?opaque_live_regions);
 
-    Some(ty::EarlyBinder::bind(opaque_outlives_args))
+    Some(ty::EarlyBinder::bind(opaque_live_regions))
 }
 
 /// Visits free regions in the type that are relevant for liveness computation.
@@ -219,11 +221,12 @@ where
 
                 // Opaques are special, because there are additional captured regions that we need to consider.
                 if let ty::AliasTyKind::Opaque { def_id } = kind {
-                    let opaque_outlives_args = tcx.live_args_for_opaque_from_outlives_bounds(def_id);
+                    let opaque_outlives_args =
+                        tcx.live_regions_for_opaque_from_outlives_bounds(def_id);
 
                     match opaque_outlives_args {
-                        Some(opaque_outlives_args) => {
-                            for r in opaque_outlives_args.as_ref().skip_binder() {
+                        Some(opaque_live_regions) => {
+                            for r in opaque_live_regions.as_ref().skip_binder() {
                                 let r = ty::EarlyBinder::bind(*r)
                                     .instantiate(tcx, args)
                                     .skip_norm_wip();

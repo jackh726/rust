@@ -2125,12 +2125,12 @@ rustc_queries! {
     /// fn bar<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized + 'static {}
     /// fn baz<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized {}
     /// ```
-    /// 
+    ///
     /// In the above:
     ///   - `foo` outlives `'a`, but we know that `'b: 'a` holds, so `'b` is *also* potentially live
     ///   - `bar` outlives `'static`, so we know that all lifetimes are potentially live and we can return an empty set
     ///   - `baz` has not outlives bound, so return `None` and let the caller decide what to do
-    query live_args_for_opaque_from_outlives_bounds(def_id: DefId) -> &'tcx Option<ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>>> {
+    query live_regions_for_opaque_from_outlives_bounds(def_id: DefId) -> &'tcx Option<ty::EarlyBinder<'tcx, Vec<ty::Region<'tcx>>>> {
         arena_cache
         desc { "identifying live args for opaque `{}`", tcx.def_path_str(def_id) }
         separate_provide_extern
