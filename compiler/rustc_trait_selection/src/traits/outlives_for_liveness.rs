@@ -12,17 +12,18 @@ use crate::infer::region_constraints::VerifyIfEq;
 use crate::infer::{InferCtxt, SubregionOrigin, TyCtxtInferExt};
 use crate::regions::InferCtxtRegionExt;
 
-/// For a given opaque type, this returns the set of generics that are relevant for liveness.
+/// For a given opaque type, this returns the set of generic args that are relevant for liveness, that can be inferred
+/// from outlives bounds on the opaque.
 ///
 /// There are three cases to consider:
-/// 1. If there is a `'static` outlives bound, then we know that all regions are irrelevant, so we return an empty list.
-/// 2. If there are *any* outlives bounds, Then we find any args that outlive those bounds.
-/// 3. If there are *no* outlives bounds, then we return all non-bivariant args, since they could potentially be relevant.
+/// 1. If there are *no* outlives bounds, then we return None.
+/// 2. If there is a `'static` outlives bound, then we know that all regions are irrelevant, so we return an empty list.
+/// 3. If there are *any* outlives bounds, Then we find any args that outlive those bounds.
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
-pub(crate) fn opaque_live_args<'tcx>(
+pub(crate) fn live_args_for_opaque_from_outlives_bounds<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: LocalDefId,
-) -> ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>> {
+) -> Option<ty::EarlyBinder<'tcx, Vec<ty::GenericArg<'tcx>>>> {
     let self_identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
 
     // We first want to collect the outlives bounds of the opaque.
@@ -49,6 +50,11 @@ pub(crate) fn opaque_live_args<'tcx>(
         .collect();
     tracing::debug!(?opaque_outlives_regions);
 
+    // If there are no outlives bounds, then all (non-bivariant) args are potentially live.
+    if opaque_outlives_regions.is_empty() {
+        return None;
+    }
+
     // If any of the outlives bounds are `'static`, then we know the opaque doesn't capture
     // *any* regions, so we can skip visiting any regions at all.
     //
@@ -59,19 +65,7 @@ pub(crate) fn opaque_live_args<'tcx>(
     // optimization.
     if opaque_outlives_regions.contains(&tcx.lifetimes.re_static) {
         tracing::debug!("opaque has a 'static outlives bound, so skipping visiting any regions");
-        return ty::EarlyBinder::bind(vec![]);
-    }
-
-    // If there are no outlives bounds, then all (non-bivariant) args are potentially live.
-    if opaque_outlives_regions.is_empty() {
-        let variances = tcx.variances_of(def_id);
-        let mut opaque_outlives_args = Vec::with_capacity(self_identity_args.len());
-        for (idx, s) in self_identity_args.iter().enumerate() {
-            if variances[idx] != ty::Bivariant {
-                opaque_outlives_args.push(s);
-            }
-        }
-        return ty::EarlyBinder::bind(opaque_outlives_args);
+        return Some(ty::EarlyBinder::bind(vec![]));
     }
 
     // Okay, so we know we have some outlives bounds, and that none of them are `'static`.
@@ -165,7 +159,7 @@ pub(crate) fn opaque_live_args<'tcx>(
     }
     tracing::debug!(?opaque_outlives_args);
 
-    ty::EarlyBinder::bind(opaque_outlives_args)
+    Some(ty::EarlyBinder::bind(opaque_outlives_args))
 }
 
 /// Visits free regions in the type that are relevant for liveness computation.
@@ -225,11 +219,25 @@ where
 
                 // Opaques are special, because there are additional captured regions that we need to consider.
                 if let ty::AliasTyKind::Opaque { def_id } = kind {
-                    let opaque_outlives_args = tcx.opaque_live_args(def_id);
+                    let opaque_outlives_args = tcx.live_args_for_opaque_from_outlives_bounds(def_id);
 
-                    for r in opaque_outlives_args.as_ref().skip_binder() {
-                        let r = ty::EarlyBinder::bind(*r).instantiate(tcx, args).skip_norm_wip();
-                        r.visit_with(self);
+                    match opaque_outlives_args {
+                        Some(opaque_outlives_args) => {
+                            for r in opaque_outlives_args.as_ref().skip_binder() {
+                                let r = ty::EarlyBinder::bind(*r)
+                                    .instantiate(tcx, args)
+                                    .skip_norm_wip();
+                                r.visit_with(self);
+                            }
+                        }
+                        None => {
+                            let variances = tcx.variances_of(def_id);
+                            for (idx, s) in args.iter().enumerate() {
+                                if variances[idx] != ty::Bivariant {
+                                    s.visit_with(self);
+                                }
+                            }
+                        }
                     }
 
                     return;

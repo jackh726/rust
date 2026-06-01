@@ -948,7 +948,7 @@ pub fn provide(providers: &mut Providers) {
         specialization_enabled_in: specialize::specialization_enabled_in,
         instantiate_and_check_impossible_predicates,
         is_impossible_associated_item,
-        opaque_live_args: outlives_for_liveness::opaque_live_args,
+        live_args_for_opaque_from_outlives_bounds: outlives_for_liveness::live_args_for_opaque_from_outlives_bounds,
         ..*providers
     };
 }
