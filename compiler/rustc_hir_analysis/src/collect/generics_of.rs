@@ -78,13 +78,6 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
     }) = node {
         assert_matches!(tcx.def_kind(fn_def_id), DefKind::AssocFn | DefKind::Fn);
 
-        // The opaque's parent is the fn itself (matching master). Its `own_params`
-        // are the captures, indexed after the fn's full generic count. The args
-        // built in `lower_opaque_ty` must mirror this: parent identity for indices
-        // `< parent_count`, captured arg values for indices `>= parent_count`.
-        let fn_generics = tcx.generics_of(fn_def_id);
-        let parent_count = fn_generics.count();
-
         let lifetimes = tcx.opaque_captured_lifetimes(def_id);
         debug!(?lifetimes);
 
@@ -99,8 +92,9 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         own_params.extend(lifetimes.iter().map(|&(parent_arg, param)| {
             let synthetic = match parent_arg {
                 rbv::ResolvedArg::EarlyBound(parent_param_def_id) => {
-                    let parent_idx = fn_generics.param_def_id_to_index(tcx, parent_param_def_id.to_def_id()).unwrap();
-                    let parent_param = fn_generics.param_at(parent_idx as usize, tcx);
+                    let parent_generics = tcx.generics_of(tcx.parent(parent_param_def_id.to_def_id()));
+                    let parent_idx = parent_generics.param_def_id_to_index(tcx, parent_param_def_id.to_def_id()).unwrap();
+                    let parent_param = parent_generics.param_at(parent_idx as usize, tcx);
                     matches!(parent_param.kind, ty::GenericParamDefKind::Type { synthetic: true, .. })
                 }
                 _ => false,

@@ -269,19 +269,8 @@ where
                 && !opaque.bounds.iter().any(|bound| matches!(bound, hir::GenericBound::Use(..)))
             {
                 // Compute the set of args that are captured by the opaque...
-                let parent_generics = self.tcx.generics_of(self.parent_def_id);
                 let mut captured = FxIndexSet::default();
                 let mut captured_regions = FxIndexSet::default();
-                let variances = self.tcx.variances_of(opaque_def_id);
-                for (idx, arg) in opaque_ty_args.iter().enumerate() {
-                    // A param is captured if it's invariant.
-                    if variances[idx] != ty::Invariant {
-                        continue;
-                    }
-                    captured.insert(extract_def_id_from_arg(self.tcx, parent_generics, arg));
-                    captured_regions.extend(arg.as_region());
-                }
-                /*
                 let variances = self.tcx.variances_of(opaque_def_id);
                 let mut current_def_id = Some(opaque_def_id.to_def_id());
                 while let Some(def_id) = current_def_id {
@@ -304,7 +293,6 @@ where
                     }
                     current_def_id = generics.parent;
                 }
-                */
 
                 // Compute the set of in scope params that are not captured.
                 let mut uncaptured_args: FxIndexSet<_> = self
