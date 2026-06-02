@@ -1,16 +1,13 @@
-use rustc_data_structures::fx::FxIndexSet;
 use rustc_data_structures::indexmap::IndexSet;
 use rustc_hir::def_id::LocalDefId;
 use rustc_middle::ty::{
     self, Flags, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
-    TypingMode, Unnormalized,
+    Unnormalized,
 };
-use rustc_span::DUMMY_SP;
 
 use crate::infer::outlives::test_type_match;
 use crate::infer::region_constraints::VerifyIfEq;
-use crate::infer::{InferCtxt, SubregionOrigin, TyCtxtInferExt};
-use crate::regions::InferCtxtRegionExt;
+use crate::regions::region_known_to_outlive;
 
 /// For a given opaque type, this returns the set of generic args that are relevant for liveness, that can be inferred
 /// from outlives bounds on the opaque.
@@ -291,49 +288,4 @@ where
             _ => ty.super_visit_with(self),
         }
     }
-}
-
-/// Given a known `param_env` and a set of well formed types, can we prove that
-/// `region_a` outlives `region_b`
-fn region_known_to_outlive<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    id: LocalDefId,
-    param_env: ty::ParamEnv<'tcx>,
-    wf_tys: &FxIndexSet<Ty<'tcx>>,
-    region_a: ty::Region<'tcx>,
-    region_b: ty::Region<'tcx>,
-) -> bool {
-    test_region_obligations(tcx, id, param_env, wf_tys, |infcx| {
-        infcx.sub_regions(
-            SubregionOrigin::RelateRegionParamBound(DUMMY_SP, None),
-            region_b,
-            region_a,
-            ty::VisibleForLeakCheck::Unreachable,
-        );
-    })
-}
-
-/// Given a known `param_env` and a set of well formed types, set up an
-/// `InferCtxt`, call the passed function (to e.g. set up region constraints
-/// to be tested), then resolve region and return errors
-fn test_region_obligations<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    id: LocalDefId,
-    param_env: ty::ParamEnv<'tcx>,
-    wf_tys: &FxIndexSet<Ty<'tcx>>,
-    add_constraints: impl FnOnce(&InferCtxt<'tcx>),
-) -> bool {
-    // Unfortunately, we have to use a new `InferCtxt` each call, because
-    // region constraints get added and solved there and we need to test each
-    // call individually.
-    let infcx = tcx.infer_ctxt().build(TypingMode::non_body_analysis());
-
-    add_constraints(&infcx);
-
-    let errors = infcx.resolve_regions(id, param_env, wf_tys.iter().copied());
-    tracing::debug!(?errors, "errors");
-
-    // If we were able to prove that the type outlives the region without
-    // an error, it must be because of the implied or explicit bounds...
-    errors.is_empty()
 }
