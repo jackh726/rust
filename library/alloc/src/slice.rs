@@ -11,8 +11,6 @@
 
 use core::borrow::{Borrow, BorrowMut};
 #[cfg(not(no_global_oom_handling))]
-use core::clone::TrivialClone;
-#[cfg(not(no_global_oom_handling))]
 use core::cmp::Ordering::{self, Less};
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
@@ -407,7 +405,7 @@ impl<T> [T] {
 
         impl<T: Clone> ConvertVec for T {
             #[inline]
-            default fn to_vec<A: Allocator>(s: &[Self], alloc: A) -> Vec<Self, A> {
+            fn to_vec<A: Allocator>(s: &[Self], alloc: A) -> Vec<Self, A> {
                 struct DropGuard<'a, T, A: Allocator> {
                     vec: &'a mut Vec<T, A>,
                     num_init: usize,
@@ -438,24 +436,6 @@ impl<T> [T] {
                     vec.set_len(s.len());
                 }
                 vec
-            }
-        }
-
-        impl<T: TrivialClone> ConvertVec for T {
-            #[inline]
-            fn to_vec<A: Allocator>(s: &[Self], alloc: A) -> Vec<Self, A> {
-                let len = s.len();
-                let mut v = Vec::with_capacity_in(len, alloc);
-                // SAFETY:
-                // allocated above with the capacity of `s`, and initialize to `s.len()` in
-                // ptr::copy_to_non_overlapping below.
-                if len > 0 {
-                    unsafe {
-                        s.as_ptr().copy_to_nonoverlapping(v.as_mut_ptr(), len);
-                        v.set_len(len);
-                    }
-                }
-                v
             }
         }
     }
@@ -811,7 +791,7 @@ pub(crate) trait SpecCloneIntoVec<T, A: Allocator> {
 
 #[cfg(not(no_global_oom_handling))]
 impl<T: Clone, A: Allocator> SpecCloneIntoVec<T, A> for [T] {
-    default fn clone_into(&self, target: &mut Vec<T, A>) {
+    fn clone_into(&self, target: &mut Vec<T, A>) {
         // drop anything in target that will not be overwritten
         target.truncate(self.len());
 
@@ -822,14 +802,6 @@ impl<T: Clone, A: Allocator> SpecCloneIntoVec<T, A> for [T] {
         // reuse the contained values' allocations/resources.
         target.clone_from_slice(init);
         target.extend_from_slice(tail);
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: TrivialClone, A: Allocator> SpecCloneIntoVec<T, A> for [T] {
-    fn clone_into(&self, target: &mut Vec<T, A>) {
-        target.clear();
-        target.extend_from_slice(self);
     }
 }
 

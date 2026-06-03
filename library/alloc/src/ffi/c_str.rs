@@ -260,52 +260,12 @@ impl CString {
         }
 
         impl<T: Into<Vec<u8>>> SpecNewImpl for T {
-            default fn spec_new_impl(self) -> Result<CString, NulError> {
+            fn spec_new_impl(self) -> Result<CString, NulError> {
                 let bytes: Vec<u8> = self.into();
                 match memchr::memchr(0, &bytes) {
                     Some(i) => Err(NulError(i, bytes)),
                     None => Ok(unsafe { CString::_from_vec_unchecked(bytes) }),
                 }
-            }
-        }
-
-        // Specialization for avoiding reallocation
-        #[inline(always)] // Without that it is not inlined into specializations
-        fn spec_new_impl_bytes(bytes: &[u8]) -> Result<CString, NulError> {
-            // We cannot have such large slice that we would overflow here
-            // but using `checked_add` allows LLVM to assume that capacity never overflows
-            // and generate twice shorter code.
-            // `saturating_add` doesn't help for some reason.
-            let capacity = bytes.len().checked_add(1).unwrap();
-
-            // Allocate before validation to avoid duplication of allocation code.
-            // We still need to allocate and copy memory even if we get an error.
-            let mut buffer = Vec::with_capacity(capacity);
-            buffer.extend(bytes);
-
-            // Check memory of self instead of new buffer.
-            // This allows better optimizations if lto enabled.
-            match memchr::memchr(0, bytes) {
-                Some(i) => Err(NulError(i, buffer)),
-                None => Ok(unsafe { CString::_from_vec_unchecked(buffer) }),
-            }
-        }
-
-        impl SpecNewImpl for &'_ [u8] {
-            fn spec_new_impl(self) -> Result<CString, NulError> {
-                spec_new_impl_bytes(self)
-            }
-        }
-
-        impl SpecNewImpl for &'_ str {
-            fn spec_new_impl(self) -> Result<CString, NulError> {
-                spec_new_impl_bytes(self.as_bytes())
-            }
-        }
-
-        impl SpecNewImpl for &'_ mut [u8] {
-            fn spec_new_impl(self) -> Result<CString, NulError> {
-                spec_new_impl_bytes(self)
             }
         }
 

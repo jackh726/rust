@@ -10,14 +10,10 @@
 
 use core::any::Any;
 use core::cell::CloneFromCell;
-#[cfg(not(no_global_oom_handling))]
-use core::clone::TrivialClone;
 use core::clone::{CloneToUninit, UseCloned};
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 use core::intrinsics::abort;
-#[cfg(not(no_global_oom_handling))]
-use core::iter;
 use core::marker::{PhantomData, Unsize};
 use core::mem::{self, Alignment, ManuallyDrop};
 use core::num::NonZeroUsize;
@@ -2275,21 +2271,6 @@ impl<T> Arc<[T]> {
         }
     }
 
-    /// Copy elements from slice into newly allocated `Arc<[T]>`
-    ///
-    /// Unsafe because the caller must either take ownership, bind `T: Copy` or
-    /// bind `T: TrivialClone`.
-    #[cfg(not(no_global_oom_handling))]
-    unsafe fn copy_from_slice(v: &[T]) -> Arc<[T]> {
-        unsafe {
-            let ptr = Self::allocate_for_slice(v.len());
-
-            ptr::copy_nonoverlapping(v.as_ptr(), (&raw mut (*ptr).data) as *mut T, v.len());
-
-            Self::from_ptr(ptr)
-        }
-    }
-
     /// Constructs an `Arc<[T]>` from an iterator known to be of a certain size.
     ///
     /// Behavior is undefined should the size be wrong.
@@ -2364,18 +2345,8 @@ trait ArcFromSlice<T> {
 #[cfg(not(no_global_oom_handling))]
 impl<T: Clone> ArcFromSlice<T> for Arc<[T]> {
     #[inline]
-    default fn from_slice(v: &[T]) -> Self {
-        unsafe { Self::from_iter_exact(v.iter().cloned(), v.len()) }
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: TrivialClone> ArcFromSlice<T> for Arc<[T]> {
-    #[inline]
     fn from_slice(v: &[T]) -> Self {
-        // SAFETY: `T` implements `TrivialClone`, so this is sound and equivalent
-        // to the above.
-        unsafe { Arc::copy_from_slice(v) }
+        unsafe { Self::from_iter_exact(v.iter().cloned(), v.len()) }
     }
 }
 
@@ -3529,32 +3500,12 @@ trait ArcEqIdent<T: ?Sized + PartialEq, A: Allocator> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized + PartialEq, A: Allocator> ArcEqIdent<T, A> for Arc<T, A> {
     #[inline]
-    default fn eq(&self, other: &Arc<T, A>) -> bool {
+    fn eq(&self, other: &Arc<T, A>) -> bool {
         **self == **other
     }
     #[inline]
-    default fn ne(&self, other: &Arc<T, A>) -> bool {
-        **self != **other
-    }
-}
-
-/// We're doing this specialization here, and not as a more general optimization on `&T`, because it
-/// would otherwise add a cost to all equality checks on refs. We assume that `Arc`s are used to
-/// store large values, that are slow to clone, but also heavy to check for equality, causing this
-/// cost to pay off more easily. It's also more likely to have two `Arc` clones, that point to
-/// the same value, than two `&T`s.
-///
-/// We can only do this when `T: Eq` as a `PartialEq` might be deliberately irreflexive.
-#[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized + crate::rc::MarkerEq, A: Allocator> ArcEqIdent<T, A> for Arc<T, A> {
-    #[inline]
-    fn eq(&self, other: &Arc<T, A>) -> bool {
-        Arc::ptr_eq(self, other) || **self == **other
-    }
-
-    #[inline]
     fn ne(&self, other: &Arc<T, A>) -> bool {
-        !Arc::ptr_eq(self, other) && **self != **other
+        **self != **other
     }
 }
 
@@ -4172,35 +4123,8 @@ trait ToArcSlice<T>: Iterator<Item = T> + Sized {
 
 #[cfg(not(no_global_oom_handling))]
 impl<T, I: Iterator<Item = T>> ToArcSlice<T> for I {
-    default fn to_arc_slice(self) -> Arc<[T]> {
-        self.collect::<Vec<T>>().into()
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T, I: iter::TrustedLen<Item = T>> ToArcSlice<T> for I {
     fn to_arc_slice(self) -> Arc<[T]> {
-        // This is the case for a `TrustedLen` iterator.
-        let (low, high) = self.size_hint();
-        if let Some(high) = high {
-            debug_assert_eq!(
-                low,
-                high,
-                "TrustedLen iterator's size hint is not exact: {:?}",
-                (low, high)
-            );
-
-            unsafe {
-                // SAFETY: We need to ensure that the iterator has an exact length and we have.
-                Arc::from_iter_exact(self, low)
-            }
-        } else {
-            // TrustedLen contract guarantees that `upper_bound == None` implies an iterator
-            // length exceeding `usize::MAX`.
-            // The default implementation would collect into a vec which would panic.
-            // Thus we panic here immediately without invoking `Vec` code.
-            panic!("capacity overflow");
-        }
+        self.collect::<Vec<T>>().into()
     }
 }
 

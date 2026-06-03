@@ -7,11 +7,9 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-#[cfg(not(no_global_oom_handling))]
-use core::clone::TrivialClone;
 use core::cmp::{self, Ordering};
 use core::hash::{Hash, Hasher};
-use core::iter::{ByRefSized, repeat_n, repeat_with};
+use core::iter::{repeat_n, repeat_with};
 // This is used in a bunch of intra-doc links.
 // FIXME: For some reason, `#[cfg(doc)]` wasn't sufficient, resulting in
 // failures in linkchecker even though rustdoc built the docs just fine.
@@ -529,99 +527,6 @@ impl<T, A: Allocator> VecDeque<T, A> {
         }
     }
 
-    /// Copies all values from `src` to `dst` in reversed order, wrapping around if needed.
-    /// Assumes capacity is sufficient.
-    /// Equivalent to calling [`VecDeque::copy_slice`] with a [reversed](https://doc.rust-lang.org/std/primitive.slice.html#method.reverse) slice.
-    #[inline]
-    unsafe fn copy_slice_reversed(&mut self, dst: usize, src: &[T]) {
-        /// # Safety
-        ///
-        /// See [`ptr::copy_nonoverlapping`].
-        unsafe fn copy_nonoverlapping_reversed<T>(src: *const T, dst: *mut T, count: usize) {
-            for i in 0..count {
-                unsafe { ptr::copy_nonoverlapping(src.add(count - 1 - i), dst.add(i), 1) };
-            }
-        }
-
-        debug_assert!(src.len() <= self.capacity());
-        let head_room = self.capacity() - dst;
-        if src.len() <= head_room {
-            unsafe {
-                copy_nonoverlapping_reversed(src.as_ptr(), self.ptr().add(dst), src.len());
-            }
-        } else {
-            let (left, right) = src.split_at(src.len() - head_room);
-            unsafe {
-                copy_nonoverlapping_reversed(right.as_ptr(), self.ptr().add(dst), right.len());
-                copy_nonoverlapping_reversed(left.as_ptr(), self.ptr(), left.len());
-            }
-        }
-    }
-
-    /// Writes all values from `iter` to `dst`.
-    ///
-    /// # Safety
-    ///
-    /// Assumes no wrapping around happens.
-    /// Assumes capacity is sufficient.
-    #[inline]
-    unsafe fn write_iter(
-        &mut self,
-        dst: usize,
-        iter: impl Iterator<Item = T>,
-        written: &mut usize,
-    ) {
-        iter.enumerate().for_each(|(i, element)| unsafe {
-            self.buffer_write(dst + i, element);
-            *written += 1;
-        });
-    }
-
-    /// Writes all values from `iter` to `dst`, wrapping
-    /// at the end of the buffer and returns the number
-    /// of written values.
-    ///
-    /// # Safety
-    ///
-    /// Assumes that `iter` yields at most `len` items.
-    /// Assumes capacity is sufficient.
-    unsafe fn write_iter_wrapping(
-        &mut self,
-        dst: usize,
-        mut iter: impl Iterator<Item = T>,
-        len: usize,
-    ) -> usize {
-        struct Guard<'a, T, A: Allocator> {
-            deque: &'a mut VecDeque<T, A>,
-            written: usize,
-        }
-
-        impl<'a, T, A: Allocator> Drop for Guard<'a, T, A> {
-            fn drop(&mut self) {
-                self.deque.len += self.written;
-            }
-        }
-
-        let head_room = self.capacity() - dst;
-
-        let mut guard = Guard { deque: self, written: 0 };
-
-        if head_room >= len {
-            unsafe { guard.deque.write_iter(dst, iter, &mut guard.written) };
-        } else {
-            unsafe {
-                guard.deque.write_iter(
-                    dst,
-                    ByRefSized(&mut iter).take(head_room),
-                    &mut guard.written,
-                );
-                guard.deque.write_iter(0, iter, &mut guard.written)
-            };
-        }
-
-        guard.written
-    }
-
     /// Frobs the head and tail sections around to handle the fact that we
     /// just reallocated. Unsafe because it trusts old_capacity.
     #[inline]
@@ -858,39 +763,6 @@ impl<T, A: Allocator> VecDeque<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> VecDeque<T, A> {
         VecDeque { head: 0, len: 0, buf: RawVec::with_capacity_in(capacity, alloc) }
-    }
-
-    /// Creates a `VecDeque` from a raw allocation, when the initialized
-    /// part of that allocation forms a *contiguous* subslice thereof.
-    ///
-    /// For use by `vec::IntoIter::into_vecdeque`
-    ///
-    /// # Safety
-    ///
-    /// All the usual requirements on the allocated memory like in
-    /// `Vec::from_raw_parts_in`, but takes a *range* of elements that are
-    /// initialized rather than only supporting `0..len`.  Requires that
-    /// `initialized.start` ≤ `initialized.end` ≤ `capacity`.
-    #[inline]
-    #[cfg(not(test))]
-    pub(crate) unsafe fn from_contiguous_raw_parts_in(
-        ptr: *mut T,
-        initialized: Range<usize>,
-        capacity: usize,
-        alloc: A,
-    ) -> Self {
-        debug_assert!(initialized.start <= initialized.end);
-        debug_assert!(initialized.end <= capacity);
-
-        // SAFETY: Our safety precondition guarantees the range length won't wrap,
-        // and that the allocation is valid for use in `RawVec`.
-        unsafe {
-            VecDeque {
-                head: initialized.start,
-                len: initialized.end.unchecked_sub(initialized.start),
-                buf: RawVec::from_raw_parts_in(ptr, capacity, alloc),
-            }
-        }
     }
 
     /// Provides a reference to the element at the given index.
@@ -3416,7 +3288,7 @@ trait SpecExtendFromWithin {
 
 #[cfg(not(no_global_oom_handling))]
 impl<T: Clone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
-    default unsafe fn spec_extend_from_within(&mut self, src: Range<usize>) {
+    unsafe fn spec_extend_from_within(&mut self, src: Range<usize>) {
         let dst = self.len();
         let count = src.end - src.start;
         let src = src.start;
@@ -3439,7 +3311,7 @@ impl<T: Clone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
         }
     }
 
-    default unsafe fn spec_prepend_from_within(&mut self, src: Range<usize>) {
+    unsafe fn spec_prepend_from_within(&mut self, src: Range<usize>) {
         let dst = 0;
         let count = src.end - src.start;
         let src = src.start + count;
@@ -3486,52 +3358,6 @@ impl<T: Clone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
                 }
             }
         }
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: TrivialClone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
-    unsafe fn spec_extend_from_within(&mut self, src: Range<usize>) {
-        let dst = self.len();
-        let count = src.end - src.start;
-        let src = src.start;
-
-        unsafe {
-            // SAFETY:
-            // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
-            // - Ranges are in bounds: guaranteed by the caller.
-            let ranges = self.nonoverlapping_ranges(src, dst, count, self.head);
-            for (src, dst, count) in ranges {
-                ptr::copy_nonoverlapping(src, dst, count);
-            }
-        }
-
-        // SAFETY:
-        // - The elements were just initialized by `copy_nonoverlapping`
-        self.len += count;
-    }
-
-    unsafe fn spec_prepend_from_within(&mut self, src: Range<usize>) {
-        let dst = 0;
-        let count = src.end - src.start;
-        let src = src.start + count;
-
-        let new_head = self.wrap_sub(self.head, count);
-
-        unsafe {
-            // SAFETY:
-            // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
-            // - Ranges are in bounds: guaranteed by the caller.
-            let ranges = self.nonoverlapping_ranges(src, dst, count, new_head);
-            for (src, dst, count) in ranges {
-                ptr::copy_nonoverlapping(src, dst, count);
-            }
-        }
-
-        // SAFETY:
-        // - The elements were just initialized by `copy_nonoverlapping`
-        self.head = new_head;
-        self.len += count;
     }
 }
 

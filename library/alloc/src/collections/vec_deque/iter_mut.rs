@@ -1,4 +1,4 @@
-use core::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
+use core::iter::{FusedIterator, TrustedLen};
 use core::num::NonZero;
 use core::ops::Try;
 use core::{fmt, mem, slice};
@@ -284,13 +284,3 @@ impl<T> FusedIterator for IterMut<'_, T> {}
 
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<T> TrustedLen for IterMut<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<T> TrustedRandomAccess for IterMut<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<T> TrustedRandomAccessNoCoerce for IterMut<'_, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}

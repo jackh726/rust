@@ -73,8 +73,6 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-#[cfg(not(no_global_oom_handling))]
-use core::clone::TrivialClone;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 #[cfg(not(no_global_oom_handling))]
@@ -113,21 +111,10 @@ mod drain;
 #[cfg(not(no_global_oom_handling))]
 mod cow;
 
-#[cfg(not(no_global_oom_handling))]
-pub(crate) use self::in_place_collect::AsVecIntoIter;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::into_iter::IntoIter;
 
 mod into_iter;
-
-#[cfg(not(no_global_oom_handling))]
-use self::is_zero::IsZero;
-
-#[cfg(not(no_global_oom_handling))]
-mod is_zero;
-
-#[cfg(not(no_global_oom_handling))]
-mod in_place_collect;
 
 mod partial_eq;
 
@@ -147,12 +134,6 @@ use self::set_len_on_drop::SetLenOnDrop;
 
 #[cfg(not(no_global_oom_handling))]
 mod set_len_on_drop;
-
-#[cfg(not(no_global_oom_handling))]
-use self::in_place_drop::{InPlaceDrop, InPlaceDstDataSrcBufDrop};
-
-#[cfg(not(no_global_oom_handling))]
-mod in_place_drop;
 
 #[cfg(not(no_global_oom_handling))]
 use self::spec_from_iter_nested::SpecFromIterNested;
@@ -3695,7 +3676,7 @@ trait ExtendFromWithinSpec {
 
 #[cfg(not(no_global_oom_handling))]
 impl<T: Clone, A: Allocator> ExtendFromWithinSpec for Vec<T, A> {
-    default unsafe fn spec_extend_from_within(&mut self, src: Range<usize>) {
+    unsafe fn spec_extend_from_within(&mut self, src: Range<usize>) {
         // SAFETY:
         // - len is increased only after initializing elements
         let (this, spare, len) = unsafe { self.split_at_spare_mut_with_len() };
@@ -3710,35 +3691,6 @@ impl<T: Clone, A: Allocator> ExtendFromWithinSpec for Vec<T, A> {
             // - Element was just initialized with `MaybeUninit::write`, so it's ok to increase len
             // - len is increased after each element to prevent leaks (see issue #82533)
             .for_each(|_| *len += 1);
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: TrivialClone, A: Allocator> ExtendFromWithinSpec for Vec<T, A> {
-    unsafe fn spec_extend_from_within(&mut self, src: Range<usize>) {
-        let count = src.len();
-        {
-            let (init, spare) = self.split_at_spare_mut();
-
-            // SAFETY:
-            // - caller guarantees that `src` is a valid index
-            let source = unsafe { init.get_unchecked(src) };
-
-            // SAFETY:
-            // - Both pointers are created from unique slice references (`&mut [_]`)
-            //   so they are valid and do not overlap.
-            // - Elements implement `TrivialClone` so this is equivalent to calling
-            //   `clone` on every one of them.
-            // - `count` is equal to the len of `source`, so source is valid for
-            //   `count` reads
-            // - `.reserve(count)` guarantees that `spare.len() >= count` so spare
-            //   is valid for `count` writes
-            unsafe { ptr::copy_nonoverlapping(source.as_ptr(), spare.as_mut_ptr() as _, count) };
-        }
-
-        // SAFETY:
-        // - The elements were just initialized by `copy_nonoverlapping`
-        self.len += count;
     }
 }
 

@@ -2099,14 +2099,8 @@ impl<T, A: Allocator> Extend<T> for LinkedList<T, A> {
 }
 
 impl<I: IntoIterator, A: Allocator> SpecExtend<I> for LinkedList<I::Item, A> {
-    default fn spec_extend(&mut self, iter: I) {
+    fn spec_extend(&mut self, iter: I) {
         iter.into_iter().for_each(move |elt| self.push_back(elt));
-    }
-}
-
-impl<T> SpecExtend<LinkedList<T>> for LinkedList<T> {
-    fn spec_extend(&mut self, ref mut other: LinkedList<T>) {
-        self.append(other);
     }
 }
 

@@ -38,22 +38,13 @@ trait BoxIter {
 
 impl<I: Iterator + ?Sized, A: Allocator> BoxIter for Box<I, A> {
     type Item = I::Item;
-    default fn last(self) -> Option<I::Item> {
+    fn last(self) -> Option<I::Item> {
         #[inline]
         fn some<T>(_: Option<T>, x: T) -> Option<T> {
             Some(x)
         }
 
         self.fold(None, some)
-    }
-}
-
-/// Specialization for sized `I`s that uses `I`s implementation of `last()`
-/// instead of the default.
-#[stable(feature = "rust1", since = "1.0.0")]
-impl<I: Iterator, A: Allocator> BoxIter for Box<I, A> {
-    fn last(self) -> Option<I::Item> {
-        (*self).last()
     }
 }
 

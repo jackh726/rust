@@ -47,8 +47,6 @@ use core::iter::FusedIterator;
 #[cfg(not(no_global_oom_handling))]
 use core::iter::from_fn;
 #[cfg(not(no_global_oom_handling))]
-use core::num::Saturating;
-#[cfg(not(no_global_oom_handling))]
 use core::ops::Add;
 #[cfg(not(no_global_oom_handling))]
 use core::ops::AddAssign;
@@ -1100,23 +1098,6 @@ impl String {
     #[rustc_diagnostic_item = "string_push_str"]
     pub fn push_str(&mut self, string: &str) {
         self.vec.extend_from_slice(string.as_bytes())
-    }
-
-    #[cfg(not(no_global_oom_handling))]
-    #[inline]
-    fn push_str_slice(&mut self, slice: &[&str]) {
-        // use saturating arithmetic to ensure that in the case of an overflow, reserve() throws OOM
-        let additional: Saturating<usize> = slice.iter().map(|x| Saturating(x.len())).sum();
-        self.reserve(additional.0);
-        let (ptr, len, cap) = core::mem::take(self).into_raw_parts();
-        unsafe {
-            let mut dst = ptr.add(len);
-            for new in slice {
-                core::ptr::copy_nonoverlapping(new.as_ptr(), dst, new.len());
-                dst = dst.add(new.len());
-            }
-            *self = String::from_raw_parts(ptr, len + additional.0, cap);
-        }
     }
 
     /// Copies elements from `src` range to the end of the string.
@@ -2521,22 +2502,8 @@ trait SpecExtendStr {
 
 #[cfg(not(no_global_oom_handling))]
 impl<'a, T: IntoIterator<Item = &'a str>> SpecExtendStr for T {
-    default fn spec_extend_into(self, target: &mut String) {
+    fn spec_extend_into(self, target: &mut String) {
         self.into_iter().for_each(move |s| target.push_str(s));
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl SpecExtendStr for [&str] {
-    fn spec_extend_into(self, target: &mut String) {
-        target.push_str_slice(&self);
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<const N: usize> SpecExtendStr for [&str; N] {
-    fn spec_extend_into(self, target: &mut String) {
-        target.push_str_slice(&self[..]);
     }
 }
 
@@ -2907,7 +2874,7 @@ impl<T: fmt::Display + ?Sized> SpecToString for T {
     // See <https://github.com/rust-lang/rust/pull/74852>, the last attempt
     // to try to remove it.
     #[inline]
-    default fn spec_to_string(&self) -> String {
+    fn spec_to_string(&self) -> String {
         let mut buf = String::new();
         let mut formatter =
             core::fmt::Formatter::new(&mut buf, core::fmt::FormattingOptions::new());
@@ -2915,167 +2882,6 @@ impl<T: fmt::Display + ?Sized> SpecToString for T {
         fmt::Display::fmt(self, &mut formatter)
             .expect("a Display implementation returned an error unexpectedly");
         buf
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl SpecToString for core::ascii::Char {
-    #[inline]
-    fn spec_to_string(&self) -> String {
-        self.as_str().to_owned()
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl SpecToString for char {
-    #[inline]
-    fn spec_to_string(&self) -> String {
-        String::from(self.encode_utf8(&mut [0; char::MAX_LEN_UTF8]))
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl SpecToString for bool {
-    #[inline]
-    fn spec_to_string(&self) -> String {
-        String::from(if *self { "true" } else { "false" })
-    }
-}
-
-macro_rules! impl_to_string {
-    ($($signed:ident, $unsigned:ident,)*) => {
-        $(
-        #[cfg(not(no_global_oom_handling))]
-        #[cfg(not(feature = "optimize_for_size"))]
-        impl SpecToString for $signed {
-            #[inline]
-            fn spec_to_string(&self) -> String {
-                const SIZE: usize = $signed::MAX.ilog10() as usize + 1;
-                let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); SIZE];
-                // Only difference between signed and unsigned are these 8 lines.
-                let mut out;
-                if *self < 0 {
-                    out = String::with_capacity(SIZE + 1);
-                    out.push('-');
-                } else {
-                    out = String::with_capacity(SIZE);
-                }
-
-                // SAFETY: `buf` is always big enough to contain all the digits.
-                unsafe { out.push_str(self.unsigned_abs()._fmt(&mut buf)); }
-                out
-            }
-        }
-        #[cfg(not(no_global_oom_handling))]
-        #[cfg(not(feature = "optimize_for_size"))]
-        impl SpecToString for $unsigned {
-            #[inline]
-            fn spec_to_string(&self) -> String {
-                const SIZE: usize = $unsigned::MAX.ilog10() as usize + 1;
-                let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); SIZE];
-
-                // SAFETY: `buf` is always big enough to contain all the digits.
-                unsafe { self._fmt(&mut buf).to_string() }
-            }
-        }
-        )*
-    }
-}
-
-impl_to_string! {
-    i8, u8,
-    i16, u16,
-    i32, u32,
-    i64, u64,
-    isize, usize,
-    i128, u128,
-}
-
-#[cfg(not(no_global_oom_handling))]
-#[cfg(feature = "optimize_for_size")]
-impl SpecToString for u8 {
-    #[inline]
-    fn spec_to_string(&self) -> String {
-        let mut buf = String::with_capacity(3);
-        let mut n = *self;
-        if n >= 10 {
-            if n >= 100 {
-                buf.push((b'0' + n / 100) as char);
-                n %= 100;
-            }
-            buf.push((b'0' + n / 10) as char);
-            n %= 10;
-        }
-        buf.push((b'0' + n) as char);
-        buf
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-#[cfg(feature = "optimize_for_size")]
-impl SpecToString for i8 {
-    #[inline]
-    fn spec_to_string(&self) -> String {
-        let mut buf = String::with_capacity(4);
-        if self.is_negative() {
-            buf.push('-');
-        }
-        let mut n = self.unsigned_abs();
-        if n >= 10 {
-            if n >= 100 {
-                buf.push('1');
-                n -= 100;
-            }
-            buf.push((b'0' + n / 10) as char);
-            n %= 10;
-        }
-        buf.push((b'0' + n) as char);
-        buf
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-macro_rules! to_string_str {
-    {$($type:ty,)*} => {
-        $(
-            impl SpecToString for $type {
-                #[inline]
-                fn spec_to_string(&self) -> String {
-                    let s: &str = self;
-                    String::from(s)
-                }
-            }
-        )*
-    };
-}
-
-#[cfg(not(no_global_oom_handling))]
-to_string_str! {
-    Cow<'_, str>,
-    String,
-    // Generic/generated code can sometimes have multiple, nested references
-    // for strings, including `&&&str`s that would never be written
-    // by hand.
-    &&&&&&&&&&&&str,
-    &&&&&&&&&&&str,
-    &&&&&&&&&&str,
-    &&&&&&&&&str,
-    &&&&&&&&str,
-    &&&&&&&str,
-    &&&&&&str,
-    &&&&&str,
-    &&&&str,
-    &&&str,
-    &&str,
-    &str,
-    str,
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl SpecToString for fmt::Arguments<'_> {
-    #[inline]
-    fn spec_to_string(&self) -> String {
-        crate::fmt::format(*self)
     }
 }
 

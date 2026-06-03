@@ -144,7 +144,7 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use core::alloc::Allocator;
-use core::iter::{FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen};
+use core::iter::{FusedIterator, TrustedLen};
 use core::mem::{self, ManuallyDrop, swap};
 use core::num::NonZero;
 use core::ops::{Deref, DerefMut};
@@ -153,8 +153,6 @@ use core::{fmt, ptr};
 use crate::alloc::Global;
 use crate::collections::TryReserveError;
 use crate::slice;
-#[cfg(not(test))]
-use crate::vec::AsVecIntoIter;
 use crate::vec::{self, Vec};
 
 /// A priority queue implemented with a binary heap.
@@ -1732,10 +1730,6 @@ impl<T, A: Allocator> ExactSizeIterator for IntoIter<T, A> {
 #[stable(feature = "fused", since = "1.26.0")]
 impl<T, A: Allocator> FusedIterator for IntoIter<T, A> {}
 
-#[doc(hidden)]
-#[unstable(issue = "none", feature = "trusted_fused")]
-unsafe impl<T, A: Allocator> TrustedFused for IntoIter<T, A> {}
-
 #[stable(feature = "default_iters", since = "1.70.0")]
 impl<T> Default for IntoIter<T> {
     /// Creates an empty `binary_heap::IntoIter`.
@@ -1747,35 +1741,6 @@ impl<T> Default for IntoIter<T> {
     /// ```
     fn default() -> Self {
         IntoIter { iter: Default::default() }
-    }
-}
-
-// In addition to the SAFETY invariants of the following three unsafe traits
-// also refer to the vec::in_place_collect module documentation to get an overview
-#[unstable(issue = "none", feature = "inplace_iteration")]
-#[doc(hidden)]
-unsafe impl<T, A: Allocator> SourceIter for IntoIter<T, A> {
-    type Source = IntoIter<T, A>;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut Self::Source {
-        self
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-#[doc(hidden)]
-unsafe impl<I, A: Allocator> InPlaceIterable for IntoIter<I, A> {
-    const EXPAND_BY: Option<NonZero<usize>> = NonZero::new(1);
-    const MERGE_BY: Option<NonZero<usize>> = NonZero::new(1);
-}
-
-#[cfg(not(test))]
-unsafe impl<I> AsVecIntoIter for IntoIter<I> {
-    type Item = I;
-
-    fn as_into_iter(&mut self) -> &mut vec::IntoIter<Self::Item> {
-        &mut self.iter
     }
 }
 

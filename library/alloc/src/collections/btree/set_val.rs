@@ -16,14 +16,7 @@ pub(super) trait IsSetVal {
 
 // Blanket implementation
 impl<V> IsSetVal for V {
-    default fn is_set_val() -> bool {
-        false
-    }
-}
-
-// Specialization
-impl IsSetVal for SetValZST {
     fn is_set_val() -> bool {
-        true
+        false
     }
 }
