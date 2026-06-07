@@ -465,17 +465,8 @@ trait SpecArrayClone: Clone {
 
 impl<T: Clone> SpecArrayClone for T {
     #[inline]
-    default fn clone<const N: usize>(array: &[T; N]) -> [T; N] {
-        from_trusted_iterator(array.iter().cloned())
-    }
-}
-
-impl<T: TrivialClone> SpecArrayClone for T {
-    #[inline]
     fn clone<const N: usize>(array: &[T; N]) -> [T; N] {
-        // SAFETY: `TrivialClone` implies that this is equivalent to calling
-        // `Clone` on every element.
-        unsafe { ptr::read(array) }
+        from_trusted_iterator(array.iter().cloned())
     }
 }
 
@@ -1019,7 +1010,7 @@ pub(crate) const trait SpecNextChunk<T, const N: usize>: Iterator<Item = T> {
 #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
 impl<I: [const] Iterator<Item = T>, T, const N: usize> const SpecNextChunk<T, N> for I {
     #[inline]
-    default fn spec_next_chunk(&mut self) -> Result<[T; N], IntoIter<T, N>> {
+    fn spec_next_chunk(&mut self) -> Result<[T; N], IntoIter<T, N>> {
         let mut array = [const { MaybeUninit::uninit() }; N];
         let r = iter_next_chunk_erased(&mut array, self);
         match r {
@@ -1031,26 +1022,6 @@ impl<I: [const] Iterator<Item = T>, T, const N: usize> const SpecNextChunk<T, N>
                 // SAFETY: Only the first `initialized` elements were populated
                 Err(unsafe { IntoIter::new_unchecked(array, 0..initialized) })
             }
-        }
-    }
-}
-#[rustc_const_unstable(feature = "const_iter", issue = "92476")]
-impl<I: [const] Iterator<Item = T> + TrustedLen, T, const N: usize> const SpecNextChunk<T, N>
-    for I
-{
-    fn spec_next_chunk(&mut self) -> Result<[T; N], IntoIter<T, N>> {
-        let len = (*self).size_hint().0;
-        let mut array = [const { MaybeUninit::uninit() }; N];
-        if len < N {
-            // SAFETY: `TrustedLen`, an unsafe trait, requires that i can get len items out of it.
-            unsafe { write(&mut array, self, len) };
-            // SAFETY: Only the first `len` elements were populated
-            Err(unsafe { IntoIter::new_unchecked(array, 0..len) })
-        } else {
-            // SAFETY: `TrustedLen`, an unsafe trait, requires that i can get N items out of it.
-            unsafe { write(&mut array, self, N) };
-            // SAFETY: All N items were populated
-            Ok(unsafe { MaybeUninit::array_assume_init(array) })
         }
     }
 }

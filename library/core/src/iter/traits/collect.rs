@@ -576,35 +576,13 @@ where
         ExtendT: Extend<T>,
         I: Iterator<Item = T>,
     {
-        default fn extend(&mut self, iter: I) {
+        fn extend(&mut self, iter: I) {
             let (lower_bound, _) = iter.size_hint();
             if lower_bound > 0 {
                 self.extend_reserve(lower_bound);
             }
 
             iter.for_each(extender(self))
-        }
-    }
-
-    impl<ExtendT, I, T> SpecExtend<I> for ExtendT
-    where
-        ExtendT: Extend<T>,
-        I: TrustedLen<Item = T>,
-    {
-        fn extend(&mut self, iter: I) {
-            let (lower_bound, upper_bound) = iter.size_hint();
-            if lower_bound > 0 {
-                self.extend_reserve(lower_bound);
-            }
-
-            if upper_bound.is_none() {
-                // We cannot reserve more than `usize::MAX` items, and this is likely to go out of memory anyway.
-                iter.for_each(extender(self))
-            } else {
-                // SAFETY: We reserve enough space for the `size_hint`, and the iterator is
-                // `TrustedLen` so its `size_hint` is exact.
-                iter.for_each(unsafe { unchecked_extender(self) })
-            }
         }
     }
 

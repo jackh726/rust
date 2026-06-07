@@ -89,8 +89,6 @@ fn eq() {
 
 const SHARED_ITER_MAX: u16 = 100;
 
-fn assert_trusted_len<I: TrustedLen>(_: &I) {}
-
 #[test]
 fn shared_from_iter_normal() {
     // Exercise the base implementation for non-`TrustedLen` iterators.
@@ -119,7 +117,6 @@ fn shared_from_iter_trustedlen_normal() {
     // where `size_hint()` matches `(_, Some(exact_len))`.
     {
         let iter = (0..SHARED_ITER_MAX).map(Box::new);
-        assert_trusted_len(&iter);
 
         // Collecting into a `Vec<T>` or `Rc<[T]>` should make no difference:
         let vec = iter.clone().collect::<Vec<_>>();
@@ -159,7 +156,6 @@ fn shared_from_iter_trustedlen_panic() {
         98 => panic!("I've almost got 99 problems."),
         _ => Box::new(val),
     });
-    assert_trusted_len(&iter);
     let _ = iter.collect::<Rc<[_]>>();
 
     panic!("I am unreachable.");
@@ -187,7 +183,6 @@ fn shared_from_iter_trustedlen_no_fuse() {
 
     let vec = vec![Some(Box::new(42)), Some(Box::new(24)), None, Some(Box::new(12))];
     let iter = Iter(vec.into_iter());
-    assert_trusted_len(&iter);
     assert_eq!(&[Box::new(42), Box::new(24)], &*iter.collect::<Rc<[_]>>());
 }
 

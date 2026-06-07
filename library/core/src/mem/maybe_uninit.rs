@@ -1640,7 +1640,7 @@ trait SpecFill<T> {
 }
 
 impl<T: Clone> SpecFill<T> for [MaybeUninit<T>] {
-    default fn spec_fill(&mut self, value: T) {
+    fn spec_fill(&mut self, value: T) {
         let mut guard = Guard { slice: self, initialized: 0 };
 
         if let Some((last, elems)) = guard.slice.split_last_mut() {
@@ -1652,15 +1652,5 @@ impl<T: Clone> SpecFill<T> for [MaybeUninit<T>] {
             last.write(value);
         }
         super::forget(guard);
-    }
-}
-
-impl<T: TrivialClone> SpecFill<T> for [MaybeUninit<T>] {
-    fn spec_fill(&mut self, value: T) {
-        // SAFETY: because `T` is `TrivialClone`, this is equivalent to calling
-        // `T::clone` for every element. Notably, `TrivialClone` also implies
-        // that the `clone` implementation will not panic, so we can avoid
-        // initialization guards and such.
-        self.fill_with(|| MaybeUninit::new(unsafe { ptr::read(&value) }));
     }
 }

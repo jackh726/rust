@@ -127,26 +127,6 @@ where
     }
 }
 
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I> SourceIter for Take<I>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable> InPlaceIterable for Take<I> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}
-
 #[stable(feature = "double_ended_take_iterator", since = "1.38.0")]
 impl<I> DoubleEndedIterator for Take<I>
 where
@@ -260,7 +240,7 @@ trait SpecTake: Iterator {
 
 impl<I: Iterator> SpecTake for Take<I> {
     #[inline]
-    default fn spec_fold<B, F>(mut self, init: B, f: F) -> B
+    fn spec_fold<B, F>(mut self, init: B, f: F) -> B
     where
         Self: Sized,
         F: FnMut(B, Self::Item) -> B,
@@ -270,7 +250,7 @@ impl<I: Iterator> SpecTake for Take<I> {
     }
 
     #[inline]
-    default fn spec_for_each<F: FnMut(Self::Item)>(mut self, f: F) {
+    fn spec_for_each<F: FnMut(Self::Item)>(mut self, f: F) {
         // The default implementation would use a unit accumulator, so we can
         // avoid a stateful closure by folding over the remaining number
         // of items we wish to return instead.
@@ -286,34 +266,6 @@ impl<I: Iterator> SpecTake for Take<I> {
         let remaining = self.n;
         if remaining > 0 {
             self.iter.try_fold(remaining - 1, check(f));
-        }
-    }
-}
-
-impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
-    #[inline]
-    fn spec_fold<B, F>(mut self, init: B, mut f: F) -> B
-    where
-        Self: Sized,
-        F: FnMut(B, Self::Item) -> B,
-    {
-        let mut acc = init;
-        let end = self.n.min(self.iter.size());
-        for i in 0..end {
-            // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
-            let val = unsafe { self.iter.__iterator_get_unchecked(i) };
-            acc = f(acc, val);
-        }
-        acc
-    }
-
-    #[inline]
-    fn spec_for_each<F: FnMut(Self::Item)>(mut self, mut f: F) {
-        let end = self.n.min(self.iter.size());
-        for i in 0..end {
-            // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
-            let val = unsafe { self.iter.__iterator_get_unchecked(i) };
-            f(val);
         }
     }
 }

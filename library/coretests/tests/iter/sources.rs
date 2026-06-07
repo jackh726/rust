@@ -18,7 +18,6 @@ fn test_repeat_take() {
     assert_eq!(it.next(), Some(42));
     assert_eq!(it.next(), Some(42));
     assert_eq!(it.next(), None);
-    is_trusted_len(repeat(42).take(3));
     assert_eq!(repeat(42).take(3).size_hint(), (3, Some(3)));
     assert_eq!(repeat(42).take(0).size_hint(), (0, Some(0)));
     assert_eq!(repeat(42).take(usize::MAX).size_hint(), (usize::MAX, Some(usize::MAX)));
@@ -60,7 +59,6 @@ fn test_repeat_with_take() {
     assert_eq!(it.next(), Some(42));
     assert_eq!(it.next(), Some(42));
     assert_eq!(it.next(), None);
-    is_trusted_len(repeat_with(|| 42).take(3));
     assert_eq!(repeat_with(|| 42).take(3).size_hint(), (3, Some(3)));
     assert_eq!(repeat_with(|| 42).take(0).size_hint(), (0, Some(0)));
     assert_eq!(repeat_with(|| 42).take(usize::MAX).size_hint(), (usize::MAX, Some(usize::MAX)));

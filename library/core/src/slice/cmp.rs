@@ -123,7 +123,7 @@ where
     // such as in `<str as PartialEq>::eq`.
     // The codegen backend can still inline it later if needed.
     #[rustc_no_mir_inline]
-    default unsafe fn equal_same_length(lhs: *const Self, rhs: *const B, len: usize) -> bool {
+    unsafe fn equal_same_length(lhs: *const Self, rhs: *const B, len: usize) -> bool {
         // Implemented as explicit indexing rather
         // than zipped iterators for performance reasons.
         // See PR https://github.com/rust-lang/rust/pull/116846
@@ -140,26 +140,6 @@ where
         true
     }
 }
-
-// When each element can be compared byte-wise, we can compare all the bytes
-// from the whole size in one call to the intrinsics.
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A, B> const SlicePartialEq<B> for A
-where
-    A: [const] BytewiseEq<B>,
-{
-    #[inline]
-    unsafe fn equal_same_length(lhs: *const Self, rhs: *const B, len: usize) -> bool {
-        // SAFETY: by our precondition, `lhs` and `rhs` are guaranteed to be valid
-        // for reading `len` values, which also means the size is guaranteed
-        // not to overflow because it exists in memory;
-        unsafe {
-            let size = crate::intrinsics::unchecked_mul(len, Self::SIZE);
-            compare_bytes(lhs as _, rhs as _, size) == 0
-        }
-    }
-}
-
 #[doc(hidden)]
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 // intermediate trait for specialization of slice's PartialOrd
@@ -181,7 +161,7 @@ type AlwaysBreak<B> = ControlFlow<B, crate::convert::Infallible>;
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 impl<A: [const] PartialOrd> const SlicePartialOrd for A {
-    default fn partial_compare(left: &[A], right: &[A]) -> Option<Ordering> {
+    fn partial_compare(left: &[A], right: &[A]) -> Option<Ordering> {
         // FIXME(const-hack): revert this to a const closure once possible
         #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
         const fn elem_chain<A: [const] PartialOrd>(a: &A, b: &A) -> ControlFlow<Option<Ordering>> {
@@ -204,16 +184,16 @@ impl<A: [const] PartialOrd> const SlicePartialOrd for A {
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 impl<A: [const] PartialOrd> const SliceChain for A {
-    default fn chaining_lt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
+    fn chaining_lt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
         chaining_impl(left, right, PartialOrd::__chaining_lt, usize::__chaining_lt)
     }
-    default fn chaining_le(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
+    fn chaining_le(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
         chaining_impl(left, right, PartialOrd::__chaining_le, usize::__chaining_le)
     }
-    default fn chaining_gt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
+    fn chaining_gt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
         chaining_impl(left, right, PartialOrd::__chaining_gt, usize::__chaining_gt)
     }
-    default fn chaining_ge(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
+    fn chaining_ge(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
         chaining_impl(left, right, PartialOrd::__chaining_ge, usize::__chaining_ge)
     }
 }
@@ -256,33 +236,6 @@ where
 }
 */
 
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A: [const] AlwaysApplicableOrd> const SlicePartialOrd for A {
-    fn partial_compare(left: &[A], right: &[A]) -> Option<Ordering> {
-        Some(SliceOrd::compare(left, right))
-    }
-}
-
-#[rustc_specialization_trait]
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-const trait AlwaysApplicableOrd: [const] SliceOrd + [const] Ord {}
-
-macro_rules! always_applicable_ord {
-    ($([$($p:tt)*] $t:ty,)*) => {
-        $(impl<$($p)*> AlwaysApplicableOrd for $t {})*
-    }
-}
-
-always_applicable_ord! {
-    [] u8, [] u16, [] u32, [] u64, [] u128, [] usize,
-    [] i8, [] i16, [] i32, [] i64, [] i128, [] isize,
-    [] bool, [] char,
-    [T: ?Sized] *const T, [T: ?Sized] *mut T,
-    [T: AlwaysApplicableOrd] &T,
-    [T: AlwaysApplicableOrd] &mut T,
-    [T: AlwaysApplicableOrd] Option<T>,
-}
-
 #[doc(hidden)]
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 // intermediate trait for specialization of slice's Ord
@@ -292,7 +245,7 @@ const trait SliceOrd: Sized {
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 impl<A: [const] Ord> const SliceOrd for A {
-    default fn compare(left: &[Self], right: &[Self]) -> Ordering {
+    fn compare(left: &[Self], right: &[Self]) -> Ordering {
         // FIXME(const-hack): revert this to a const closure once possible
         #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
         const fn elem_chain<A: [const] Ord>(a: &A, b: &A) -> ControlFlow<Ordering> {
@@ -313,88 +266,6 @@ impl<A: [const] Ord> const SliceOrd for A {
     }
 }
 
-/// Marks that a type should be treated as an unsigned byte for comparisons.
-///
-/// # Safety
-/// * The type must be readable as an `u8`, meaning it has to have the same
-///   layout as `u8` and always be initialized.
-/// * For every `x` and `y` of this type, `Ord(x, y)` must return the same
-///   value as `Ord::cmp(transmute::<_, u8>(x), transmute::<_, u8>(y))`.
-#[rustc_specialization_trait]
-const unsafe trait UnsignedBytewiseOrd: [const] Ord {}
-
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for bool {}
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for u8 {}
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for NonZero<u8> {}
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for Option<NonZero<u8>> {}
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-unsafe impl const UnsignedBytewiseOrd for ascii::Char {}
-
-// `compare_bytes` compares a sequence of unsigned bytes lexicographically, so
-// use it if the requirements for `UnsignedBytewiseOrd` are fulfilled.
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A: [const] Ord + [const] UnsignedBytewiseOrd> const SliceOrd for A {
-    #[inline]
-    fn compare(left: &[Self], right: &[Self]) -> Ordering {
-        // Since the length of a slice is always less than or equal to
-        // isize::MAX, this never underflows.
-        let diff = left.len() as isize - right.len() as isize;
-        // This comparison gets optimized away (on x86_64 and ARM) because the
-        // subtraction updates flags.
-        let len = if left.len() < right.len() { left.len() } else { right.len() };
-        let left = left.as_ptr().cast();
-        let right = right.as_ptr().cast();
-        // SAFETY: `left` and `right` are references and are thus guaranteed to
-        // be valid. `UnsignedBytewiseOrd` is only implemented for types that
-        // are valid u8s and can be compared the same way. We use the minimum
-        // of both lengths which guarantees that both regions are valid for
-        // reads in that interval.
-        let mut order = unsafe { compare_bytes(left, right, len) as isize };
-        if order == 0 {
-            order = diff;
-        }
-        order.cmp(&0)
-    }
-}
-
-// Don't generate our own chaining loops for `memcmp`-able things either.
-
-#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<A: [const] PartialOrd + [const] UnsignedBytewiseOrd> const SliceChain for A {
-    #[inline]
-    fn chaining_lt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
-        match SliceOrd::compare(left, right) {
-            Ordering::Equal => ControlFlow::Continue(()),
-            ne => ControlFlow::Break(ne.is_lt()),
-        }
-    }
-    #[inline]
-    fn chaining_le(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
-        match SliceOrd::compare(left, right) {
-            Ordering::Equal => ControlFlow::Continue(()),
-            ne => ControlFlow::Break(ne.is_le()),
-        }
-    }
-    #[inline]
-    fn chaining_gt(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
-        match SliceOrd::compare(left, right) {
-            Ordering::Equal => ControlFlow::Continue(()),
-            ne => ControlFlow::Break(ne.is_gt()),
-        }
-    }
-    #[inline]
-    fn chaining_ge(left: &[Self], right: &[Self]) -> ControlFlow<bool> {
-        match SliceOrd::compare(left, right) {
-            Ordering::Equal => ControlFlow::Continue(()),
-            ne => ControlFlow::Break(ne.is_ge()),
-        }
-    }
-}
-
 pub(super) trait SliceContains: Sized {
     fn slice_contains(&self, x: &[Self]) -> bool;
 }
@@ -403,53 +274,7 @@ impl<T> SliceContains for T
 where
     T: PartialEq,
 {
-    default fn slice_contains(&self, x: &[Self]) -> bool {
+    fn slice_contains(&self, x: &[Self]) -> bool {
         x.iter().any(|y| *y == *self)
     }
 }
-
-impl SliceContains for u8 {
-    #[inline]
-    fn slice_contains(&self, x: &[Self]) -> bool {
-        memchr::memchr(*self, x).is_some()
-    }
-}
-
-impl SliceContains for i8 {
-    #[inline]
-    fn slice_contains(&self, x: &[Self]) -> bool {
-        let byte = *self as u8;
-        // SAFETY: `i8` and `u8` have the same memory layout, thus casting `x.as_ptr()`
-        // as `*const u8` is safe. The `x.as_ptr()` comes from a reference and is thus guaranteed
-        // to be valid for reads for the length of the slice `x.len()`, which cannot be larger
-        // than `isize::MAX`. The returned slice is never mutated.
-        let bytes: &[u8] = unsafe { from_raw_parts(x.as_ptr() as *const u8, x.len()) };
-        memchr::memchr(byte, bytes).is_some()
-    }
-}
-
-macro_rules! impl_slice_contains {
-    ($($t:ty),*) => {
-        $(
-            impl SliceContains for $t {
-                #[inline]
-                fn slice_contains(&self, arr: &[$t]) -> bool {
-                    // Make our LANE_COUNT 4x the normal lane count (aiming for 128 bit vectors).
-                    // The compiler will nicely unroll it.
-                    const LANE_COUNT: usize = 4 * (128 / (size_of::<$t>() * 8));
-                    // SIMD
-                    let mut chunks = arr.chunks_exact(LANE_COUNT);
-                    for chunk in &mut chunks {
-                        if chunk.iter().fold(false, |acc, x| acc | (*x == *self)) {
-                            return true;
-                        }
-                    }
-                    // Scalar remainder
-                    return chunks.remainder().iter().any(|x| *x == *self);
-                }
-            }
-        )*
-    };
-}
-
-impl_slice_contains!(u16, u32, u64, i16, i32, i64, f32, f64, usize, isize, char);

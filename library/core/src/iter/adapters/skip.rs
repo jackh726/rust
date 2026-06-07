@@ -1,6 +1,5 @@
 use crate::intrinsics::unlikely;
 use crate::iter::adapters::SourceIter;
-use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::{
     FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, TrustedRandomAccess,
     TrustedRandomAccessNoCoerce,
@@ -156,32 +155,6 @@ where
 
         NonZero::new(n).map_or(Ok(()), Err)
     }
-
-    #[doc(hidden)]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        // SAFETY: the caller must uphold the contract for
-        // `Iterator::__iterator_get_unchecked`.
-        //
-        // Dropping the skipped prefix when index 0 is passed is safe
-        // since
-        // * the caller passing index 0 means that the inner iterator has more items than `self.n`
-        // * TRA contract requires that get_unchecked will only be called once
-        //   (unless elements are copyable)
-        // * it does not conflict with in-place iteration since index 0 must be accessed
-        //   before something is written into the storage used by the prefix
-        unsafe {
-            if Self::MAY_HAVE_SIDE_EFFECT && idx == 0 {
-                for skipped_idx in 0..self.n {
-                    drop(try_get_unchecked(&mut self.iter, skipped_idx));
-                }
-            }
-
-            try_get_unchecked(&mut self.iter, idx + self.n)
-        }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -247,39 +220,6 @@ impl<I> FusedIterator for Skip<I> where I: FusedIterator {}
 
 #[unstable(issue = "none", feature = "trusted_fused")]
 unsafe impl<I: TrustedFused> TrustedFused for Skip<I> {}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I> SourceIter for Skip<I>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable> InPlaceIterable for Skip<I> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccess for Skip<I> where I: TrustedRandomAccess {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccessNoCoerce for Skip<I>
-where
-    I: TrustedRandomAccessNoCoerce,
-{
-    const MAY_HAVE_SIDE_EFFECT: bool = I::MAY_HAVE_SIDE_EFFECT;
-}
 
 // SAFETY: This adapter is shortening. TrustedLen requires the upper bound to be calculated correctly.
 // These requirements can only be satisfied when the upper bound of the inner iterator's upper

@@ -904,7 +904,7 @@ fn test_extend_impl(trusted_len: bool) {
 
         fn test_extend<I>(&mut self, iter: I)
         where
-            I: Iterator<Item = usize> + TrustedLen + Clone,
+            I: Iterator<Item = usize> + Clone,
         {
             struct BasicIterator<I>(I);
             impl<I> Iterator for BasicIterator<I>

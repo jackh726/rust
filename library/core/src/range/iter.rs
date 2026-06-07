@@ -32,38 +32,6 @@ impl<A> RangeIter<A> {
     }
 }
 
-/// Safety: This macro must only be used on types that are `Copy` and result in ranges
-/// which have an exact `size_hint()` where the upper bound must not be `None`.
-macro_rules! unsafe_range_trusted_random_access_impl {
-    ($($t:ty)*) => ($(
-        #[doc(hidden)]
-        #[unstable(feature = "trusted_random_access", issue = "none")]
-        unsafe impl TrustedRandomAccess for RangeIter<$t> {}
-
-        #[doc(hidden)]
-        #[unstable(feature = "trusted_random_access", issue = "none")]
-        unsafe impl TrustedRandomAccessNoCoerce for RangeIter<$t> {
-            const MAY_HAVE_SIDE_EFFECT: bool = false;
-        }
-    )*)
-}
-
-unsafe_range_trusted_random_access_impl! {
-    usize u8 u16
-    isize i8 i16
-}
-
-#[cfg(target_pointer_width = "32")]
-unsafe_range_trusted_random_access_impl! {
-    u32 i32
-}
-
-#[cfg(target_pointer_width = "64")]
-unsafe_range_trusted_random_access_impl! {
-    u32 i32
-    u64 i64
-}
-
 #[stable(feature = "new_range_api", since = "1.96.0")]
 impl<A: Step> Iterator for RangeIter<A> {
     type Item = A;
@@ -117,18 +85,6 @@ impl<A: Step> Iterator for RangeIter<A> {
     #[inline]
     fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
         self.0.advance_by(n)
-    }
-
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        // SAFETY: The TrustedRandomAccess contract requires that callers only pass an index
-        // that is in bounds.
-        // Additionally Self: TrustedRandomAccess is only implemented for Copy types
-        // which means even repeated reads of the same index would be safe.
-        unsafe { Step::forward_unchecked(self.0.start.clone(), idx) }
     }
 }
 

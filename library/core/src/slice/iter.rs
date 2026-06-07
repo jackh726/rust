@@ -1402,14 +1402,6 @@ impl<'a, T> Iterator for Windows<'a, T> {
             Some(&self.v[start..])
         }
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: since the caller guarantees that `i` is in bounds,
-        // which means that `i` cannot overflow an `isize`, and the
-        // slice created by `from_raw_parts` is a subslice of `self.v`
-        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(idx), self.size.get()) }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1442,16 +1434,6 @@ unsafe impl<T> TrustedLen for Windows<'_, T> {}
 
 #[stable(feature = "fused", since = "1.26.0")]
 impl<T> FusedIterator for Windows<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for Windows<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for Windows<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over a slice in (non-overlapping) chunks (`chunk_size` elements at a
 /// time), starting at the beginning of the slice.
@@ -1552,21 +1534,6 @@ impl<'a, T> Iterator for Chunks<'a, T> {
             Some(&self.v[start..])
         }
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: the caller guarantees that `i` is in bounds,
-        // which means that `start` must be in bounds of the
-        // underlying `self.v` slice, and we made sure that `len`
-        // is also in bounds of `self.v`. Thus, `start` cannot overflow
-        // an `isize`, and the slice constructed by `from_raw_parts`
-        // is a subslice of `self.v` which is guaranteed to be valid
-        // for the lifetime `'a` of `self.v`.
-        unsafe {
-            let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
-            from_raw_parts(self.v.as_ptr().add(start), len)
-        }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1622,16 +1589,6 @@ unsafe impl<T> TrustedLen for Chunks<'_, T> {}
 
 #[stable(feature = "fused", since = "1.26.0")]
 impl<T> FusedIterator for Chunks<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for Chunks<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for Chunks<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over a slice in (non-overlapping) mutable chunks (`chunk_size`
 /// elements at a time), starting at the beginning of the slice.
@@ -1733,20 +1690,6 @@ impl<'a, T> Iterator for ChunksMut<'a, T> {
             Some(unsafe { &mut *self.v.get_unchecked_mut(start..) })
         }
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: see comments for `Chunks::__iterator_get_unchecked` and `self.v`.
-        //
-        // Also note that the caller also guarantees that we're never called
-        // with the same index again, and that no other methods that will
-        // access this subslice are called, so it is valid for the returned
-        // slice to be mutable.
-        unsafe {
-            let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
-            from_raw_parts_mut(self.v.as_mut_ptr().add(start), len)
-        }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1798,16 +1741,6 @@ unsafe impl<T> TrustedLen for ChunksMut<'_, T> {}
 
 #[stable(feature = "fused", since = "1.26.0")]
 impl<T> FusedIterator for ChunksMut<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for ChunksMut<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for ChunksMut<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<T> Send for ChunksMut<'_, T> where T: Send {}
@@ -1928,12 +1861,6 @@ impl<'a, T> Iterator for ChunksExact<'a, T> {
     fn last(mut self) -> Option<Self::Item> {
         self.next_back()
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: mostly identical to `Chunks::__iterator_get_unchecked`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(start), self.chunk_size) }
-    }
 }
 
 #[stable(feature = "chunks_exact", since = "1.31.0")]
@@ -1977,16 +1904,6 @@ unsafe impl<T> TrustedLen for ChunksExact<'_, T> {}
 
 #[stable(feature = "chunks_exact", since = "1.31.0")]
 impl<T> FusedIterator for ChunksExact<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for ChunksExact<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for ChunksExact<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over a slice in (non-overlapping) mutable chunks (`chunk_size`
 /// elements at a time), starting at the beginning of the slice.
@@ -2085,12 +2002,6 @@ impl<'a, T> Iterator for ChunksExactMut<'a, T> {
     fn last(mut self) -> Option<Self::Item> {
         self.next_back()
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: see comments for `Chunks::__iterator_get_unchecked` and `self.v`.
-        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), self.chunk_size) }
-    }
 }
 
 #[stable(feature = "chunks_exact", since = "1.31.0")]
@@ -2140,16 +2051,6 @@ unsafe impl<T> TrustedLen for ChunksExactMut<'_, T> {}
 
 #[stable(feature = "chunks_exact", since = "1.31.0")]
 impl<T> FusedIterator for ChunksExactMut<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for ChunksExactMut<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for ChunksExactMut<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 #[stable(feature = "chunks_exact", since = "1.31.0")]
 unsafe impl<T> Send for ChunksExactMut<'_, T> where T: Send {}
@@ -2232,14 +2133,6 @@ impl<'a, T, const N: usize> Iterator for ArrayWindows<'a, T, N> {
     fn last(self) -> Option<Self::Item> {
         self.v.last_chunk()
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: since the caller guarantees that `idx` is in bounds,
-        // which means that `idx` cannot overflow an `isize`, and the
-        // "slice" created by `cast_array` is a subslice of `self.v`
-        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
-        unsafe { &*self.v.as_ptr().add(idx).cast_array() }
-    }
 }
 
 #[stable(feature = "array_windows", since = "1.94.0")]
@@ -2273,16 +2166,6 @@ unsafe impl<T, const N: usize> TrustedLen for ArrayWindows<'_, T, N> {}
 
 #[stable(feature = "array_windows", since = "1.94.0")]
 impl<T, const N: usize> FusedIterator for ArrayWindows<'_, T, N> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<T, const N: usize> TrustedRandomAccess for ArrayWindows<'_, T, N> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<T, const N: usize> TrustedRandomAccessNoCoerce for ArrayWindows<'_, T, N> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over a slice in (non-overlapping) chunks (`chunk_size` elements at a
 /// time), starting at the end of the slice.
@@ -2387,13 +2270,6 @@ impl<'a, T> Iterator for RChunks<'a, T> {
             Some(&self.v[0..end])
         }
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = end.saturating_sub(self.chunk_size);
-        // SAFETY: mostly identical to `Chunks::__iterator_get_unchecked`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(start), end - start) }
-    }
 }
 
 #[stable(feature = "rchunks", since = "1.31.0")]
@@ -2437,16 +2313,6 @@ unsafe impl<T> TrustedLen for RChunks<'_, T> {}
 
 #[stable(feature = "rchunks", since = "1.31.0")]
 impl<T> FusedIterator for RChunks<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for RChunks<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for RChunks<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over a slice in (non-overlapping) mutable chunks (`chunk_size`
 /// elements at a time), starting at the end of the slice.
@@ -2551,14 +2417,6 @@ impl<'a, T> Iterator for RChunksMut<'a, T> {
             Some(unsafe { &mut *self.v.get_unchecked_mut(0..end) })
         }
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = end.saturating_sub(self.chunk_size);
-        // SAFETY: see comments for `RChunks::__iterator_get_unchecked` and
-        // `ChunksMut::__iterator_get_unchecked`, `self.v`.
-        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), end - start) }
-    }
 }
 
 #[stable(feature = "rchunks", since = "1.31.0")]
@@ -2608,16 +2466,6 @@ unsafe impl<T> TrustedLen for RChunksMut<'_, T> {}
 
 #[stable(feature = "rchunks", since = "1.31.0")]
 impl<T> FusedIterator for RChunksMut<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for RChunksMut<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for RChunksMut<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 #[stable(feature = "rchunks", since = "1.31.0")]
 unsafe impl<T> Send for RChunksMut<'_, T> where T: Send {}
@@ -2741,13 +2589,6 @@ impl<'a, T> Iterator for RChunksExact<'a, T> {
     fn last(mut self) -> Option<Self::Item> {
         self.next_back()
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = end - self.chunk_size;
-        // SAFETY: mostly identical to `Chunks::__iterator_get_unchecked`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(start), self.chunk_size) }
-    }
 }
 
 #[stable(feature = "rchunks", since = "1.31.0")]
@@ -2794,16 +2635,6 @@ unsafe impl<T> TrustedLen for RChunksExact<'_, T> {}
 
 #[stable(feature = "rchunks", since = "1.31.0")]
 impl<T> FusedIterator for RChunksExact<'_, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for RChunksExact<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for RChunksExact<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over a slice in (non-overlapping) mutable chunks (`chunk_size`
 /// elements at a time), starting at the end of the slice.
@@ -2908,13 +2739,6 @@ impl<'a, T> Iterator for RChunksExactMut<'a, T> {
     fn last(mut self) -> Option<Self::Item> {
         self.next_back()
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = end - self.chunk_size;
-        // SAFETY: see comments for `RChunksMut::__iterator_get_unchecked` and `self.v`.
-        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), self.chunk_size) }
-    }
 }
 
 #[stable(feature = "rchunks", since = "1.31.0")]
@@ -2968,41 +2792,11 @@ unsafe impl<T> TrustedLen for RChunksExactMut<'_, T> {}
 #[stable(feature = "rchunks", since = "1.31.0")]
 impl<T> FusedIterator for RChunksExactMut<'_, T> {}
 
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for RChunksExactMut<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for RChunksExactMut<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
-
 #[stable(feature = "rchunks", since = "1.31.0")]
 unsafe impl<T> Send for RChunksExactMut<'_, T> where T: Send {}
 
 #[stable(feature = "rchunks", since = "1.31.0")]
 unsafe impl<T> Sync for RChunksExactMut<'_, T> where T: Sync {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for Iter<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for Iter<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccess for IterMut<'a, T> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<'a, T> TrustedRandomAccessNoCoerce for IterMut<'a, T> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// An iterator over slice in (non-overlapping) chunks separated by a predicate.
 ///

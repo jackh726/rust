@@ -142,20 +142,6 @@ impl<'a, T> Iterator for Iter<'a, T> {
     fn last(mut self) -> Option<&'a T> {
         self.next_back()
     }
-
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // Safety: The TrustedRandomAccess contract requires that callers only pass an index
-        // that is in bounds.
-        unsafe {
-            let i1_len = self.i1.len();
-            if idx < i1_len {
-                self.i1.__iterator_get_unchecked(idx)
-            } else {
-                self.i2.__iterator_get_unchecked(idx - i1_len)
-            }
-        }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]

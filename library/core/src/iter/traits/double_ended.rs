@@ -423,7 +423,7 @@ trait DoubleEndedIteratorRefSpec: DoubleEndedIterator {
 }
 
 impl<I: DoubleEndedIterator + ?Sized> DoubleEndedIteratorRefSpec for &mut I {
-    default fn spec_rfold<B, F>(self, init: B, mut f: F) -> B
+    fn spec_rfold<B, F>(self, init: B, mut f: F) -> B
     where
         F: FnMut(B, Self::Item) -> B,
     {
@@ -434,7 +434,7 @@ impl<I: DoubleEndedIterator + ?Sized> DoubleEndedIteratorRefSpec for &mut I {
         accum
     }
 
-    default fn spec_try_rfold<B, F, R>(&mut self, init: B, mut f: F) -> R
+    fn spec_try_rfold<B, F, R>(&mut self, init: B, mut f: F) -> R
     where
         F: FnMut(B, Self::Item) -> R,
         R: Try<Output = B>,
@@ -444,17 +444,5 @@ impl<I: DoubleEndedIterator + ?Sized> DoubleEndedIteratorRefSpec for &mut I {
             accum = f(accum, x)?;
         }
         try { accum }
-    }
-}
-
-impl<I: DoubleEndedIterator> DoubleEndedIteratorRefSpec for &mut I {
-    impl_fold_via_try_fold! { spec_rfold -> spec_try_rfold }
-
-    fn spec_try_rfold<B, F, R>(&mut self, init: B, f: F) -> R
-    where
-        F: FnMut(B, Self::Item) -> R,
-        R: Try<Output = B>,
-    {
-        (**self).try_rfold(init, f)
     }
 }

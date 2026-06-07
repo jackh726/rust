@@ -316,7 +316,7 @@ pub const trait Iterator {
         }
 
         impl<I: Iterator + ?Sized> SpecAdvanceBy for I {
-            default fn spec_advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
+            fn spec_advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
                 for i in 0..n {
                     if self.next().is_none() {
                         // SAFETY: `i` is always less than `n`.
@@ -324,21 +324,6 @@ pub const trait Iterator {
                     }
                 }
                 Ok(())
-            }
-        }
-
-        impl<I: Iterator> SpecAdvanceBy for I {
-            fn spec_advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
-                let Some(n) = NonZero::new(n) else {
-                    return Ok(());
-                };
-
-                let res = self.try_fold(n, |n, _| NonZero::new(n.get() - 1));
-
-                match res {
-                    None => Ok(()),
-                    Some(n) => Err(n),
-                }
             }
         }
 
@@ -4130,20 +4115,6 @@ pub const trait Iterator {
     {
         self.map(f).is_sorted()
     }
-
-    /// See [TrustedRandomAccess][super::super::TrustedRandomAccess]
-    // The unusual name is to avoid name collisions in method resolution
-    // see #76479.
-    #[inline]
-    #[doc(hidden)]
-    #[unstable(feature = "trusted_random_access", issue = "none")]
-    #[rustc_non_const_trait_method]
-    unsafe fn __iterator_get_unchecked(&mut self, _idx: usize) -> Self::Item
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        unreachable!("Always specialized");
-    }
 }
 
 trait SpecIterEq<B: Iterator>: Iterator {
@@ -4154,30 +4125,10 @@ trait SpecIterEq<B: Iterator>: Iterator {
 
 impl<A: Iterator, B: Iterator> SpecIterEq<B> for A {
     #[inline]
-    default fn spec_iter_eq<F>(self, b: B, f: F) -> bool
-    where
-        F: FnMut(Self::Item, <B as Iterator>::Item) -> ControlFlow<()>,
-    {
-        iter_eq(self, b, f)
-    }
-}
-
-impl<A: Iterator + TrustedLen, B: Iterator + TrustedLen> SpecIterEq<B> for A {
-    #[inline]
     fn spec_iter_eq<F>(self, b: B, f: F) -> bool
     where
         F: FnMut(Self::Item, <B as Iterator>::Item) -> ControlFlow<()>,
     {
-        // we *can't* short-circuit if:
-        match (self.size_hint(), b.size_hint()) {
-            // ... both iterators have the same length
-            ((_, Some(a)), (_, Some(b))) if a == b => {}
-            // ... or both of them are longer than `usize::MAX` (i.e. have an unknown length).
-            ((_, None), (_, None)) => {}
-            // otherwise, we can ascertain that they are unequal without actually comparing items
-            _ => return false,
-        }
-
         iter_eq(self, b, f)
     }
 }
@@ -4279,7 +4230,7 @@ trait IteratorRefSpec: Iterator {
 }
 
 impl<I: Iterator + ?Sized> IteratorRefSpec for &mut I {
-    default fn spec_fold<B, F>(self, init: B, mut f: F) -> B
+    fn spec_fold<B, F>(self, init: B, mut f: F) -> B
     where
         F: FnMut(B, Self::Item) -> B,
     {
@@ -4290,7 +4241,7 @@ impl<I: Iterator + ?Sized> IteratorRefSpec for &mut I {
         accum
     }
 
-    default fn spec_try_fold<B, F, R>(&mut self, init: B, mut f: F) -> R
+    fn spec_try_fold<B, F, R>(&mut self, init: B, mut f: F) -> R
     where
         F: FnMut(B, Self::Item) -> R,
         R: Try<Output = B>,
@@ -4300,17 +4251,5 @@ impl<I: Iterator + ?Sized> IteratorRefSpec for &mut I {
             accum = f(accum, x)?;
         }
         try { accum }
-    }
-}
-
-impl<I: Iterator> IteratorRefSpec for &mut I {
-    impl_fold_via_try_fold! { spec_fold -> spec_try_fold }
-
-    fn spec_try_fold<B, F, R>(&mut self, init: B, f: F) -> R
-    where
-        F: FnMut(B, Self::Item) -> R,
-        R: Try<Output = B>,
-    {
-        (**self).try_fold(init, f)
     }
 }

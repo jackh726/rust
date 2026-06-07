@@ -239,13 +239,8 @@ trait IsFreeze {
 }
 
 impl<T> IsFreeze for T {
-    default fn is_freeze() -> bool {
-        false
-    }
-}
-impl<T: FreezeMarker> IsFreeze for T {
     fn is_freeze() -> bool {
-        true
+        false
     }
 }
 

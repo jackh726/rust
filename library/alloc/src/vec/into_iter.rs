@@ -329,21 +329,6 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         }
         R::from_output(accum)
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, i: usize) -> Self::Item
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        // SAFETY: the caller must guarantee that `i` is in bounds of the
-        // `Vec<T>`, so `i` cannot overflow an `isize`, and the `self.ptr.add(i)`
-        // is guaranteed to pointer to an element of the `Vec<T>` and
-        // thus guaranteed to be valid to dereference.
-        //
-        // Also note the implementation of `Self: TrustedRandomAccess` requires
-        // that `T: Copy` so reading elements from the buffer doesn't invalidate
-        // them for `Drop`.
-        unsafe { self.ptr.add(i).read() }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]

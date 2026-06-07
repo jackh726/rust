@@ -1156,7 +1156,6 @@ fn test_from_iter_partially_drained_in_place_specialization() {
 
 #[test]
 fn test_from_iter_specialization_with_iterator_adapters() {
-    fn assert_in_place_trait<T: InPlaceIterable>(_: &T) {}
     let owned: Vec<usize> = vec![0usize; 256];
     let refd: Vec<&usize> = owned.iter().collect();
     let src: Vec<&&usize> = refd.iter().collect();
@@ -1172,7 +1171,6 @@ fn test_from_iter_specialization_with_iterator_adapters() {
         .map_while(Option::Some)
         .skip(1)
         .map(|e| if e != usize::MAX { Ok(NonZero::new(e)) } else { Err(()) });
-    assert_in_place_trait(&iter);
     let sink = iter.collect::<Result<Vec<_>, _>>().unwrap();
     let sinkptr = sink.as_ptr();
     assert_eq!(srcptr as *const usize, sinkptr as *const usize);
@@ -1180,13 +1178,10 @@ fn test_from_iter_specialization_with_iterator_adapters() {
 
 #[test]
 fn test_in_place_specialization_step_up_down() {
-    fn assert_in_place_trait<T: InPlaceIterable>(_: &T) {}
-
     let src = vec![0u8; 1024];
     let srcptr = src.as_ptr();
     let src_bytes = src.capacity();
     let iter = src.into_iter().array_chunks::<4>();
-    assert_in_place_trait(&iter);
     let sink = iter.collect::<Vec<_>>();
     let sinkptr = sink.as_ptr();
     assert_eq!(srcptr.addr(), sinkptr.addr());
@@ -1203,7 +1198,6 @@ fn test_in_place_specialization_step_up_down() {
     let mut src: Vec<[u8; 3]> = Vec::with_capacity(17);
     src.resize(8, [0; 3]);
     let iter = src.into_iter().map(|[a, b, _]| [a, b]);
-    assert_in_place_trait(&iter);
     let sink: Vec<[u8; 2]> = iter.collect();
     assert_eq!(sink.len(), 8);
     assert!(sink.capacity() <= 25);

@@ -11,7 +11,7 @@ pub(super) unsafe trait CopySpec: Clone {
 
 unsafe impl<T: Clone> CopySpec for T {
     #[inline]
-    default unsafe fn clone_one(src: &Self, dst: *mut Self) {
+    unsafe fn clone_one(src: &Self, dst: *mut Self) {
         // SAFETY: The safety conditions of clone_to_uninit() are a superset of those of
         // ptr::write().
         unsafe {
@@ -23,7 +23,7 @@ unsafe impl<T: Clone> CopySpec for T {
 
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
-    default unsafe fn clone_slice(src: &[Self], dst: *mut [Self]) {
+    unsafe fn clone_slice(src: &[Self], dst: *mut [Self]) {
         let len = src.len();
         // This is the most likely mistake to make, so check it as a debug assertion.
         debug_assert_eq!(
@@ -47,37 +47,6 @@ unsafe impl<T: Clone> CopySpec for T {
         // If we reach here, then the entire slice is initialized, and we've satisfied our
         // responsibilities to the caller. Disarm the cleanup guard by forgetting it.
         mem::forget(initializing);
-    }
-}
-
-// Specialized implementation for types that are [`TrivialClone`], not just [`Clone`],
-// and can therefore be copied bitwise.
-unsafe impl<T: TrivialClone> CopySpec for T {
-    #[inline]
-    unsafe fn clone_one(src: &Self, dst: *mut Self) {
-        // SAFETY: The safety conditions of clone_to_uninit() are a superset of those of
-        // ptr::copy_nonoverlapping().
-        unsafe {
-            ptr::copy_nonoverlapping(src, dst, 1);
-        }
-    }
-
-    #[inline]
-    #[cfg_attr(debug_assertions, track_caller)]
-    unsafe fn clone_slice(src: &[Self], dst: *mut [Self]) {
-        let len = src.len();
-        // This is the most likely mistake to make, so check it as a debug assertion.
-        debug_assert_eq!(
-            len,
-            dst.len(),
-            "clone_to_uninit() source and destination must have equal lengths",
-        );
-
-        // SAFETY: The safety conditions of clone_to_uninit() are a superset of those of
-        // ptr::copy_nonoverlapping().
-        unsafe {
-            ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len);
-        }
     }
 }
 

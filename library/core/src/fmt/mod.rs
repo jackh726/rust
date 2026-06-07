@@ -218,22 +218,11 @@ pub trait Write {
 
         impl<W: Write + ?Sized> SpecWriteFmt for &mut W {
             #[inline]
-            default fn spec_write_fmt(mut self, args: Arguments<'_>) -> Result {
+            fn spec_write_fmt(mut self, args: Arguments<'_>) -> Result {
                 if let Some(s) = args.as_statically_known_str() {
                     self.write_str(s)
                 } else {
                     write(&mut self, args)
-                }
-            }
-        }
-
-        impl<W: Write> SpecWriteFmt for &mut W {
-            #[inline]
-            fn spec_write_fmt(self, args: Arguments<'_>) -> Result {
-                if let Some(s) = args.as_statically_known_str() {
-                    self.write_str(s)
-                } else {
-                    write(self, args)
                 }
             }
         }

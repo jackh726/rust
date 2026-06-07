@@ -1,6 +1,5 @@
 use core::num::NonZero;
 
-use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedLen, UncheckedIterator};
 use crate::ops::Try;
@@ -60,15 +59,6 @@ where
     {
         self.it.map(T::clone).fold(init, f)
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> T
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        // SAFETY: the caller must uphold the contract for
-        // `Iterator::__iterator_get_unchecked`.
-        unsafe { try_get_unchecked(&mut self.it, idx).clone() }
-    }
 }
 
 #[stable(feature = "iter_cloned", since = "1.1.0")]
@@ -121,19 +111,6 @@ where
 {
 }
 
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccess for Cloned<I> where I: TrustedRandomAccess {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccessNoCoerce for Cloned<I>
-where
-    I: TrustedRandomAccessNoCoerce,
-{
-    const MAY_HAVE_SIDE_EFFECT: bool = true;
-}
-
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<'a, I, T: 'a> TrustedLen for Cloned<I>
 where
@@ -167,24 +144,4 @@ impl<I: Default> Default for Cloned<I> {
     fn default() -> Self {
         Self::new(Default::default())
     }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I> SourceIter for Cloned<I>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.it) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable> InPlaceIterable for Cloned<I> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }

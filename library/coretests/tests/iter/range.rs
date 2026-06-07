@@ -202,7 +202,6 @@ fn test_range_from_take() {
     assert_eq!(it.next(), Some(1));
     assert_eq!(it.next(), Some(2));
     assert_eq!(it.next(), None);
-    is_trusted_len((0..).take(3));
     assert_eq!((0..).take(3).size_hint(), (3, Some(3)));
     assert_eq!((0..).take(0).size_hint(), (0, Some(0)));
     assert_eq!((0..).take(usize::MAX).size_hint(), (usize::MAX, Some(usize::MAX)));
@@ -478,16 +477,6 @@ fn test_range_inclusive_size_hint() {
     assert_eq!((imin..=imax - 1).size_hint(), (usize::MAX, Some(usize::MAX)));
     assert_eq!((imin..=imax).size_hint(), (usize::MAX, None));
     assert_eq!((imin..=imax + 1).size_hint(), (usize::MAX, None));
-}
-
-#[test]
-fn test_range_trusted_random_access() {
-    let mut range = 0..10;
-    unsafe {
-        assert_eq!(range.next(), Some(0));
-        assert_eq!(range.__iterator_get_unchecked(0), 1);
-        assert_eq!(range.__iterator_get_unchecked(1), 2);
-    }
 }
 
 #[test]

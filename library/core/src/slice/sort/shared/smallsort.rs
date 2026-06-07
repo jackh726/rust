@@ -29,13 +29,13 @@ pub(crate) trait StableSmallSortTypeImpl: Sized {
 
 impl<T> StableSmallSortTypeImpl for T {
     #[inline(always)]
-    default fn small_sort_threshold() -> usize {
+    fn small_sort_threshold() -> usize {
         // Optimal number of comparisons, and good perf.
         SMALL_SORT_FALLBACK_THRESHOLD
     }
 
     #[inline(always)]
-    default fn small_sort<F: FnMut(&T, &T) -> bool>(
+    fn small_sort<F: FnMut(&T, &T) -> bool>(
         v: &mut [T],
         _scratch: &mut [MaybeUninit<T>],
         is_less: &mut F,
@@ -43,22 +43,6 @@ impl<T> StableSmallSortTypeImpl for T {
         if v.len() >= 2 {
             insertion_sort_shift_left(v, 1, is_less);
         }
-    }
-}
-
-impl<T: FreezeMarker> StableSmallSortTypeImpl for T {
-    #[inline(always)]
-    fn small_sort_threshold() -> usize {
-        SMALL_SORT_GENERAL_THRESHOLD
-    }
-
-    #[inline(always)]
-    fn small_sort<F: FnMut(&T, &T) -> bool>(
-        v: &mut [T],
-        scratch: &mut [MaybeUninit<T>],
-        is_less: &mut F,
-    ) {
-        small_sort_general_with_scratch(v, scratch, is_less);
     }
 }
 
@@ -74,23 +58,8 @@ pub(crate) trait UnstableSmallSortTypeImpl: Sized {
 
 impl<T> UnstableSmallSortTypeImpl for T {
     #[inline(always)]
-    default fn small_sort_threshold() -> usize {
-        SMALL_SORT_FALLBACK_THRESHOLD
-    }
-
-    #[inline(always)]
-    default fn small_sort<F>(v: &mut [T], is_less: &mut F)
-    where
-        F: FnMut(&T, &T) -> bool,
-    {
-        small_sort_fallback(v, is_less);
-    }
-}
-
-impl<T: FreezeMarker> UnstableSmallSortTypeImpl for T {
-    #[inline(always)]
     fn small_sort_threshold() -> usize {
-        <T as UnstableSmallSortFreezeTypeImpl>::small_sort_threshold()
+        SMALL_SORT_FALLBACK_THRESHOLD
     }
 
     #[inline(always)]
@@ -98,10 +67,9 @@ impl<T: FreezeMarker> UnstableSmallSortTypeImpl for T {
     where
         F: FnMut(&T, &T) -> bool,
     {
-        <T as UnstableSmallSortFreezeTypeImpl>::small_sort(v, is_less);
+        small_sort_fallback(v, is_less);
     }
 }
-
 /// FIXME(const_trait_impl) use original ipnsort approach with choose_unstable_small_sort,
 /// as found here <https://github.com/Voultapher/sort-research-rs/blob/438fad5d0495f65d4b72aa87f0b62fc96611dff3/ipnsort/src/smallsort.rs#L83C10-L83C36>.
 pub(crate) trait UnstableSmallSortFreezeTypeImpl: Sized + FreezeMarker {
@@ -112,7 +80,7 @@ pub(crate) trait UnstableSmallSortFreezeTypeImpl: Sized + FreezeMarker {
 
 impl<T: FreezeMarker> UnstableSmallSortFreezeTypeImpl for T {
     #[inline(always)]
-    default fn small_sort_threshold() -> usize {
+    fn small_sort_threshold() -> usize {
         if (size_of::<T>() * SMALL_SORT_GENERAL_SCRATCH_LEN) <= MAX_STACK_ARRAY_SIZE {
             SMALL_SORT_GENERAL_THRESHOLD
         } else {
@@ -121,7 +89,7 @@ impl<T: FreezeMarker> UnstableSmallSortFreezeTypeImpl for T {
     }
 
     #[inline(always)]
-    default fn small_sort<F>(v: &mut [T], is_less: &mut F)
+    fn small_sort<F>(v: &mut [T], is_less: &mut F)
     where
         F: FnMut(&T, &T) -> bool,
     {
@@ -138,37 +106,6 @@ impl<T: FreezeMarker> UnstableSmallSortFreezeTypeImpl for T {
 trait CopyMarker {}
 
 impl<T: Copy> CopyMarker for T {}
-
-impl<T: FreezeMarker + CopyMarker> UnstableSmallSortFreezeTypeImpl for T {
-    #[inline(always)]
-    fn small_sort_threshold() -> usize {
-        if has_efficient_in_place_swap::<T>()
-            && (size_of::<T>() * SMALL_SORT_NETWORK_SCRATCH_LEN) <= MAX_STACK_ARRAY_SIZE
-        {
-            SMALL_SORT_NETWORK_THRESHOLD
-        } else if (size_of::<T>() * SMALL_SORT_GENERAL_SCRATCH_LEN) <= MAX_STACK_ARRAY_SIZE {
-            SMALL_SORT_GENERAL_THRESHOLD
-        } else {
-            SMALL_SORT_FALLBACK_THRESHOLD
-        }
-    }
-
-    #[inline(always)]
-    fn small_sort<F>(v: &mut [T], is_less: &mut F)
-    where
-        F: FnMut(&T, &T) -> bool,
-    {
-        if has_efficient_in_place_swap::<T>()
-            && (size_of::<T>() * SMALL_SORT_NETWORK_SCRATCH_LEN) <= MAX_STACK_ARRAY_SIZE
-        {
-            small_sort_network(v, is_less);
-        } else if (size_of::<T>() * SMALL_SORT_GENERAL_SCRATCH_LEN) <= MAX_STACK_ARRAY_SIZE {
-            small_sort_general(v, is_less);
-        } else {
-            small_sort_fallback(v, is_less);
-        }
-    }
-}
 
 /// Optimal number of comparisons, and good perf.
 const SMALL_SORT_FALLBACK_THRESHOLD: usize = 16;

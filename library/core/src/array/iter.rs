@@ -277,15 +277,6 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
     fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
         self.unsize_mut().advance_by(n)
     }
-
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: The caller must provide an idx that is in bound of the remainder.
-        let elem_ref = unsafe { self.as_mut_slice().get_unchecked_mut(idx) };
-        // SAFETY: We only implement `TrustedRandomAccessNoCoerce` for types
-        // which are actually `Copy`, so cannot have multiple-drop issues.
-        unsafe { ptr::read(elem_ref) }
-    }
 }
 
 #[stable(feature = "array_value_iter_impls", since = "1.40.0")]
@@ -368,15 +359,6 @@ pub trait NonDrop {}
 // and thus we can't implement drop-handling
 #[unstable(issue = "none", feature = "std_internals")]
 impl<T: Copy> NonDrop for T {}
-
-#[doc(hidden)]
-#[unstable(issue = "none", feature = "std_internals")]
-unsafe impl<T, const N: usize> TrustedRandomAccessNoCoerce for IntoIter<T, N>
-where
-    T: NonDrop,
-{
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 #[stable(feature = "array_value_iter_impls", since = "1.40.0")]
 impl<T: fmt::Debug, const N: usize> fmt::Debug for IntoIter<T, N> {

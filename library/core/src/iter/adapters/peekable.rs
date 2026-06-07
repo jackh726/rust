@@ -460,17 +460,3 @@ impl<I: Iterator> Peekable<I> {
 
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Peekable<I> where I: TrustedLen {}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: Iterator> SourceIter for Peekable<I>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}

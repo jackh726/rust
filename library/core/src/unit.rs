@@ -23,13 +23,7 @@ pub(crate) trait IsUnit {
 }
 
 impl<T: ?Sized> IsUnit for T {
-    default fn is_unit() -> bool {
-        false
-    }
-}
-
-impl IsUnit for () {
     fn is_unit() -> bool {
-        true
+        false
     }
 }

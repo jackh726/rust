@@ -201,26 +201,6 @@ impl<I: FusedIterator, P> FusedIterator for Filter<I, P> where P: FnMut(&I::Item
 #[unstable(issue = "none", feature = "trusted_fused")]
 unsafe impl<I: TrustedFused, F> TrustedFused for Filter<I, F> {}
 
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<P, I> SourceIter for Filter<I, P>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable, P> InPlaceIterable for Filter<I, P> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}
-
 trait SpecAssumeCount {
     /// # Safety
     ///
@@ -235,19 +215,11 @@ trait SpecAssumeCount {
 impl<I: Iterator> SpecAssumeCount for I {
     #[inline]
     #[rustc_inherit_overflow_checks]
-    default unsafe fn assume_count_le_upper_bound(count: usize, upper: usize) {
+    unsafe fn assume_count_le_upper_bound(count: usize, upper: usize) {
         // In the default we can't trust the `upper` for soundness
         // because it came from an untrusted `size_hint`.
 
         // In debug mode we might as well check that the size_hint wasn't too small
         let _ = upper - count;
-    }
-}
-
-impl<I: TrustedLen> SpecAssumeCount for I {
-    #[inline]
-    unsafe fn assume_count_le_upper_bound(count: usize, upper: usize) {
-        // SAFETY: The `upper` is trusted because it came from a `TrustedLen` iterator.
-        unsafe { crate::hint::assert_unchecked(count <= upper) }
     }
 }

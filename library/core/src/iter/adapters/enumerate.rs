@@ -1,4 +1,3 @@
-use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen};
 use crate::num::NonZero;
@@ -157,18 +156,6 @@ where
         self.count += advanced;
         remaining
     }
-
-    #[rustc_inherit_overflow_checks]
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        // SAFETY: the caller must uphold the contract for
-        // `Iterator::__iterator_get_unchecked`.
-        let value = unsafe { try_get_unchecked(&mut self.iter, idx) };
-        (self.count + idx, value)
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -260,19 +247,6 @@ where
     }
 }
 
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccess for Enumerate<I> where I: TrustedRandomAccess {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccessNoCoerce for Enumerate<I>
-where
-    I: TrustedRandomAccessNoCoerce,
-{
-    const MAY_HAVE_SIDE_EFFECT: bool = I::MAY_HAVE_SIDE_EFFECT;
-}
-
 #[stable(feature = "fused", since = "1.26.0")]
 impl<I> FusedIterator for Enumerate<I> where I: FusedIterator {}
 
@@ -281,26 +255,6 @@ unsafe impl<I: TrustedFused> TrustedFused for Enumerate<I> {}
 
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Enumerate<I> where I: TrustedLen {}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I> SourceIter for Enumerate<I>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable> InPlaceIterable for Enumerate<I> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}
 
 #[stable(feature = "default_iters", since = "1.70.0")]
 impl<I: Default> Default for Enumerate<I> {

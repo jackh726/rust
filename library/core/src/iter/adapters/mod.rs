@@ -204,29 +204,3 @@ where
 
     impl_fold_via_try_fold! { fold -> try_fold }
 }
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I, R> SourceIter for GenericShunt<'_, I, R>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut Self::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-// SAFETY: GenericShunt::next calls `I::try_for_each`, which has to advance `iter`
-// in order to return `Some(_)`. Since `iter` has type `I: InPlaceIterable` it's
-// guaranteed that at least one item will be moved out from the underlying source.
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I, R> InPlaceIterable for GenericShunt<'_, I, R>
-where
-    I: InPlaceIterable,
-{
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}

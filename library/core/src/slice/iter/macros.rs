@@ -414,21 +414,6 @@ macro_rules! iterator {
                 None
             }
 
-            #[inline]
-            unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-                // SAFETY: the caller must guarantee that `i` is in bounds of
-                // the underlying slice, so `i` cannot overflow an `isize`, and
-                // the returned references is guaranteed to refer to an element
-                // of the slice and thus guaranteed to be valid.
-                //
-                // Also note that the caller also guarantees that we're never
-                // called with the same index again, and that no other methods
-                // that will access this subslice are called, so it is valid
-                // for the returned reference to be mutable in the case of
-                // `IterMut`
-                unsafe { & $( $mut_ )? * self.ptr.as_ptr().add(idx) }
-            }
-
             $($extra)*
         }
 

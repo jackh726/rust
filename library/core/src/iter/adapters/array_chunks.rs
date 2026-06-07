@@ -207,70 +207,11 @@ where
     I: Iterator,
 {
     #[inline]
-    default fn fold<B, F>(mut self, init: B, f: F) -> B
+    fn fold<B, F>(mut self, init: B, f: F) -> B
     where
         Self: Sized,
         F: FnMut(B, Self::Item) -> B,
     {
         self.try_fold(init, NeverShortCircuit::wrap_mut_2(f)).0
     }
-}
-
-impl<I, const N: usize> SpecFold for ArrayChunks<I, N>
-where
-    I: Iterator + TrustedRandomAccessNoCoerce,
-{
-    #[inline]
-    fn fold<B, F>(mut self, init: B, mut f: F) -> B
-    where
-        Self: Sized,
-        F: FnMut(B, Self::Item) -> B,
-    {
-        let mut accum = init;
-        let inner_len = self.iter.size();
-        let mut i = 0;
-        // Use a while loop because (0..len).step_by(N) doesn't optimize well.
-        while inner_len - i >= N {
-            let chunk = crate::array::from_fn(|local| {
-                // SAFETY: The method consumes the iterator and the loop condition ensures that
-                // all accesses are in bounds and only happen once.
-                unsafe {
-                    let idx = i + local;
-                    self.iter.__iterator_get_unchecked(idx)
-                }
-            });
-            accum = f(accum, chunk);
-            i += N;
-        }
-
-        // unlike try_fold this method does not need to take care of the remainder
-        // since `self` will be dropped
-
-        accum
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I, const N: usize> SourceIter for ArrayChunks<I, N>
-where
-    I: SourceIter + Iterator,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable + Iterator, const N: usize> InPlaceIterable for ArrayChunks<I, N> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = const {
-        match (I::MERGE_BY, NonZero::new(N)) {
-            (Some(m), Some(n)) => m.checked_mul(n),
-            _ => None,
-        }
-    };
 }

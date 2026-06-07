@@ -1,6 +1,5 @@
 use crate::intrinsics;
 use crate::iter::adapters::SourceIter;
-use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::{
     FusedIterator, TrustedFused, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce,
 };
@@ -106,20 +105,6 @@ where
         P: FnMut(&Self::Item) -> bool,
     {
         FuseImpl::find(self, predicate)
-    }
-
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        match self.iter {
-            // SAFETY: the caller must uphold the contract for
-            // `Iterator::__iterator_get_unchecked`.
-            Some(ref mut iter) => unsafe { try_get_unchecked(iter, idx) },
-            // SAFETY: the caller asserts there is an item at `i`, so we're not exhausted.
-            None => unsafe { intrinsics::unreachable() },
-        }
     }
 }
 
@@ -231,24 +216,6 @@ impl<I: Default> Default for Fuse<I> {
 // implement `TrustedLen` here.
 unsafe impl<I> TrustedLen for Fuse<I> where I: TrustedLen {}
 
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-// SAFETY: `TrustedRandomAccess` requires that `size_hint()` must be exact and cheap to call, and
-// `Iterator::__iterator_get_unchecked()` must be implemented accordingly.
-//
-// This is safe to implement as `Fuse` is just forwarding these to the wrapped iterator `I`, which
-// preserves these properties.
-unsafe impl<I> TrustedRandomAccess for Fuse<I> where I: TrustedRandomAccess {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I> TrustedRandomAccessNoCoerce for Fuse<I>
-where
-    I: TrustedRandomAccessNoCoerce,
-{
-    const MAY_HAVE_SIDE_EFFECT: bool = I::MAY_HAVE_SIDE_EFFECT;
-}
-
 /// Fuse specialization trait
 ///
 /// We only need to worry about `&mut self` methods, which
@@ -297,93 +264,13 @@ where
     type Item = <I as Iterator>::Item;
 
     #[inline]
-    default fn next(&mut self) -> Option<<I as Iterator>::Item> {
+    fn next(&mut self) -> Option<<I as Iterator>::Item> {
         and_then_or_clear(&mut self.iter, Iterator::next)
     }
 
     #[inline]
-    default fn nth(&mut self, n: usize) -> Option<I::Item> {
-        and_then_or_clear(&mut self.iter, |iter| iter.nth(n))
-    }
-
-    #[inline]
-    default fn try_fold<Acc, Fold, R>(&mut self, mut acc: Acc, fold: Fold) -> R
-    where
-        Self: Sized,
-        Fold: FnMut(Acc, Self::Item) -> R,
-        R: Try<Output = Acc>,
-    {
-        if let Some(ref mut iter) = self.iter {
-            acc = iter.try_fold(acc, fold)?;
-            self.iter = None;
-        }
-        try { acc }
-    }
-
-    #[inline]
-    default fn find<P>(&mut self, predicate: P) -> Option<Self::Item>
-    where
-        P: FnMut(&Self::Item) -> bool,
-    {
-        and_then_or_clear(&mut self.iter, |iter| iter.find(predicate))
-    }
-
-    #[inline]
-    default fn next_back(&mut self) -> Option<<I as Iterator>::Item>
-    where
-        I: DoubleEndedIterator,
-    {
-        and_then_or_clear(&mut self.iter, |iter| iter.next_back())
-    }
-
-    #[inline]
-    default fn nth_back(&mut self, n: usize) -> Option<<I as Iterator>::Item>
-    where
-        I: DoubleEndedIterator,
-    {
-        and_then_or_clear(&mut self.iter, |iter| iter.nth_back(n))
-    }
-
-    #[inline]
-    default fn try_rfold<Acc, Fold, R>(&mut self, mut acc: Acc, fold: Fold) -> R
-    where
-        Self: Sized,
-        Fold: FnMut(Acc, Self::Item) -> R,
-        R: Try<Output = Acc>,
-        I: DoubleEndedIterator,
-    {
-        if let Some(ref mut iter) = self.iter {
-            acc = iter.try_rfold(acc, fold)?;
-            self.iter = None;
-        }
-        try { acc }
-    }
-
-    #[inline]
-    default fn rfind<P>(&mut self, predicate: P) -> Option<Self::Item>
-    where
-        P: FnMut(&Self::Item) -> bool,
-        I: DoubleEndedIterator,
-    {
-        and_then_or_clear(&mut self.iter, |iter| iter.rfind(predicate))
-    }
-}
-
-/// Specialized `Fuse` impl which doesn't bother clearing `iter` when exhausted.
-/// However, we must still be prepared for the possibility that it was already cleared!
-#[doc(hidden)]
-impl<I> FuseImpl<I> for Fuse<I>
-where
-    I: FusedIterator,
-{
-    #[inline]
-    fn next(&mut self) -> Option<<I as Iterator>::Item> {
-        self.iter.as_mut()?.next()
-    }
-
-    #[inline]
     fn nth(&mut self, n: usize) -> Option<I::Item> {
-        self.iter.as_mut()?.nth(n)
+        and_then_or_clear(&mut self.iter, |iter| iter.nth(n))
     }
 
     #[inline]
@@ -395,6 +282,7 @@ where
     {
         if let Some(ref mut iter) = self.iter {
             acc = iter.try_fold(acc, fold)?;
+            self.iter = None;
         }
         try { acc }
     }
@@ -404,7 +292,7 @@ where
     where
         P: FnMut(&Self::Item) -> bool,
     {
-        self.iter.as_mut()?.find(predicate)
+        and_then_or_clear(&mut self.iter, |iter| iter.find(predicate))
     }
 
     #[inline]
@@ -412,7 +300,7 @@ where
     where
         I: DoubleEndedIterator,
     {
-        self.iter.as_mut()?.next_back()
+        and_then_or_clear(&mut self.iter, |iter| iter.next_back())
     }
 
     #[inline]
@@ -420,7 +308,7 @@ where
     where
         I: DoubleEndedIterator,
     {
-        self.iter.as_mut()?.nth_back(n)
+        and_then_or_clear(&mut self.iter, |iter| iter.nth_back(n))
     }
 
     #[inline]
@@ -433,6 +321,7 @@ where
     {
         if let Some(ref mut iter) = self.iter {
             acc = iter.try_rfold(acc, fold)?;
+            self.iter = None;
         }
         try { acc }
     }
@@ -443,24 +332,7 @@ where
         P: FnMut(&Self::Item) -> bool,
         I: DoubleEndedIterator,
     {
-        self.iter.as_mut()?.rfind(predicate)
-    }
-}
-
-// This is used by Flatten's SourceIter impl
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I> SourceIter for Fuse<I>
-where
-    I: SourceIter + TrustedFused,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements.
-        // TrustedFused guarantees that we'll never encounter a case where `self.iter` would
-        // be set to None.
-        unsafe { SourceIter::as_inner(self.iter.as_mut().unwrap_unchecked()) }
+        and_then_or_clear(&mut self.iter, |iter| iter.rfind(predicate))
     }
 }
 

@@ -109,23 +109,3 @@ where
 
 #[unstable(issue = "none", feature = "trusted_fused")]
 unsafe impl<I: TrustedFused, P> TrustedFused for TakeWhile<I, P> {}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<P, I> SourceIter for TakeWhile<I, P>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable, F> InPlaceIterable for TakeWhile<I, F> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}

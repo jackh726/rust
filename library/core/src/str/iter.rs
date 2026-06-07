@@ -351,13 +351,6 @@ impl Iterator for Bytes<'_> {
     {
         self.0.rposition(predicate)
     }
-
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> u8 {
-        // SAFETY: the caller must uphold the safety contract
-        // for `Iterator::__iterator_get_unchecked`.
-        unsafe { self.0.__iterator_get_unchecked(idx) }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -399,16 +392,6 @@ impl FusedIterator for Bytes<'_> {}
 
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl TrustedLen for Bytes<'_> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl TrustedRandomAccess for Bytes<'_> {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl TrustedRandomAccessNoCoerce for Bytes<'_> {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
 
 /// This macro generates a Clone impl for string pattern API
 /// wrapper types of the form X<'a, P>

@@ -5599,7 +5599,7 @@ where
     T: [const] Clone + [const] Destruct,
 {
     #[track_caller]
-    default fn spec_clone_from(&mut self, src: &[T]) {
+    fn spec_clone_from(&mut self, src: &[T]) {
         assert!(self.len() == src.len(), "destination and source slices have different lengths");
         // NOTE: We need to explicitly slice them to the same length
         // to make it easier for the optimizer to elide bounds checking.
@@ -5611,20 +5611,6 @@ where
         while idx < self.len() {
             self[idx].clone_from(&src[idx]);
             idx += 1;
-        }
-    }
-}
-
-#[rustc_const_unstable(feature = "const_clone", issue = "142757")]
-impl<T> const CloneFromSpec<T> for [T]
-where
-    T: [const] TrivialClone + [const] Destruct,
-{
-    #[track_caller]
-    fn spec_clone_from(&mut self, src: &[T]) {
-        // SAFETY: `T` implements `TrivialClone`.
-        unsafe {
-            copy_from_slice_impl(self, src);
         }
     }
 }

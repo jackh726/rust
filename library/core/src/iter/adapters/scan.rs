@@ -78,23 +78,3 @@ where
 
     impl_fold_via_try_fold! { fold -> try_fold }
 }
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<St, F, I> SourceIter for Scan<I, St, F>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<St, F, I: InPlaceIterable> InPlaceIterable for Scan<I, St, F> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
-}

@@ -1,5 +1,4 @@
 use crate::fmt;
-use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, UncheckedIterator};
 use crate::num::NonZero;
@@ -127,16 +126,6 @@ where
     {
         self.iter.fold(init, map_fold(self.f, g))
     }
-
-    #[inline]
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> B
-    where
-        Self: TrustedRandomAccessNoCoerce,
-    {
-        // SAFETY: the caller must uphold the contract for
-        // `Iterator::__iterator_get_unchecked`.
-        unsafe { (self.f)(try_get_unchecked(&mut self.iter, idx)) }
-    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -205,37 +194,4 @@ where
         let item = unsafe { self.iter.next_unchecked() };
         (self.f)(item)
     }
-}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I, F> TrustedRandomAccess for Map<I, F> where I: TrustedRandomAccess {}
-
-#[doc(hidden)]
-#[unstable(feature = "trusted_random_access", issue = "none")]
-unsafe impl<I, F> TrustedRandomAccessNoCoerce for Map<I, F>
-where
-    I: TrustedRandomAccessNoCoerce,
-{
-    const MAY_HAVE_SIDE_EFFECT: bool = true;
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I, F> SourceIter for Map<I, F>
-where
-    I: SourceIter,
-{
-    type Source = I::Source;
-
-    #[inline]
-    unsafe fn as_inner(&mut self) -> &mut I::Source {
-        // SAFETY: unsafe function forwarding to unsafe function with the same requirements
-        unsafe { SourceIter::as_inner(&mut self.iter) }
-    }
-}
-
-#[unstable(issue = "none", feature = "inplace_iteration")]
-unsafe impl<I: InPlaceIterable, F> InPlaceIterable for Map<I, F> {
-    const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
-    const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }

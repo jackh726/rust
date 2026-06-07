@@ -409,11 +409,6 @@ macro_rules! casemappingiter_impls {
             fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
                 self.0.advance_by(n)
             }
-
-            unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-                // SAFETY: just forwarding requirements to caller
-                unsafe { self.0.__iterator_get_unchecked(idx) }
-            }
         }
 
         #[$dendstab]
@@ -451,18 +446,6 @@ macro_rules! casemappingiter_impls {
         // SAFETY: forwards to inner `array::IntoIter`
         #[unstable(feature = "trusted_len", issue = "37572")]
         unsafe impl TrustedLen for $ITER_NAME {}
-
-        // SAFETY: forwards to inner `array::IntoIter`
-        #[doc(hidden)]
-        #[unstable(feature = "std_internals", issue = "none")]
-        unsafe impl TrustedRandomAccessNoCoerce for $ITER_NAME {
-            const MAY_HAVE_SIDE_EFFECT: bool = false;
-        }
-
-        // SAFETY: this iter has no subtypes/supertypes
-        #[doc(hidden)]
-        #[unstable(feature = "std_internals", issue = "none")]
-        unsafe impl TrustedRandomAccess for $ITER_NAME {}
 
         #[$displaystab]
         impl fmt::Display for $ITER_NAME {
@@ -568,11 +551,6 @@ impl Iterator for CaseMappingIter {
     fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
         self.0.advance_by(n)
     }
-
-    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: just forwarding requirements to caller
-        unsafe { self.0.__iterator_get_unchecked(idx) }
-    }
 }
 
 impl DoubleEndedIterator for CaseMappingIter {
@@ -606,14 +584,6 @@ impl FusedIterator for CaseMappingIter {}
 
 // SAFETY: forwards to inner `array::IntoIter`
 unsafe impl TrustedLen for CaseMappingIter {}
-
-// SAFETY: forwards to inner `array::IntoIter`
-unsafe impl TrustedRandomAccessNoCoerce for CaseMappingIter {
-    const MAY_HAVE_SIDE_EFFECT: bool = false;
-}
-
-// SAFETY: `CaseMappingIter` has no subtypes/supertypes
-unsafe impl TrustedRandomAccess for CaseMappingIter {}
 
 impl fmt::Display for CaseMappingIter {
     #[inline]
