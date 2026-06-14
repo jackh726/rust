@@ -543,13 +543,6 @@ impl Read for StdinLock<'_> {
     }
 }
 
-impl SpecReadByte for StdinLock<'_> {
-    #[inline]
-    fn spec_read_byte(&mut self) -> Option<io::Result<u8>> {
-        BufReader::spec_read_byte(&mut *self.inner)
-    }
-}
-
 #[stable(feature = "rust1", since = "1.0.0")]
 impl BufRead for StdinLock<'_> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {

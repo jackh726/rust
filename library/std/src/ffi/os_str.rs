@@ -264,22 +264,10 @@ impl OsString {
 
         impl<T: AsRef<OsStr>> SpecPushTo for T {
             #[inline]
-            default fn spec_push_to(&self, buf: &mut OsString) {
+            fn spec_push_to(&self, buf: &mut OsString) {
                 buf.inner.push_slice(&self.as_ref().inner);
             }
         }
-
-        // Use a more efficient implementation when the string is UTF-8.
-        macro spec_str($T:ty) {
-            impl SpecPushTo for $T {
-                #[inline]
-                fn spec_push_to(&self, buf: &mut OsString) {
-                    buf.inner.push_str(self);
-                }
-            }
-        }
-        spec_str!(str);
-        spec_str!(String);
 
         s.spec_push_to(self)
     }
@@ -633,22 +621,10 @@ impl<T: ?Sized + AsRef<OsStr>> From<&T> for OsString {
 
         impl<T: AsRef<OsStr>> SpecToOsString for T {
             #[inline]
-            default fn spec_to_os_string(&self) -> OsString {
+            fn spec_to_os_string(&self) -> OsString {
                 self.as_ref().to_os_string()
             }
         }
-
-        // Preserve the known-UTF-8 property for strings.
-        macro spec_str($T:ty) {
-            impl SpecToOsString for $T {
-                #[inline]
-                fn spec_to_os_string(&self) -> OsString {
-                    OsString::from(String::from(self))
-                }
-            }
-        }
-        spec_str!(str);
-        spec_str!(String);
 
         s.spec_to_os_string()
     }

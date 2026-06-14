@@ -2891,21 +2891,6 @@ impl<T: BufRead, U: BufRead> BufRead for Chain<T, U> {
     // split between the two parts of the chain
 }
 
-impl<T, U> SizeHint for Chain<T, U> {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        SizeHint::lower_bound(&self.first) + SizeHint::lower_bound(&self.second)
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        match (SizeHint::upper_bound(&self.first), SizeHint::upper_bound(&self.second)) {
-            (Some(first), Some(second)) => first.checked_add(second),
-            _ => None,
-        }
-    }
-}
-
 /// Reader adapter which limits the bytes read from an underlying reader.
 ///
 /// This struct is generally created by calling [`take`] on a reader.
@@ -3165,21 +3150,6 @@ impl<T: BufRead> BufRead for Take<T> {
     }
 }
 
-impl<T> SizeHint for Take<T> {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        cmp::min(SizeHint::lower_bound(&self.inner) as u64, self.limit) as usize
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        match SizeHint::upper_bound(&self.inner) {
-            Some(upper_bound) => Some(cmp::min(upper_bound as u64, self.limit) as usize),
-            None => self.limit.try_into().ok(),
-        }
-    }
-}
-
 #[stable(feature = "seek_io_take", since = "1.89.0")]
 impl<T: Seek> Seek for Take<T> {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
@@ -3261,7 +3231,7 @@ where
     Self: Read,
 {
     #[inline]
-    default fn spec_read_byte(&mut self) -> Option<Result<u8>> {
+    fn spec_read_byte(&mut self) -> Option<Result<u8>> {
         inlined_slow_read_byte(self)
     }
 }
@@ -3300,49 +3270,13 @@ trait SizeHint {
 
 impl<T: ?Sized> SizeHint for T {
     #[inline]
-    default fn lower_bound(&self) -> usize {
+    fn lower_bound(&self) -> usize {
         0
     }
 
     #[inline]
-    default fn upper_bound(&self) -> Option<usize> {
+    fn upper_bound(&self) -> Option<usize> {
         None
-    }
-}
-
-impl<T> SizeHint for &mut T {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        SizeHint::lower_bound(*self)
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        SizeHint::upper_bound(*self)
-    }
-}
-
-impl<T> SizeHint for Box<T> {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        SizeHint::lower_bound(&**self)
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        SizeHint::upper_bound(&**self)
-    }
-}
-
-impl SizeHint for &[u8] {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        self.len()
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        Some(self.len())
     }
 }
 

@@ -181,7 +181,6 @@
 #![feature(fundamental)]
 #![feature(intrinsics)]
 #![feature(lang_items)]
-//#![feature(min_specialization)]
 #![feature(multiple_supertrait_upcastable)]
 #![feature(negative_impls)]
 #![feature(never_type)]

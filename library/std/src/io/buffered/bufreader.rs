@@ -317,22 +317,6 @@ impl<R: ?Sized + Seek> BufReader<R> {
     }
 }
 
-impl<R> SpecReadByte for BufReader<R>
-where
-    Self: Read,
-{
-    #[inline]
-    fn spec_read_byte(&mut self) -> Option<io::Result<u8>> {
-        let mut byte = 0;
-        if self.buf.consume_with(1, |claimed| byte = claimed[0]) {
-            return Some(Ok(byte));
-        }
-
-        // Fallback case, only reached once per buffer refill.
-        uninlined_slow_read_byte(self)
-    }
-}
-
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<R: ?Sized + Read> Read for BufReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -576,17 +560,5 @@ impl<R: ?Sized + Seek> Seek for BufReader<R> {
     /// information themselves if it is required.
     fn seek_relative(&mut self, offset: i64) -> io::Result<()> {
         self.seek_relative(offset)
-    }
-}
-
-impl<T: ?Sized> SizeHint for BufReader<T> {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        SizeHint::lower_bound(self.get_ref()) + self.buffer().len()
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        SizeHint::upper_bound(self.get_ref()).and_then(|up| self.buffer().len().checked_add(up))
     }
 }

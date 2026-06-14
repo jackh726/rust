@@ -104,83 +104,12 @@ where
     T: ?Sized,
 {
     #[inline]
-    default fn buffer_size(&self) -> usize {
+    fn buffer_size(&self) -> usize {
         0
     }
 
-    default fn copy_to(&mut self, _to: &mut (impl Write + ?Sized)) -> Result<u64> {
+    fn copy_to(&mut self, _to: &mut (impl Write + ?Sized)) -> Result<u64> {
         unreachable!("only called from specializations")
-    }
-}
-
-impl BufferedReaderSpec for &[u8] {
-    fn buffer_size(&self) -> usize {
-        // prefer this specialization since the source "buffer" is all we'll ever need,
-        // even if it's small
-        usize::MAX
-    }
-
-    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64> {
-        let len = self.len();
-        to.write_all(self)?;
-        *self = &self[len..];
-        Ok(len as u64)
-    }
-}
-
-impl<A: Allocator> BufferedReaderSpec for VecDeque<u8, A> {
-    fn buffer_size(&self) -> usize {
-        // prefer this specialization since the source "buffer" is all we'll ever need,
-        // even if it's small
-        usize::MAX
-    }
-
-    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64> {
-        let len = self.len();
-        let (front, back) = self.as_slices();
-        let bufs = &mut [IoSlice::new(front), IoSlice::new(back)];
-        to.write_all_vectored(bufs)?;
-        self.clear();
-        Ok(len as u64)
-    }
-}
-
-impl<I> BufferedReaderSpec for BufReader<I>
-where
-    Self: Read,
-    I: ?Sized,
-{
-    fn buffer_size(&self) -> usize {
-        self.capacity()
-    }
-
-    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64> {
-        let mut len = 0;
-
-        loop {
-            // Hack: this relies on `impl Read for BufReader` always calling fill_buf
-            // if the buffer is empty, even for empty slices.
-            // It can't be called directly here since specialization prevents us
-            // from adding I: Read
-            match self.read(&mut []) {
-                Ok(_) => {}
-                Err(e) if e.is_interrupted() => continue,
-                Err(e) => return Err(e),
-            }
-            let buf = self.buffer();
-            if self.buffer().len() == 0 {
-                return Ok(len);
-            }
-
-            // In case the writer side is a BufWriter then its write_all
-            // implements an optimization that passes through large
-            // buffers to the underlying writer. That code path is #[cold]
-            // but we're still avoiding redundant memcopies when doing
-            // a copy between buffered inputs and outputs.
-            to.write_all(buf)?;
-            len += buf.len() as u64;
-            self.discard_buffer();
-        }
     }
 }
 
@@ -194,73 +123,12 @@ trait BufferedWriterSpec: Write {
 
 impl<W: Write + ?Sized> BufferedWriterSpec for W {
     #[inline]
-    default fn buffer_size(&self) -> usize {
+    fn buffer_size(&self) -> usize {
         0
     }
 
-    default fn copy_from<R: Read + ?Sized>(&mut self, reader: &mut R) -> Result<u64> {
+    fn copy_from<R: Read + ?Sized>(&mut self, reader: &mut R) -> Result<u64> {
         stack_buffer_copy(reader, self)
-    }
-}
-
-impl<I: Write + ?Sized> BufferedWriterSpec for BufWriter<I> {
-    fn buffer_size(&self) -> usize {
-        self.capacity()
-    }
-
-    fn copy_from<R: Read + ?Sized>(&mut self, reader: &mut R) -> Result<u64> {
-        if self.capacity() < DEFAULT_BUF_SIZE {
-            return stack_buffer_copy(reader, self);
-        }
-
-        let mut len = 0;
-        let mut init = false;
-
-        loop {
-            let buf = self.buffer_mut();
-            let mut read_buf: BorrowedBuf<'_> = buf.spare_capacity_mut().into();
-
-            if init {
-                // SAFETY: init is either 0 or the init_len from the previous iteration.
-                unsafe { read_buf.set_init() };
-            }
-
-            if read_buf.capacity() >= DEFAULT_BUF_SIZE {
-                let mut cursor = read_buf.unfilled();
-                match reader.read_buf(cursor.reborrow()) {
-                    Ok(()) => {
-                        let bytes_read = cursor.written();
-
-                        if bytes_read == 0 {
-                            return Ok(len);
-                        }
-
-                        init = read_buf.is_init();
-                        len += bytes_read as u64;
-
-                        // SAFETY: BorrowedBuf guarantees all of its filled bytes are init
-                        unsafe { buf.set_len(buf.len() + bytes_read) };
-
-                        // Read again if the buffer still has enough capacity, as BufWriter itself would do
-                        // This will occur if the reader returns short reads
-                    }
-                    Err(ref e) if e.is_interrupted() => {}
-                    Err(e) => return Err(e),
-                }
-            } else {
-                self.flush_buf()?;
-            }
-        }
-    }
-}
-
-impl BufferedWriterSpec for Vec<u8> {
-    fn buffer_size(&self) -> usize {
-        cmp::max(DEFAULT_BUF_SIZE, self.capacity() - self.len())
-    }
-
-    fn copy_from<R: Read + ?Sized>(&mut self, reader: &mut R) -> Result<u64> {
-        reader.read_to_end(self).map(|bytes| u64::try_from(bytes).expect("usize overflowed u64"))
     }
 }
 

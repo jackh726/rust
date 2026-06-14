@@ -149,13 +149,6 @@ impl Seek for Empty {
     }
 }
 
-impl SizeHint for Empty {
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        Some(0)
-    }
-}
-
 #[stable(feature = "empty_write", since = "1.73.0")]
 impl Write for Empty {
     #[inline]
@@ -314,18 +307,6 @@ impl Read for Repeat {
     #[inline]
     fn is_read_vectored(&self) -> bool {
         true
-    }
-}
-
-impl SizeHint for Repeat {
-    #[inline]
-    fn lower_bound(&self) -> usize {
-        usize::MAX
-    }
-
-    #[inline]
-    fn upper_bound(&self) -> Option<usize> {
-        None
     }
 }
 
