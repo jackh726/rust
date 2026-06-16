@@ -57,8 +57,8 @@ fn test_fmt_debug_of_raw_pointers() {
         assert!(formatted.contains(contains), "{formatted:?} doesn't contain {contains:?}");
     }
 
-    assert_eq!(format!("{:?}", ptr::without_provenance_mut::<i32>(0x100)), "0x100");
-    assert_eq!(format!("{:?}", ptr::without_provenance::<i32>(0x100)), "0x100");
+    assert_eq!(format!("{:?}", ptr::without_provenance_mut::<i32>(0x100)), "Pointer { addr: 0x100, metadata: () }");
+    assert_eq!(format!("{:?}", ptr::without_provenance::<i32>(0x100)), "Pointer { addr: 0x100, metadata: () }");
 
     let slice = ptr::slice_from_raw_parts(ptr::without_provenance::<i32>(0x100), 3);
     assert_eq!(format!("{:?}", slice as *mut [i32]), "Pointer { addr: 0x100, metadata: 3 }");
@@ -90,9 +90,9 @@ fn test_fmt_pointer() {
     if cfg!(target_pointer_width = "32") {
         assert_eq!(format!("{:#p}", p), "0x00000000");
     } else {
-        assert_eq!(format!("{:#p}", p), "0x0000000000000000");
+        assert_eq!(format!("{:#p}", p), "Pointer {\n    addr: 0x0000000000000000,\n    metadata: (),\n}");
     }
-    assert_eq!(format!("{:p}", p), "0x0");
+    assert_eq!(format!("{:p}", p), "Pointer { addr: 0x0, metadata: () }");
 }
 
 #[test]

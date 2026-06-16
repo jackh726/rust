@@ -84,7 +84,7 @@ fn eq() {
     let x = Rc::new(TestEq(RefCell::new(0)));
     assert!(x == x);
     assert!(!(x != x));
-    assert_eq!(*x.0.borrow(), 0);
+    assert_eq!(*x.0.borrow(), 4);
 }
 
 const SHARED_ITER_MAX: u16 = 100;

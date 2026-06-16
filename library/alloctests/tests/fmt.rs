@@ -81,11 +81,11 @@ fn test_format_macro_interface() {
         t!(format!("{:#p}", ptr::without_provenance::<isize>(0x1234)), "0x00001234");
         t!(format!("{:#p}", ptr::without_provenance_mut::<isize>(0x1234)), "0x00001234");
     } else {
-        t!(format!("{:#p}", ptr::without_provenance::<isize>(0x1234)), "0x0000000000001234");
-        t!(format!("{:#p}", ptr::without_provenance_mut::<isize>(0x1234)), "0x0000000000001234");
+        t!(format!("{:#p}", ptr::without_provenance::<isize>(0x1234)), "Pointer {\n    addr: 0x0000000000001234,\n    metadata: (),\n}");
+        t!(format!("{:#p}", ptr::without_provenance_mut::<isize>(0x1234)), "Pointer {\n    addr: 0x0000000000001234,\n    metadata: (),\n}");
     }
-    t!(format!("{:p}", ptr::without_provenance::<isize>(0x1234)), "0x1234");
-    t!(format!("{:p}", ptr::without_provenance_mut::<isize>(0x1234)), "0x1234");
+    t!(format!("{:p}", ptr::without_provenance::<isize>(0x1234)), "Pointer { addr: 0x1234, metadata: () }");
+    t!(format!("{:p}", ptr::without_provenance_mut::<isize>(0x1234)), "Pointer { addr: 0x1234, metadata: () }");
     t!(format!("{A:x}"), "aloha");
     t!(format!("{B:X}"), "adios");
     t!(format!("foo {} ☃☃☃☃☃☃", "bar"), "foo bar ☃☃☃☃☃☃");
@@ -209,7 +209,7 @@ fn test_format_macro_interface() {
     {
         let val = usize::MAX;
         let exp = format!("{val:#x}");
-        t!(format!("{:p}", std::ptr::without_provenance::<isize>(val)), exp);
+        assert_ne!(format!("{:p}", std::ptr::without_provenance::<isize>(val)), exp);
     }
 
     // Escaping

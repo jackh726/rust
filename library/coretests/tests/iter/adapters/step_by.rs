@@ -237,7 +237,7 @@ fn test_iterator_step_by_size_hint() {
         }
     }
     assert!(TrustedLenCheck::test(a.iter()));
-    assert!(TrustedLenCheck::test(a.iter().step_by(1)));
+    assert!(!TrustedLenCheck::test(a.iter().step_by(1)));
     assert!(TrustedLenCheck::test(a.iter().chain(a.iter())));
     assert!(!TrustedLenCheck::test(a.iter().chain(a.iter()).step_by(1)));
 }

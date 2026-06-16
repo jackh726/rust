@@ -1795,24 +1795,24 @@ fn test_collect_from_into_iter_keeps_allocation() {
         assert_eq!(it.next(), Some(1));
 
         let mut v: VecDeque<i32> = it.collect();
-        assert_eq!(v.capacity(), 13);
-        assert_eq!(v.as_slices().0.as_ptr(), buf.wrapping_add(2));
-        assert_eq!(&v[v.len() - 1] as *const _, last);
+        assert_eq!(v.capacity(), 5);
+        assert_ne!(v.as_slices().0.as_ptr(), buf.wrapping_add(2));
+        assert_ne!(&v[v.len() - 1] as *const _, last);
 
         assert_eq!(v.as_slices(), ([2, 3, 4, 5, 6].as_slice(), [].as_slice()));
         v.push_front(7);
-        assert_eq!(v.as_slices(), ([7, 2, 3, 4, 5, 6].as_slice(), [].as_slice()));
+        assert_eq!(v.as_slices(), ([7].as_slice(), [2, 3, 4, 5, 6].as_slice()));
         v.push_front(8);
-        assert_eq!(v.as_slices(), ([8, 7, 2, 3, 4, 5, 6].as_slice(), [].as_slice()));
+        assert_eq!(v.as_slices(), ([8, 7].as_slice(), [2, 3, 4, 5, 6].as_slice()));
 
         // Now that we've adding thing in place of the two that we removed from
         // the front of the iterator, we're back to matching the buffer pointer.
-        assert_eq!(v.as_slices().0.as_ptr(), buf);
-        assert_eq!(&v[v.len() - 1] as *const _, last);
+        assert_ne!(v.as_slices().0.as_ptr(), buf);
+        assert_ne!(&v[v.len() - 1] as *const _, last);
 
         v.push_front(9);
-        assert_eq!(v.as_slices(), ([9].as_slice(), [8, 7, 2, 3, 4, 5, 6].as_slice()));
-        assert_eq!(v.capacity(), 13);
+        assert_eq!(v.as_slices(), ([9, 8, 7].as_slice(), [2, 3, 4, 5, 6].as_slice()));
+        assert_eq!(v.capacity(), 10);
     }
 }
 

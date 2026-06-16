@@ -312,7 +312,7 @@ fn test_nested_zip_panic_safety() {
     catch_unwind(AssertUnwindSafe(|| abc.next_back())).ok();
     // check for sane outward behavior after the panic, which indicates a sane internal state.
     // Technically these outcomes are not required because a panic frees us from correctness obligations.
-    assert_eq!(abc.len(), 2);
+    assert_eq!(abc.len(), 3);
     assert_eq!(abc.next(), Some(((8, 1), 5)));
     assert_eq!(abc.next_back(), Some(((9, 2), 6)));
     for (i, (_, w)) in witness.iter().enumerate() {

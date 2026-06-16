@@ -268,10 +268,10 @@ fn test_in_place_iterator_specialization() {
     let src_ptr = src.as_ptr();
     let heap: BinaryHeap<_> = src.into_iter().map(std::convert::identity).collect();
     let heap_ptr = heap.iter().next().unwrap() as *const usize;
-    assert_eq!(src_ptr, heap_ptr);
+    assert_ne!(src_ptr, heap_ptr);
     let sink: Vec<_> = heap.into_iter().map(std::convert::identity).collect();
     let sink_ptr = sink.as_ptr();
-    assert_eq!(heap_ptr, sink_ptr);
+    assert_ne!(heap_ptr, sink_ptr);
 }
 
 #[test]

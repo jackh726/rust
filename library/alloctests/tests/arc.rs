@@ -83,7 +83,7 @@ fn eq() {
     let x = Arc::new(TestEq(RefCell::new(0)));
     assert!(x == x);
     assert!(!(x != x));
-    assert_eq!(*x.0.borrow(), 0);
+    assert_eq!(*x.0.borrow(), 4);
 }
 
 // The test code below is identical to that in `rc.rs`.

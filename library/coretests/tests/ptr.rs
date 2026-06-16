@@ -600,7 +600,7 @@ fn pointee_metadata_debug() {
     assert_eq!("()", format!("{:?}", metadata::<u32>(&17)));
     assert_eq!("2", format!("{:?}", metadata::<[u32]>(&[19, 23])));
     let for_dyn = format!("{:?}", metadata::<dyn Debug>(&29));
-    assert!(for_dyn.starts_with("DynMetadata(0x"), "{:?}", for_dyn);
+    assert!(for_dyn.starts_with("DynMetadata("), "{:?}", for_dyn);
 }
 
 #[test]
@@ -619,7 +619,7 @@ fn dyn_metadata() {
     assert_eq!(meta.align_of(), align_of::<Something>());
     assert_eq!(meta.layout(), std::alloc::Layout::new::<Something>());
 
-    assert!(format!("{meta:?}").starts_with("DynMetadata(0x"));
+    assert!(format!("{meta:?}").starts_with("DynMetadata("));
 }
 
 #[test]

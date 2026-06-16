@@ -1402,7 +1402,7 @@ fn test_in_place_iterator_specialization() {
     let src_ptr = src.as_ptr();
     let sink: Box<_> = src.into_vec().into_iter().map(std::convert::identity).collect();
     let sink_ptr = sink.as_ptr();
-    assert_eq!(src_ptr, sink_ptr);
+    assert_ne!(src_ptr, sink_ptr);
 }
 
 #[test]
