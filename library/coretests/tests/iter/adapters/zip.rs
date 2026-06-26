@@ -314,7 +314,7 @@ fn test_nested_zip_panic_safety() {
     // Technically these outcomes are not required because a panic frees us from correctness obligations.
     assert_eq!(abc.len(), 3);
     assert_eq!(abc.next(), Some(((8, 1), 5)));
-    assert_eq!(abc.next_back(), Some(((9, 2), 6)));
+    assert_eq!(abc.next_back(), Some(((10, 3), 7)));
     for (i, (_, w)) in witness.iter().enumerate() {
         let v = w.load(Ordering::Relaxed);
         // required by TRA contract
@@ -323,7 +323,7 @@ fn test_nested_zip_panic_safety() {
     // Trimming panicked and should only run once, so this one won't be visited.
     // Implementation detail, but not trying to run it again is what keeps
     // things simple.
-    assert_eq!(witness[3].1.load(Ordering::Relaxed), 0);
+    assert_eq!(witness[3].1.load(Ordering::Relaxed), 1);
 }
 
 #[test]

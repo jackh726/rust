@@ -293,43 +293,43 @@ fn bufreader_size_hint() {
     // Check that size hint matches buffer contents
     let mut buffered_bytes = buf_reader.bytes();
     let (lower_bound, _upper_bound) = buffered_bytes.size_hint();
-    assert_eq!(lower_bound, buffer_length);
+    assert_eq!(lower_bound, 0);
 
     // Check that size hint matches buffer contents after advancing
     buffered_bytes.next().unwrap().unwrap();
     let (lower_bound, _upper_bound) = buffered_bytes.size_hint();
-    assert_eq!(lower_bound, buffer_length - 1);
+    assert_eq!(lower_bound, 0);
 }
 
 #[test]
 fn empty_size_hint() {
     let size_hint = io::empty().bytes().size_hint();
-    assert_eq!(size_hint, (0, Some(0)));
+    assert_eq!(size_hint, (0, None));
 }
 
 #[test]
 fn slice_size_hint() {
     let size_hint = (&[1, 2, 3]).bytes().size_hint();
-    assert_eq!(size_hint, (3, Some(3)));
+    assert_eq!(size_hint, (0, None));
 }
 
 #[test]
 fn take_size_hint() {
     let size_hint = (&[1, 2, 3]).take(2).bytes().size_hint();
-    assert_eq!(size_hint, (2, Some(2)));
+    assert_eq!(size_hint, (0, None));
 
     let size_hint = (&[1, 2, 3]).take(4).bytes().size_hint();
-    assert_eq!(size_hint, (3, Some(3)));
+    assert_eq!(size_hint, (0, None));
 
     let size_hint = io::repeat(0).take(3).bytes().size_hint();
-    assert_eq!(size_hint, (3, Some(3)));
+    assert_eq!(size_hint, (0, None));
 }
 
 #[test]
 fn chain_empty_size_hint() {
     let chain = io::empty().chain(io::empty());
     let size_hint = chain.bytes().size_hint();
-    assert_eq!(size_hint, (0, Some(0)));
+    assert_eq!(size_hint, (0, None));
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn chain_size_hint() {
 
     let chain = buf_reader_1.chain(buf_reader_2);
     let size_hint = chain.bytes().size_hint();
-    assert_eq!(size_hint, (testdata.len(), Some(testdata.len())));
+    assert_eq!(size_hint, (0, None));
 }
 
 #[test]

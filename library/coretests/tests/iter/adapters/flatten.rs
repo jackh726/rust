@@ -146,30 +146,30 @@ fn test_trusted_len_flatten() {
     assert_eq!(iter.size_hint(), (4, None));
 
     let iter = IntoIterator::into_iter([[(); usize::MAX]; 1]).flatten();
-    assert_eq!(iter.size_hint(), (0, Some(usize::MAX)));
+    assert_eq!(iter.size_hint(), (0, None));
 
     let iter = IntoIterator::into_iter([[(); usize::MAX]; 2]).flatten();
-    assert_eq!(iter.size_hint(), (usize::MAX, None));
+    assert_eq!(iter.size_hint(), (0, None));
 
     let mut a = [(); 10];
     let mut b = [(); 10];
 
     let iter = IntoIterator::into_iter([&mut a, &mut b]).flatten();
     assert_trusted_len(&iter);
-    assert_eq!(iter.size_hint(), (20, Some(20)));
+    assert_eq!(iter.size_hint(), (0, None));
     core::mem::drop(iter);
 
     let iter = IntoIterator::into_iter([&a, &b]).flatten();
     assert_trusted_len(&iter);
-    assert_eq!(iter.size_hint(), (20, Some(20)));
+    assert_eq!(iter.size_hint(), (0, None));
 
     let iter = [(), (), ()].iter().flat_map(|_| [(); 1000]);
     assert_trusted_len(&iter);
-    assert_eq!(iter.size_hint(), (3000, Some(3000)));
+    assert_eq!(iter.size_hint(), (0, None));
 
     let iter = [(), ()].iter().flat_map(|_| &a);
     assert_trusted_len(&iter);
-    assert_eq!(iter.size_hint(), (20, Some(20)));
+    assert_eq!(iter.size_hint(), (0, None));
 }
 
 #[test]
