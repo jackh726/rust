@@ -3425,7 +3425,7 @@ impl PatchableFunctionEntry {
 /// or future prototype.
 #[derive(Clone, Copy, PartialEq, Hash, Debug, Default)]
 pub enum Polonius {
-    /// The default value: diabled.
+    /// The default value: (next on nightly, off on stable)
     #[default]
     Default,
 
@@ -3446,8 +3446,9 @@ impl Polonius {
     }
 
     /// Returns whether the "next" version of polonius is enabled
-    pub fn is_next_enabled(&self, _is_nightly: bool) -> bool {
-        matches!(self, Polonius::Next)
+    pub fn is_next_enabled(&self, is_nightly: bool) -> bool {
+        // We're enabling next on nightly if a different option was not explicitly specified.
+        matches!(self, Polonius::Next) || (is_nightly && matches!(self, Polonius::Default))
     }
 }
 
