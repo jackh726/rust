@@ -45,7 +45,14 @@ pub(super) fn generate<'tcx>(
     // unlike NLLs.
     // We do record these regions in the polonius context, since they're used to differentiate
     // relevant and boring locals, which is a key distinction used later in diagnostics.
-    if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled() {
+    if typeck
+        .tcx()
+        .sess
+        .opts
+        .unstable_opts
+        .polonius
+        .is_next_enabled(typeck.tcx().sess.is_nightly_build())
+    {
         let (_, boring_locals) =
             compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
         typeck.polonius_context.as_mut().unwrap().boring_nll_locals =

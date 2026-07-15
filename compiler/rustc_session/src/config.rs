@@ -3425,9 +3425,12 @@ impl PatchableFunctionEntry {
 /// or future prototype.
 #[derive(Clone, Copy, PartialEq, Hash, Debug, Default)]
 pub enum Polonius {
-    /// The default value: disabled.
+    /// The default value: diabled.
     #[default]
-    Off,
+    Default,
+
+    /// Polonius is disabled, only use NLL.
+    NLL,
 
     /// Legacy version, using datalog and the `polonius-engine` crate. Historical value for `-Zpolonius`.
     Legacy,
@@ -3443,7 +3446,7 @@ impl Polonius {
     }
 
     /// Returns whether the "next" version of polonius is enabled
-    pub fn is_next_enabled(&self) -> bool {
+    pub fn is_next_enabled(&self, _is_nightly: bool) -> bool {
         matches!(self, Polonius::Next)
     }
 }

@@ -25,7 +25,7 @@ pub(crate) fn dump_polonius_mir<'tcx>(
     polonius_context: Option<&PoloniusContext>,
 ) {
     let tcx = infcx.tcx;
-    if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
+    if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled(tcx.sess.is_nightly_build()) {
         return;
     }
 

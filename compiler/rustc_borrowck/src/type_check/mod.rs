@@ -138,7 +138,14 @@ pub(crate) fn type_check<'tcx>(
 
     debug!(?normalized_inputs_and_output);
 
-    let polonius_context = if infcx.tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
+    let polonius_context = if infcx
+        .tcx
+        .sess
+        .opts
+        .unstable_opts
+        .polonius
+        .is_next_enabled(infcx.tcx.sess.is_nightly_build())
+    {
         Some(PoloniusContext::default())
     } else {
         None
