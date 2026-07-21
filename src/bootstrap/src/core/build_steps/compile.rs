@@ -1251,6 +1251,11 @@ pub fn rustc_cargo(
         cargo.rustflag("-Zdefault-visibility=protected");
     }
 
+    let nightly = builder.config.channel == "nightly" || builder.config.channel == "dev";
+    if nightly {
+        cargo.rustflag("-Zpolonius=next");
+    }
+
     if is_lto_stage(build_compiler) {
         match builder.config.rust_lto {
             RustcLto::Thin | RustcLto::Fat => {

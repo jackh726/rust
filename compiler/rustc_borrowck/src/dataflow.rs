@@ -433,7 +433,7 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
         borrow_set: &'a BorrowSet<'tcx>,
     ) -> Self {
         let borrows_out_of_scope_at_location =
-            if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled(tcx.sess.is_nightly_build()) {
+            if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
                 calculate_borrows_out_of_scope_at_location(body, regioncx, borrow_set)
             } else {
                 PoloniusOutOfScopePrecomputer::compute(body, regioncx, borrow_set)

@@ -632,13 +632,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
             if let Some(polonius_context) = self.polonius_context {
                 polonius_context.boring_nll_locals.contains(&local)
             } else {
-                assert!(
-                    !tcx.sess
-                        .opts
-                        .unstable_opts
-                        .polonius
-                        .is_next_enabled(tcx.sess.is_nightly_build())
-                );
+                assert!(!tcx.sess.opts.unstable_opts.polonius.is_next_enabled());
 
                 // Boring locals are never the cause of a borrow explanation in NLLs.
                 false

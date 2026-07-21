@@ -3446,9 +3446,9 @@ impl Polonius {
     }
 
     /// Returns whether the "next" version of polonius is enabled
-    pub fn is_next_enabled(&self, is_nightly: bool) -> bool {
+    pub fn is_next_enabled(&self) -> bool {
         // We're enabling next on nightly if a different option was not explicitly specified.
-        matches!(self, Polonius::Next) || (is_nightly && matches!(self, Polonius::Default))
+        matches!(self, Polonius::Next)
     }
 }
 
