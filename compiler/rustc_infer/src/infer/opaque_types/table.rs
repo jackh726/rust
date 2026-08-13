@@ -3,7 +3,7 @@ use std::ops::Deref;
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_data_structures::undo_log::UndoLogs;
 use rustc_middle::bug;
-use rustc_middle::ty::{OpaqueTypeKey, ProvisionalHiddenType, Ty};
+use rustc_middle::ty::{OpaqueTypeKey, ProvisionalHiddenType};
 use tracing::instrument;
 
 use crate::infer::snapshot::undo_log::{InferCtxtUndoLogs, UndoLog};
@@ -94,17 +94,6 @@ impl<'tcx> OpaqueTypeStorage<'tcx> {
         self.opaque_types.iter().map(|(k, v)| (*k, *v))
     }
 
-    /// Only returns the opaque types which are stored in `duplicate_entries`.
-    ///
-    /// These have to considered when checking all opaque type uses but are e.g.
-    /// irrelevant for canonical inputs as nested queries never meaningfully
-    /// accesses them.
-    pub fn iter_duplicate_entries(
-        &self,
-    ) -> impl Iterator<Item = (OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)> {
-        self.duplicate_entries.iter().copied()
-    }
-
     pub fn iter_opaque_types(
         &self,
     ) -> impl Iterator<Item = (OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)> {
@@ -139,11 +128,11 @@ impl<'a, 'tcx> OpaqueTypeTable<'a, 'tcx> {
         &mut self,
         key: OpaqueTypeKey<'tcx>,
         hidden_type: ProvisionalHiddenType<'tcx>,
-    ) -> Option<Ty<'tcx>> {
+    ) -> Option<ProvisionalHiddenType<'tcx>> {
         if let Some(entry) = self.storage.opaque_types.get_mut(&key) {
             let prev = std::mem::replace(entry, hidden_type);
             self.undo_log.push(UndoLog::OpaqueTypes(key, Some(prev)));
-            return Some(prev.ty);
+            return Some(prev);
         }
         self.storage.opaque_types.insert(key, hidden_type);
         self.undo_log.push(UndoLog::OpaqueTypes(key, None));

@@ -387,14 +387,6 @@ impl<'tcx> rustc_type_ir::InferCtxtLike for InferCtxt<'tcx> {
     fn clone_opaque_types_lookup_table(&self) -> Vec<(ty::OpaqueTypeKey<'tcx>, Ty<'tcx>)> {
         self.inner.borrow_mut().opaque_types().iter_lookup_table().map(|(k, h)| (k, h.ty)).collect()
     }
-    fn clone_duplicate_opaque_types(&self) -> Vec<(ty::OpaqueTypeKey<'tcx>, Ty<'tcx>)> {
-        self.inner
-            .borrow_mut()
-            .opaque_types()
-            .iter_duplicate_entries()
-            .map(|(k, h)| (k, h.ty))
-            .collect()
-    }
     fn clone_opaque_types_added_since(
         &self,
         prev_entries: OpaqueTypeStorageEntries,

@@ -67,23 +67,40 @@ pub(crate) fn clone_and_resolve_opaque_types<'tcx>(
     infcx: &BorrowckInferCtxt<'tcx>,
     universal_region_relations: &Frozen<UniversalRegionRelations<'tcx>>,
     constraints: &mut MirTypeckRegionConstraints<'tcx>,
-) -> (OpaqueTypeStorageEntries, Vec<(OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)>) {
-    let opaque_types = infcx.clone_opaque_types();
+) -> (OpaqueTypeStorageEntries, OpaqueTypeUses<'tcx>) {
+    let all_uses = infcx.clone_opaque_types();
+    let defining_uses =
+        infcx.inner.borrow_mut().opaque_types().iter_lookup_table().collect::<Vec<_>>();
     let opaque_types_storage_num_entries = infcx.inner.borrow_mut().opaque_types().num_entries();
-    let opaque_types = opaque_types
-        .into_iter()
-        .map(|entry| {
-            fold_regions(infcx.tcx, infcx.resolve_vars_if_possible(entry), |r, _| {
-                let vid = if let ty::RePlaceholder(placeholder) = r.kind() {
-                    constraints.placeholder_region(infcx, placeholder).as_var()
-                } else {
-                    universal_region_relations.universal_regions.to_region_vid(r)
-                };
-                Region::new_var(infcx.tcx, vid)
+    let mut resolve = |entries: Vec<(OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)>| {
+        entries
+            .into_iter()
+            .map(|entry| {
+                fold_regions(infcx.tcx, infcx.resolve_vars_if_possible(entry), |r, _| {
+                    let vid = if let ty::RePlaceholder(placeholder) = r.kind() {
+                        constraints.placeholder_region(infcx, placeholder).as_var()
+                    } else {
+                        universal_region_relations.universal_regions.to_region_vid(r)
+                    };
+                    Region::new_var(infcx.tcx, vid)
+                })
             })
-        })
-        .collect::<Vec<_>>();
-    (opaque_types_storage_num_entries, opaque_types)
+            .collect::<Vec<_>>()
+    };
+    let uses =
+        OpaqueTypeUses { all_uses: resolve(all_uses), defining_uses: resolve(defining_uses) };
+    (opaque_types_storage_num_entries, uses)
+}
+
+#[derive(Debug)]
+pub(crate) struct OpaqueTypeUses<'tcx> {
+    /// *Every* use of an opaque type, including the ones whose storage entry has since
+    /// been replaced by a later use.
+    pub(crate) all_uses: Vec<(OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)>,
+
+    /// One use per opaque type key, used to *infer* the hidden type of the definition
+    /// site in [`compute_definition_site_hidden_types`].
+    pub(crate) defining_uses: Vec<(OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)>,
 }
 
 /// Maps an NLL var to a deterministically chosen equal universal region.
@@ -539,17 +556,18 @@ pub(crate) fn apply_definition_site_hidden_types<'tcx>(
     let tcx = infcx.tcx;
     let mut errors = Vec::new();
     for &(key, hidden_type) in opaque_types {
+        // A hidden type equal to the opaque type key doesn't add extra information.
+        if let &ty::Alias(_, ty::AliasTy { kind: ty::Opaque { def_id }, args, .. }) =
+            hidden_type.ty.kind()
+            && def_id == key.def_id.to_def_id()
+            && args == key.args
+        {
+            continue;
+        }
+
         let Some(expected) = hidden_types.get(&key.def_id) else {
             if !tcx.use_typing_mode_post_typeck_until_borrowck() {
-                if let &ty::Alias(_, ty::AliasTy { kind: ty::Opaque { def_id }, args, .. }) =
-                    hidden_type.ty.kind()
-                    && def_id == key.def_id.to_def_id()
-                    && args == key.args
-                {
-                    continue;
-                } else {
-                    unreachable!("non-defining use in defining scope");
-                }
+                unreachable!("non-defining use in defining scope");
             }
             errors.push(DeferredOpaqueTypeError::NonDefiningUseInDefiningScope {
                 span: hidden_type.span,

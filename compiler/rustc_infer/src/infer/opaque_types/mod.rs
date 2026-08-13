@@ -205,7 +205,11 @@ impl<'tcx> InferCtxt<'tcx> {
         opaque_type_key: OpaqueTypeKey<'tcx>,
         hidden_ty: ProvisionalHiddenType<'tcx>,
     ) -> Option<Ty<'tcx>> {
-        self.inner.borrow_mut().opaque_types().register(opaque_type_key, hidden_ty)
+        self.inner
+            .borrow_mut()
+            .opaque_types()
+            .register(opaque_type_key, hidden_ty)
+            .map(|prev| prev.ty)
     }
 
     /// Insert a hidden type into the opaque type storage, equating it
@@ -245,9 +249,10 @@ impl<'tcx> InferCtxt<'tcx> {
                     .opaque_types()
                     .register(opaque_type_key, ProvisionalHiddenType { ty: hidden_ty, span });
                 if let Some(prev) = prev {
+                    self.inner.borrow_mut().opaque_types().add_duplicate(opaque_type_key, prev);
                     goals.extend(
                         self.at(&ObligationCause::dummy_with_span(span), param_env)
-                            .eq(DefineOpaqueTypes::Yes, prev, hidden_ty)?
+                            .eq(DefineOpaqueTypes::Yes, prev.ty, hidden_ty)?
                             .obligations
                             .into_iter()
                             .map(|obligation| obligation.as_goal()),
@@ -261,9 +266,13 @@ impl<'tcx> InferCtxt<'tcx> {
                     .opaque_types()
                     .register(opaque_type_key, ProvisionalHiddenType { ty: hidden_ty, span });
 
+                if let Some(prev) = prev {
+                    self.inner.borrow_mut().opaque_types().add_duplicate(opaque_type_key, prev);
+                }
+
                 // We either equate the new hidden type with the previous entry or with the type
                 // inferred by HIR typeck.
-                let actual = prev.unwrap_or_else(|| {
+                let actual = prev.map(|prev| prev.ty).unwrap_or_else(|| {
                     let actual = tcx
                         .type_of_opaque_hir_typeck(opaque_type_key.def_id)
                         .instantiate(self.tcx, opaque_type_key.args)

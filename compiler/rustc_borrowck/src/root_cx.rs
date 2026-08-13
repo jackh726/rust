@@ -100,7 +100,7 @@ impl<'diag, 'tcx> BorrowCheckRootCtxt<'diag, 'tcx> {
     fn handle_opaque_type_uses(&mut self) {
         let mut per_body_info = Vec::new();
         for (def_id, input) in &mut self.collect_region_constraints_results {
-            let (num_entries, opaque_types) = clone_and_resolve_opaque_types(
+            let (num_entries, opaque_type_uses) = clone_and_resolve_opaque_types(
                 &input.infcx,
                 &input.universal_region_relations,
                 &mut input.constraints,
@@ -113,9 +113,9 @@ impl<'diag, 'tcx> BorrowCheckRootCtxt<'diag, 'tcx> {
                 Rc::clone(&input.location_map),
                 &mut self.hidden_types,
                 &mut self.unconstrained_hidden_type_errors,
-                &opaque_types,
+                &opaque_type_uses.defining_uses,
             );
-            per_body_info.push((num_entries, opaque_types));
+            per_body_info.push((num_entries, opaque_type_uses));
         }
 
         handle_unconstrained_hidden_type_errors(
@@ -125,7 +125,7 @@ impl<'diag, 'tcx> BorrowCheckRootCtxt<'diag, 'tcx> {
             &mut self.collect_region_constraints_results,
         );
 
-        for (input, (opaque_types_storage_num_entries, opaque_types)) in
+        for (input, (opaque_types_storage_num_entries, opaque_type_uses)) in
             self.collect_region_constraints_results.values_mut().zip(per_body_info)
         {
             if input.deferred_opaque_type_errors.is_empty() {
@@ -137,7 +137,7 @@ impl<'diag, 'tcx> BorrowCheckRootCtxt<'diag, 'tcx> {
                     &input.known_type_outlives_obligations,
                     &mut input.constraints,
                     &mut self.hidden_types,
-                    &opaque_types,
+                    &opaque_type_uses.all_uses,
                 );
             }
 
