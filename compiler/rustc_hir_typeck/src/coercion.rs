@@ -1803,32 +1803,8 @@ impl<'tcx> CoerceMany<'tcx> {
             //
             // Another example is `break` with no argument expression.
             assert!(expression_ty.is_unit(), "if let hack without unit type");
-            for (expr, expr_ty) in self.expressions.iter() {
-                let coerce = Coerce::new(fcx, cause.clone(), AllowTwoPhase::No, true);
-                let ok = match fcx.commit_if_ok(|_| coerce.coerce(*expr_ty, expression_ty)) {
-                    Ok(coerce) => coerce,
-                    Err(e) => {
-                        let reported = self.report_coercion_error(
-                            fcx,
-                            e,
-                            cause,
-                            expression,
-                            expected,
-                            found,
-                            augment_error,
-                        );
-                        self.final_ty = Some(Ty::new_error(fcx.tcx, reported));
-                        self.expressions.push((expression, expression_ty));
-                        return;
-                    }
-                };
-                let (adjustments, _) = fcx.register_infer_ok_obligations(ok);
-                if let Some(expr) = expr {
-                    fcx.set_adjustments(expr, adjustments);
-                }
-            }
-
-            fcx.at(cause, fcx.param_env)
+            fcx
+                .at(cause, fcx.param_env)
                 .eq(
                     // needed for tests/ui/type-alias-impl-trait/issue-65679-inst-opaque-ty-from-val-twice.rs
                     DefineOpaqueTypes::Yes,
