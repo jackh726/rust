@@ -388,16 +388,14 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             });
         }
 
-        let coerce_inner = |a: Ty<'tcx>, b: Ty<'tcx>, unify_fallback: bool| -> CoerceResult<'tcx> {
-            let span = tracing::debug_span!("coerce_inner", ?a, ?b);
-            let _span = span.enter();
-
+        #[tracing::instrument(skip(coerce), ret)]
+        fn coerce_mutual_inner<'f, 'tcx>(coerce: &Coerce<'f, 'tcx>, a: Ty<'tcx>, b: Ty<'tcx>, unify_fallback: bool) -> CoerceResult<'tcx> {
             // Consider coercing the subtype to a DST
             //
             // NOTE: this is wrapped in a `commit_if_ok` because it creates
             // a "spurious" type variable, and we don't want to have that
             // type variable in memory if the coercion fails.
-            let unsize = self.commit_if_ok(|_| self.coerce_unsized(a, b));
+            let unsize = coerce.commit_if_ok(|_| coerce.coerce_unsized(a, b));
             match unsize {
                 Ok(_) => {
                     debug!("coerce: unsize successful");
@@ -412,16 +410,16 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             // as auto-borrowing, coercing pointer mutability, or pin-ergonomics.
             match *b.kind() {
                 ty::RawPtr(_, b_mutbl) => {
-                    return self.coerce_to_raw_ptr(a, b, b_mutbl);
+                    return coerce.coerce_to_raw_ptr(a, b, b_mutbl);
                 }
                 ty::Ref(r_b, _, mutbl_b) => {
-                    return self.coerce_to_ref(a, b, r_b, mutbl_b);
+                    return coerce.coerce_to_ref(a, b, r_b, mutbl_b);
                 }
                 ty::Adt(pin, _)
-                    if self.tcx.features().pin_ergonomics()
-                        && self.tcx.is_lang_item(pin.did(), hir::LangItem::Pin) =>
+                    if coerce.tcx.features().pin_ergonomics()
+                        && coerce.tcx.is_lang_item(pin.did(), hir::LangItem::Pin) =>
                 {
-                    let pin_coerce = self.commit_if_ok(|_| self.coerce_to_pin_ref(a, b));
+                    let pin_coerce = coerce.commit_if_ok(|_| coerce.coerce_to_pin_ref(a, b));
                     if pin_coerce.is_ok() {
                         return pin_coerce;
                     }
@@ -436,38 +434,38 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
                     // require double indirection).
                     // Additionally, we permit coercion of function
                     // items to drop the unsafe qualifier.
-                    self.coerce_from_fn_item(a, b)
+                    coerce.coerce_from_fn_item(a, b)
                 }
                 ty::FnPtr(a_sig_tys, a_hdr) => {
                     // We permit coercion of fn pointers to drop the
                     // unsafe qualifier.
-                    self.coerce_from_fn_pointer(a, a_sig_tys.with(a_hdr), b)
+                    coerce.coerce_from_fn_pointer(a, a_sig_tys.with(a_hdr), b)
                 }
                 ty::Closure(..) => {
                     // Non-capturing closures are coercible to
                     // function pointers or unsafe function pointers.
                     // It cannot convert closures that require unsafe.
-                    self.coerce_closure_to_fn(a, b)
+                    coerce.coerce_closure_to_fn(a, b)
                 }
                 _ => {
                     // Typically, we would fallback to unification rules, but we
                     // delay this on the *reverse* because it would succeed in
                     // more cases than we want (for example, opaques).
                     if unify_fallback {
-                        self.unify(a, b, ForceLeakCheck::No)
+                        coerce.unify(a, b, ForceLeakCheck::No)
                     } else {
                         Err(TypeError::Mismatch)
                     }
                 }
             }
-        };
+        }
 
-        let result = self.commit_if_ok(|_| coerce_inner(new_ty, prev_ty, true));
+        let result = self.commit_if_ok(|_| coerce_mutual_inner(self, new_ty, prev_ty, true));
         let first_error = match result {
             Ok(forwd_result) => {
                 let prev_ty = self.resolve_vars_if_possible(prev_ty);
                 let new_ty = self.resolve_vars_if_possible(new_ty);
-                let rev_result = self.commit_if_ok(|_| coerce_inner(prev_ty, new_ty, false));
+                let rev_result = self.commit_if_ok(|_| coerce_mutual_inner(self, prev_ty, new_ty, false));
                 if let Ok(rev_result) = rev_result {
                     let forwd_ty = self.resolve_vars_if_possible(forwd_result.value.1);
                     let rev_ty = self.resolve_vars_if_possible(rev_result.value.1);
@@ -485,7 +483,7 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             Err(e) => e,
         };
 
-        let result = self.commit_if_ok(|_| coerce_inner(prev_ty, new_ty, true));
+        let result = self.commit_if_ok(|_| coerce_mutual_inner(self, prev_ty, new_ty, true));
         if let Ok(_) = result {
             return result.map(|r| InferOk {
                 obligations: r.obligations,

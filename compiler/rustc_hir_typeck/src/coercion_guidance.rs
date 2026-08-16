@@ -46,7 +46,8 @@ use rustc_infer::infer::{
 };
 use rustc_infer::traits::{Obligation, PredicateObligation, PredicateObligations, SelectionError};
 use rustc_middle::ty::adjustment::{
-    Adjust, Adjustment, AllowTwoPhase, AutoBorrow, AutoBorrowMutability, DerefAdjustKind, PointerCoercion,
+    Adjust, Adjustment, AllowTwoPhase, AutoBorrow, AutoBorrowMutability, DerefAdjustKind,
+    PointerCoercion,
 };
 use rustc_middle::ty::error::TypeError;
 use rustc_middle::ty::relate::{self, Relate, TypeRelation};

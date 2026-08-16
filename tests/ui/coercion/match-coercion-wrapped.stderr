@@ -1,0 +1,35 @@
+error[E0308]: `match` arms have incompatible types
+  --> $DIR/match-coercion-wrapped.rs:19:17
+   |
+LL |       let interest = match None::<()> {
+   |  ____________________-
+LL | |         None => Some(&[] as Foo),
+   | |                 ---------------- this is found to be of type `Option<&[(); 0]>`
+LL | |         None => Some(&[] as Foo as Bar),
+   | |                 ^^^^^^^^^^^^^^^^^^^^^^^ expected `Option<&[(); 0]>`, found `Option<&[()]>`
+...  |
+LL | |     };
+   | |_____- `match` arms have incompatible types
+   |
+   = note: expected enum `Option<&[(); 0]>`
+              found enum `Option<&[()]>`
+
+error[E0308]: `match` arms have incompatible types
+  --> $DIR/match-coercion-wrapped.rs:40:17
+   |
+LL |       let interest = match None::<()> {
+   |  ____________________-
+LL | |         None => Box::new(&[] as Foo),
+   | |                 -------------------- this is found to be of type `Box<&[(); 0]>`
+LL | |         None => Box::new(&[] as Foo as Bar),
+   | |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Box<&[(); 0]>`, found `Box<&[()]>`
+...  |
+LL | |     };
+   | |_____- `match` arms have incompatible types
+   |
+   = note: expected struct `Box<&[(); 0]>`
+              found struct `Box<&[()]>`
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0308`.
