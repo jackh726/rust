@@ -465,14 +465,18 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             Ok(forwd_result) => {
                 let prev_ty = self.resolve_vars_if_possible(prev_ty);
                 let new_ty = self.resolve_vars_if_possible(new_ty);
-                let rev_result = self.commit_if_ok(|_| coerce_mutual_inner(self, prev_ty, new_ty, false));
-                if let Ok(rev_result) = rev_result {
-                    let forwd_ty = self.resolve_vars_if_possible(forwd_result.value.1);
+                let forwd_ty = self.resolve_vars_if_possible(forwd_result.value.1);
+                // The reverse direction only checks if the two directions agree. However,
+                // adjustments and the target type from the forward direciton.
+                let mismatch = self.probe(|_| {
+                    let Ok(rev_result) = coerce_mutual_inner(self, prev_ty, new_ty, false) else {
+                        return None;
+                    };
                     let rev_ty = self.resolve_vars_if_possible(rev_result.value.1);
-                    let res = self.unify(forwd_ty, rev_ty, ForceLeakCheck::No);
-                    if let Err(e) = res {
-                        return Err(e);
-                    }
+                    self.unify(forwd_ty, rev_ty, ForceLeakCheck::No).err()
+                });
+                if let Some(e) = mismatch {
+                    return Err(e);
                 }
 
                 return Ok(InferOk {
