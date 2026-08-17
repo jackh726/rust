@@ -1,5 +1,5 @@
-use rustc_data_structures::fx::{FxIndexMap, FxIndexSet};
-use rustc_index::bit_set::DenseBitSet;
+use rustc_data_structures::fx::{FxHashMap, FxIndexMap, FxIndexSet};
+use rustc_index::bit_set::{DenseBitSet, MixedBitSet};
 use rustc_index::interval::IntervalSet;
 use rustc_infer::infer::canonical::QueryRegionConstraints;
 use rustc_infer::traits::TraitErrors;
@@ -8,7 +8,8 @@ use rustc_middle::traits::query::DropckOutlivesResult;
 use rustc_middle::ty::relate::Relate;
 use rustc_middle::ty::{Ty, TyCtxt, TypeVisitable, TypeVisitableExt};
 use rustc_mir_dataflow::impls::MaybeInitializedPlaces;
-use rustc_mir_dataflow::move_paths::{HasMoveData, MoveData, MovePathIndex};
+use rustc_mir_dataflow::lattice::MaybeReachable;
+use rustc_mir_dataflow::move_paths::{MoveData, MovePathIndex};
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 use rustc_mir_dataflow::{Analysis, ResultsCursor};
 use rustc_span::{DUMMY_SP, ErrorGuaranteed, Span};
@@ -55,6 +56,8 @@ pub(super) fn trace<'tcx>(
         local_use_map,
         move_data,
         drop_data: FxIndexMap::default(),
+        init_before_term: Default::default(),
+        init_at_exit: Default::default(),
     };
 
     let mut results = LivenessResults::new(cx);
@@ -89,7 +92,13 @@ struct LivenessContext<'a, 'typeck, 'tcx> {
     /// Index indicating where each variable is assigned, used, or
     /// dropped.
     local_use_map: &'a LocalUseMap,
+
+    /// Memoized `MaybeInitializedPlaces` state before/after the terminator of a block.
+    init_before_term: FxHashMap<BasicBlock, MaybeInitDomain>,
+    init_at_exit: FxHashMap<BasicBlock, MaybeInitDomain>,
 }
+
+type MaybeInitDomain = MaybeReachable<MixedBitSet<MovePathIndex>>;
 
 struct DropData<'tcx> {
     dropck_result: DropckOutlivesResult<'tcx>,
@@ -501,28 +510,19 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         self.typeck.body
     }
 
-    /// Returns `true` if the local variable (or some part of it) is initialized at the current
-    /// cursor position. Callers should call one of the `seek` methods immediately before to point
-    /// the cursor to the desired location.
-    fn initialized_at_curr_loc(&mut self, mpi: MovePathIndex) -> bool {
-        let flow_inits = self.flow_inits();
-        let state = flow_inits.get();
-        if state.contains(mpi) {
-            return true;
-        }
-
-        let move_paths = &flow_inits.analysis().move_data().move_paths;
-        move_paths[mpi].find_descendant(move_paths, |mpi| state.contains(mpi)).is_some()
-    }
-
     /// Returns `true` if the local variable (or some part of it) is initialized in
     /// the terminator of `block`. We need to check this to determine if a
     /// DROP of some local variable will have an effect -- note that
     /// drops, as they may unwind, are always terminators.
     fn initialized_at_terminator(&mut self, block: BasicBlock, mpi: MovePathIndex) -> bool {
-        let terminator_location = self.body().terminator_loc(block);
-        self.flow_inits().seek_before_primary_effect(terminator_location);
-        self.initialized_at_curr_loc(mpi)
+        if !self.init_before_term.contains_key(&block) {
+            let terminator_location = self.body().terminator_loc(block);
+            self.flow_inits().seek_before_primary_effect(terminator_location);
+            let state = self.flow_inits().get().clone();
+            self.init_before_term.insert(block, state);
+        }
+        let state = &self.init_before_term[&block];
+        Self::state_contains(self.move_data, state, mpi)
     }
 
     /// Returns `true` if the path `mpi` (or some part of it) is initialized at
@@ -531,9 +531,27 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
     /// **Warning:** Does not account for the result of `Call`
     /// instructions.
     fn initialized_at_exit(&mut self, block: BasicBlock, mpi: MovePathIndex) -> bool {
-        let terminator_location = self.body().terminator_loc(block);
-        self.flow_inits().seek_after_primary_effect(terminator_location);
-        self.initialized_at_curr_loc(mpi)
+        if !self.init_at_exit.contains_key(&block) {
+            let terminator_location = self.body().terminator_loc(block);
+            self.flow_inits().seek_after_primary_effect(terminator_location);
+            let state = self.flow_inits().get().clone();
+            self.init_at_exit.insert(block, state);
+        }
+        let state = &self.init_at_exit[&block];
+        Self::state_contains(self.move_data, state, mpi)
+    }
+
+    /// Returns `true` if `mpi` (or some part of it) is set in `state`.
+    fn state_contains(
+        move_data: &MoveData<'tcx>,
+        state: &MaybeInitDomain,
+        mpi: MovePathIndex,
+    ) -> bool {
+        if state.contains(mpi) {
+            return true;
+        }
+        let move_paths = &move_data.move_paths;
+        move_paths[mpi].find_descendant(move_paths, |mpi| state.contains(mpi)).is_some()
     }
 
     /// Stores the result that all regions in `value` are live for the
