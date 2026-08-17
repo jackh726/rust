@@ -40,6 +40,10 @@ pub(super) fn generate<'tcx>(
         &typeck.constraints.outlives_constraints,
     );
 
+    // The `dropck_outlives` cache and the maybe-initialized dataflow, shared by the two passes
+    // drop-liveness now runs in: the constraints first, then the points in `trace`.
+    let mut drop_state = trace::DropLivenessState::new(typeck.body, move_data);
+
     // NLLs can avoid computing some liveness data here because its constraints are
     // location-insensitive, but that doesn't work in polonius: locals whose type contains a region
     // that outlives a free region are not necessarily live everywhere in a flow-sensitive setting,
@@ -62,10 +66,16 @@ pub(super) fn generate<'tcx>(
             boring_locals.into_iter().collect();
         free_regions = typeck.universal_regions.universal_regions_iter().collect();
     }
+
     let (relevant_live_locals, boring_locals) =
         compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
 
-    trace::trace(typeck, location_map, move_data, relevant_live_locals, boring_locals);
+    // Drop-liveness in two passes: the outlives constraints for the relevant locals first, then
+    // the points. Splitting them is what makes the constraint set independent of when, or whether,
+    // any particular local's liveness gets computed.
+    trace::add_drop_constraints(typeck, location_map, &mut drop_state, &relevant_live_locals);
+
+    trace::trace(typeck, location_map, relevant_live_locals, boring_locals, &mut drop_state);
 
     // Mark regions that should be live where they appear within rvalues or within a call: like
     // args, regions, and types.
