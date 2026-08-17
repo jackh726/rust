@@ -3,7 +3,9 @@ use rustc_index::bit_set::{DenseBitSet, MixedBitSet};
 use rustc_index::interval::IntervalSet;
 use rustc_infer::infer::canonical::QueryRegionConstraints;
 use rustc_infer::traits::TraitErrors;
-use rustc_middle::mir::{BasicBlock, Body, ConstraintCategory, HasLocalDecls, Local, Location};
+use rustc_middle::mir::{
+    BasicBlock, Body, ConstraintCategory, HasLocalDecls, Local, Location, TerminatorKind,
+};
 use rustc_middle::traits::query::DropckOutlivesResult;
 use rustc_middle::ty::relate::Relate;
 use rustc_middle::ty::{Ty, TyCtxt, TypeVisitable, TypeVisitableExt};
@@ -42,23 +44,14 @@ use crate::type_check::{NormalizeLocation, TypeChecker};
 pub(super) fn trace<'tcx>(
     typeck: &mut TypeChecker<'_, 'tcx>,
     location_map: &DenseLocationMap,
-    move_data: &MoveData<'tcx>,
     relevant_live_locals: Vec<Local>,
     boring_locals: Vec<Local>,
+    state: &mut DropLivenessState<'_, 'tcx>,
 ) {
     let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness_trace");
 
     let local_use_map = &LocalUseMap::build(&relevant_live_locals, location_map, typeck.body);
-    let cx = LivenessContext {
-        typeck,
-        flow_inits: None,
-        location_map,
-        local_use_map,
-        move_data,
-        drop_data: FxIndexMap::default(),
-        init_before_term: Default::default(),
-        init_at_exit: Default::default(),
-    };
+    let cx = LivenessContext { typeck, location_map, local_use_map: Some(local_use_map), state };
 
     let mut results = LivenessResults::new(cx);
 
@@ -69,15 +62,44 @@ pub(super) fn trace<'tcx>(
     results.dropck_boring_locals(boring_locals);
 }
 
-/// Contextual state for the type-liveness coroutine.
-struct LivenessContext<'a, 'typeck, 'tcx> {
-    /// Current type-checker, giving us our inference context etc.
-    ///
-    /// This also stores the body we're currently analyzing.
-    typeck: &'a mut TypeChecker<'typeck, 'tcx>,
+/// Runs the drop-liveness half that produces *outlives constraints* -- see
+/// `LivenessContext::add_drop_constraints_for`.
+///
+/// This is a separate pass from `trace` so that computing a local's liveness contributes *nothing*
+/// to the outlives constraint set: what is left in `trace` only adds points. The constraint graph
+/// therefore no longer depends on when -- or whether -- any particular local's liveness is
+/// computed, which is what lets the expensive half run later, or lazily.
+///
+/// `relevant_live_locals` is the whole of it: a boring local's liveness is never computed, so it
+/// never had, and never will have, drop constraints of its own.
+pub(super) fn add_drop_constraints<'tcx>(
+    typeck: &mut TypeChecker<'_, 'tcx>,
+    location_map: &DenseLocationMap,
+    state: &mut DropLivenessState<'_, 'tcx>,
+    relevant_live_locals: &[Local],
+) {
+    let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness_drop_constraints");
 
-    /// Defines the `PointIndex` mapping
-    location_map: &'a DenseLocationMap,
+    // This pass looks at the body's `Drop` terminators, never at a local's uses, so it needs no
+    // use map -- and building an empty one is not free, it is three vectors the size of the body's
+    // local count.
+    let mut cx = LivenessContext { typeck, location_map, local_use_map: None, state };
+
+    cx.add_drop_constraints_for_relevant_locals(relevant_live_locals);
+}
+
+/// The parts of drop-liveness that do not depend on the relevant/boring partition: the
+/// `dropck_outlives` cache, and the dataflow that says which drops actually have an effect.
+///
+/// This is split out because drop-liveness runs in two passes that are separated by the very
+/// question they inform: `add_drop_constraints` pushes the outlives constraints for every dropped
+/// local, `generate` then uses the constraint set to compute the partition, and `trace` finally
+/// computes liveness for it. Without somewhere to keep this, the `dropck_outlives` queries and the
+/// whole-body `MaybeInitializedPlaces` dataflow would both run twice.
+pub(super) struct DropLivenessState<'a, 'tcx> {
+    /// The body being analyzed. Same as the type checker's; held here so the dataflow below can
+    /// be built without one.
+    body: &'a Body<'tcx>,
 
     /// Mapping to/from the various indices used for initialization tracking.
     move_data: &'a MoveData<'tcx>,
@@ -89,13 +111,46 @@ struct LivenessContext<'a, 'typeck, 'tcx> {
     /// initialized. Computed lazily when needed by drop-liveness.
     flow_inits: Option<ResultsCursor<'a, 'tcx, MaybeInitializedPlaces<'a, 'tcx>>>,
 
-    /// Index indicating where each variable is assigned, used, or
-    /// dropped.
-    local_use_map: &'a LocalUseMap,
-
     /// Memoized `MaybeInitializedPlaces` state before/after the terminator of a block.
     init_before_term: FxHashMap<BasicBlock, MaybeInitDomain>,
     init_at_exit: FxHashMap<BasicBlock, MaybeInitDomain>,
+}
+
+impl<'a, 'tcx> DropLivenessState<'a, 'tcx> {
+    pub(super) fn new(body: &'a Body<'tcx>, move_data: &'a MoveData<'tcx>) -> Self {
+        DropLivenessState {
+            body,
+            move_data,
+            drop_data: FxIndexMap::default(),
+            flow_inits: None,
+            init_before_term: Default::default(),
+            init_at_exit: Default::default(),
+        }
+    }
+}
+
+/// Contextual state for the type-liveness coroutine.
+struct LivenessContext<'a, 'b, 'typeck, 'tcx> {
+    /// Current type-checker, giving us our inference context etc.
+    ///
+    /// This also stores the body we're currently analyzing.
+    typeck: &'a mut TypeChecker<'typeck, 'tcx>,
+
+    /// Defines the `PointIndex` mapping
+    location_map: &'a DenseLocationMap,
+
+    /// Index indicating where each variable is assigned, used, or dropped.
+    ///
+    /// `None` in the drop-constraint pass, which needs no such index; see `add_drop_constraints`.
+    /// Only `LivenessResults` reads it, and only `trace` builds one of those, so the `unwrap`s at
+    /// its use sites cannot fire. They stay `unwrap`s rather than moving behind an accessor
+    /// because `Option<&_>` is `Copy`: reading the field here does not borrow the whole context,
+    /// and a method would.
+    local_use_map: Option<&'a LocalUseMap>,
+
+    /// The dropck and initializedness data, shared with the drop-constraint pass that ran before
+    /// the partition was known.
+    state: &'a mut DropLivenessState<'b, 'tcx>,
 }
 
 type MaybeInitDomain = MaybeReachable<MixedBitSet<MovePathIndex>>;
@@ -105,8 +160,8 @@ struct DropData<'tcx> {
     region_constraint_data: Option<&'tcx QueryRegionConstraints<'tcx>>,
 }
 
-struct LivenessResults<'a, 'typeck, 'tcx> {
-    cx: LivenessContext<'a, 'typeck, 'tcx>,
+struct LivenessResults<'a, 'b, 'typeck, 'tcx> {
+    cx: LivenessContext<'a, 'b, 'typeck, 'tcx>,
 
     /// Set of points that define the current local.
     defs: DenseBitSet<PointIndex>,
@@ -127,8 +182,8 @@ struct LivenessResults<'a, 'typeck, 'tcx> {
     stack: Vec<PointIndex>,
 }
 
-impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
-    fn new(cx: LivenessContext<'a, 'typeck, 'tcx>) -> Self {
+impl<'a, 'b, 'typeck, 'tcx> LivenessResults<'a, 'b, 'typeck, 'tcx> {
+    fn new(cx: LivenessContext<'a, 'b, 'typeck, 'tcx>) -> Self {
         let num_points = cx.location_map.num_points();
         LivenessResults {
             cx,
@@ -140,6 +195,11 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
         }
     }
 
+    /// Computes liveness for each of `relevant_live_locals`.
+    ///
+    /// The drop-liveness *constraints* are not this loop's job: `add_drop_constraints` has already
+    /// pushed them. Reporting dropck overflows still is, so that the diagnostic stays on the span,
+    /// and for the locals, it was on before.
     fn compute_for_all_locals(&mut self, relevant_live_locals: Vec<Local>) {
         for local in relevant_live_locals {
             self.reset_local_state();
@@ -154,7 +214,8 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
             }
 
             if !self.drop_live_at.is_empty() {
-                self.cx.add_drop_constraints_for(local, local_ty, &self.drop_locations);
+                let first_drop = self.drop_locations[0];
+                self.cx.report_drop_overflows(local, local_ty, first_drop);
                 self.cx.add_drop_live_points_for(local, local_ty, &self.drop_live_at);
             }
         }
@@ -170,7 +231,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
         for local in boring_locals {
             let local_ty = self.cx.body().local_decls[local].ty;
             let local_span = self.cx.body().local_decls[local].source_info.span;
-            let drop_data = self.cx.drop_data.entry(local_ty).or_insert_with({
+            let drop_data = self.cx.state.drop_data.entry(local_ty).or_insert_with({
                 let typeck = &self.cx.typeck;
                 move || LivenessContext::compute_drop_data(typeck, local_ty, local_span)
             });
@@ -219,6 +280,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
 
         let live_at = IntervalSet::new(self.cx.location_map.num_points());
         for (local, local_ty, location) in facts_to_add {
+            self.cx.report_drop_overflows(local, local_ty, location);
             self.cx.add_drop_constraints_for(local, local_ty, &[location]);
             self.cx.add_drop_live_points_for(local, local_ty, &live_at);
         }
@@ -235,7 +297,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
 
     /// Adds the definitions of `local` into `self.defs`.
     fn add_defs_for(&mut self, local: Local) {
-        for def in self.cx.local_use_map.defs(local) {
+        for def in self.cx.local_use_map.unwrap().defs(local) {
             debug!("- defined at {:?}", def);
             self.defs.insert(def);
         }
@@ -250,7 +312,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
     fn compute_use_live_points_for(&mut self, local: Local) {
         debug!("compute_use_live_points_for(local={:?})", local);
 
-        self.stack.extend(self.cx.local_use_map.uses(local));
+        self.stack.extend(self.cx.local_use_map.unwrap().uses(local));
         while let Some(p) = self.stack.pop() {
             // We are live in this block from the closest to us of:
             //
@@ -304,11 +366,11 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
     fn compute_drop_live_points_for(&mut self, local: Local) {
         debug!("compute_drop_live_points_for(local={:?})", local);
 
-        let Some(mpi) = self.cx.move_data.rev_lookup.find_local(local) else { return };
+        let Some(mpi) = self.cx.state.move_data.rev_lookup.find_local(local) else { return };
         debug!("compute_drop_live_points_for: mpi = {:?}", mpi);
 
         // Find the drops where `local` is initialized.
-        for drop_point in self.cx.local_use_map.drops(local) {
+        for drop_point in self.cx.local_use_map.unwrap().drops(local) {
             let location = self.cx.location_map.to_location(drop_point);
             debug_assert_eq!(self.cx.body().terminator_loc(location.block), location,);
 
@@ -344,7 +406,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
     fn compute_drop_live_points_for_block(&mut self, mpi: MovePathIndex, term_point: PointIndex) {
         debug!(
             "compute_drop_live_points_for_block(mpi={:?}, term_point={:?})",
-            self.cx.move_data.move_paths[mpi].place,
+            self.cx.state.move_data.move_paths[mpi].place,
             self.cx.location_map.to_location(term_point),
         );
 
@@ -467,7 +529,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
     }
 }
 
-impl<'a, 'typeck, 'tcx> LivenessContext<'a, 'typeck, 'tcx> {
+impl<'a, 'tcx> DropLivenessState<'a, 'tcx> {
     /// Computes the `MaybeInitializedPlaces` dataflow analysis if it hasn't been done already.
     ///
     /// In practice, the results of this dataflow analysis are rarely needed but can be expensive to
@@ -477,10 +539,12 @@ impl<'a, 'typeck, 'tcx> LivenessContext<'a, 'typeck, 'tcx> {
     ///
     /// This happens as part of the drop-liveness computation: it's the only place checking for
     /// maybe-initializedness of `MovePathIndex`es.
-    fn flow_inits(&mut self) -> &mut ResultsCursor<'a, 'tcx, MaybeInitializedPlaces<'a, 'tcx>> {
+    fn flow_inits(
+        &mut self,
+        tcx: TyCtxt<'tcx>,
+    ) -> &mut ResultsCursor<'a, 'tcx, MaybeInitializedPlaces<'a, 'tcx>> {
+        let (body, move_data) = (self.body, self.move_data);
         self.flow_inits.get_or_insert_with(|| {
-            let tcx = self.typeck.tcx();
-            let body = self.typeck.body;
             // FIXME: reduce the `MaybeInitializedPlaces` domain to the useful `MovePath`s.
             //
             // This dataflow analysis computes maybe-initializedness of all move paths, which
@@ -494,28 +558,27 @@ impl<'a, 'typeck, 'tcx> LivenessContext<'a, 'typeck, 'tcx> {
             // case), there are a few dozens compared to e.g. thousands or tens of thousands of
             // locals and move paths.
             let _timer = tcx.prof.generic_activity("borrowck_dataflow_maybe_inits");
-            let flow_inits = MaybeInitializedPlaces::new(tcx, body, self.move_data)
+            let flow_inits = MaybeInitializedPlaces::new(tcx, body, move_data)
                 .iterate_to_fixpoint(tcx, body, Some("borrowck"))
                 .into_results_cursor(body);
             flow_inits
         })
-    }
-}
-
-impl<'tcx> LivenessContext<'_, '_, 'tcx> {
-    fn body(&self) -> &Body<'tcx> {
-        self.typeck.body
     }
 
     /// Returns `true` if the local variable (or some part of it) is initialized in
     /// the terminator of `block`. We need to check this to determine if a
     /// DROP of some local variable will have an effect -- note that
     /// drops, as they may unwind, are always terminators.
-    fn initialized_at_terminator(&mut self, block: BasicBlock, mpi: MovePathIndex) -> bool {
+    fn initialized_at_terminator(
+        &mut self,
+        tcx: TyCtxt<'tcx>,
+        block: BasicBlock,
+        mpi: MovePathIndex,
+    ) -> bool {
         if !self.init_before_term.contains_key(&block) {
-            let terminator_location = self.body().terminator_loc(block);
-            self.flow_inits().seek_before_primary_effect(terminator_location);
-            let state = self.flow_inits().get().clone();
+            let terminator_location = self.body.terminator_loc(block);
+            self.flow_inits(tcx).seek_before_primary_effect(terminator_location);
+            let state = self.flow_inits(tcx).get().clone();
             self.init_before_term.insert(block, state);
         }
         let state = &self.init_before_term[&block];
@@ -527,11 +590,16 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
     ///
     /// **Warning:** Does not account for the result of `Call`
     /// instructions.
-    fn initialized_at_exit(&mut self, block: BasicBlock, mpi: MovePathIndex) -> bool {
+    fn initialized_at_exit(
+        &mut self,
+        tcx: TyCtxt<'tcx>,
+        block: BasicBlock,
+        mpi: MovePathIndex,
+    ) -> bool {
         if !self.init_at_exit.contains_key(&block) {
-            let terminator_location = self.body().terminator_loc(block);
-            self.flow_inits().seek_after_primary_effect(terminator_location);
-            let state = self.flow_inits().get().clone();
+            let terminator_location = self.body.terminator_loc(block);
+            self.flow_inits(tcx).seek_after_primary_effect(terminator_location);
+            let state = self.flow_inits(tcx).get().clone();
             self.init_at_exit.insert(block, state);
         }
         let state = &self.init_at_exit[&block];
@@ -549,6 +617,74 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         }
         let move_paths = &move_data.move_paths;
         move_paths[mpi].find_descendant(move_paths, |mpi| state.contains(mpi)).is_some()
+    }
+}
+
+impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
+    fn body(&self) -> &'b Body<'tcx> {
+        self.state.body
+    }
+
+    /// Forwards to [`DropLivenessState::initialized_at_terminator`].
+    fn initialized_at_terminator(&mut self, block: BasicBlock, mpi: MovePathIndex) -> bool {
+        let tcx = self.typeck.tcx();
+        self.state.initialized_at_terminator(tcx, block, mpi)
+    }
+
+    /// Forwards to [`DropLivenessState::initialized_at_exit`].
+    fn initialized_at_exit(&mut self, block: BasicBlock, mpi: MovePathIndex) -> bool {
+        let tcx = self.typeck.tcx();
+        self.state.initialized_at_exit(tcx, block, mpi)
+    }
+
+    /// Pushes the `dropck_outlives` constraints for each of `relevant_live_locals` that is
+    /// actually dropped, without computing any liveness.
+    ///
+    /// This is the same set of constraints the per-local loop used to push, arrived at the same
+    /// way: the local's drop terminators, filtered by initializedness. What it does not need is
+    /// the reverse DFS -- the loop only pushed when the drop-live set came back non-empty, and
+    /// that set is non-empty exactly when this filter leaves something behind.
+    ///
+    /// Reporting dropck overflows is deliberately *not* hoisted along with the constraints; see
+    /// `report_drop_overflows`.
+    fn add_drop_constraints_for_relevant_locals(&mut self, relevant_live_locals: &[Local]) {
+        let mut relevant = DenseBitSet::new_empty(self.body().local_decls.len());
+        for &local in relevant_live_locals {
+            relevant.insert(local);
+        }
+
+        // The same points `LocalUseMap::drops` would yield -- `DefUse::Drop` is produced only by a
+        // `Drop` terminator's place -- without needing that map to have been built.
+        let mut drops: FxIndexMap<Local, Vec<Location>> = FxIndexMap::default();
+        for (block, data) in self.body().basic_blocks.iter_enumerated() {
+            if let TerminatorKind::Drop { place, .. } = data.terminator().kind
+                && relevant.contains(place.local)
+            {
+                let location = Location { block, statement_index: data.statements.len() };
+                drops.entry(place.local).or_default().push(location);
+            }
+        }
+
+        // Visit locals in index order, not in the block order they were collected in, to match the
+        // order of the loop this pass takes over from.
+        drops.sort_unstable_keys();
+
+        for (local, drop_locations) in drops {
+            // A drop only has an effect where the local is (partly) initialized. This is the same
+            // filter `compute_drop_live_points_for` applies when seeding its DFS, and it is why
+            // this cannot be a purely syntactic scan.
+            let Some(mpi) = self.state.move_data.rev_lookup.find_local(local) else { continue };
+            let initialized: Vec<Location> = drop_locations
+                .into_iter()
+                .filter(|location| self.initialized_at_terminator(location.block, mpi))
+                .collect();
+            if initialized.is_empty() {
+                continue;
+            }
+
+            let local_ty = self.body().local_decls[local].ty;
+            self.add_drop_constraints_for(local, local_ty, &initialized);
+        }
     }
 
     /// Stores the result that all regions in `value` are live for the
@@ -578,7 +714,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         );
 
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
-        let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
+        let drop_data = self.state.drop_data.entry(dropped_ty).or_insert_with({
             let typeck = &self.typeck;
             move || Self::compute_drop_data(typeck, dropped_ty, local_span)
         });
@@ -593,9 +729,32 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
             }
         }
 
+    }
+
+    /// Reports the `dropck_outlives` overflow for `dropped_ty`, if any, at the drop terminator
+    /// `drop_location`.
+    ///
+    /// This is deliberately not folded into `add_drop_constraints_for`. That function now also
+    /// runs for locals whose liveness is never computed, and for locals whose drop-live set turns
+    /// out to be empty -- neither of which reported an overflow before, and the former of which
+    /// would report it on the drop terminator's span rather than the local's. Keeping the report
+    /// at the call sites that owned it keeps the diagnostic on the same span, for the same
+    /// locals, in the same order.
+    fn report_drop_overflows(
+        &mut self,
+        dropped_local: Local,
+        dropped_ty: Ty<'tcx>,
+        drop_location: Location,
+    ) {
+        let local_span = self.body().local_decls()[dropped_local].source_info.span;
+        let drop_data = self.state.drop_data.entry(dropped_ty).or_insert_with({
+            let typeck = &self.typeck;
+            move || Self::compute_drop_data(typeck, dropped_ty, local_span)
+        });
+
         drop_data.dropck_result.report_overflows(
             self.typeck.infcx.tcx,
-            self.typeck.body.source_info(*drop_locations.first().unwrap()).span,
+            self.typeck.body.source_info(drop_location).span,
             dropped_ty,
         );
     }
@@ -622,7 +781,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         );
 
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
-        let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
+        let drop_data = self.state.drop_data.entry(dropped_ty).or_insert_with({
             let typeck = &self.typeck;
             move || Self::compute_drop_data(typeck, dropped_ty, local_span)
         });
