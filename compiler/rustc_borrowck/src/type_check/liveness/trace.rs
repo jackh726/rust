@@ -154,12 +154,8 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
             }
 
             if !self.drop_live_at.is_empty() {
-                self.cx.add_drop_live_facts_for(
-                    local,
-                    local_ty,
-                    &self.drop_locations,
-                    &self.drop_live_at,
-                );
+                self.cx.add_drop_constraints_for(local, local_ty, &self.drop_locations);
+                self.cx.add_drop_live_points_for(local, local_ty, &self.drop_live_at);
             }
         }
     }
@@ -223,7 +219,8 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
 
         let live_at = IntervalSet::new(self.cx.location_map.num_points());
         for (local, local_ty, location) in facts_to_add {
-            self.cx.add_drop_live_facts_for(local, local_ty, &[location], &live_at);
+            self.cx.add_drop_constraints_for(local, local_ty, &[location]);
+            self.cx.add_drop_live_points_for(local, local_ty, &live_at);
         }
     }
 
@@ -561,28 +558,23 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         Self::make_all_regions_live(self.location_map, self.typeck, value, live_at);
     }
 
-    /// Some variable with type `live_ty` is "drop live" at `location`
-    /// -- i.e., it may be dropped later. This means that *some* of
-    /// the regions in its type must be live at `location`. The
-    /// precise set will depend on the dropck constraints, and in
-    /// particular this takes `#[may_dangle]` into account.
-    fn add_drop_live_facts_for(
+    /// The half of drop-liveness that produces *outlives constraints*: the `dropck_outlives`
+    /// query for `dropped_ty`, and its region constraints pushed at each location where
+    /// `dropped_local` is actually dropped.
+    ///
+    /// This deliberately does not take the drop-live point set. It depends only on
+    /// `drop_locations` -- which needs the initializedness filter, but not the reverse DFS --
+    /// so it can run without computing liveness at all. See `add_drop_live_points_for` for the
+    /// half that does need the point set.
+    fn add_drop_constraints_for(
         &mut self,
         dropped_local: Local,
         dropped_ty: Ty<'tcx>,
         drop_locations: &[Location],
-        live_at: &IntervalSet<PointIndex>,
     ) {
         debug!(
-            "add_drop_live_constraint(\
-             dropped_local={:?}, \
-             dropped_ty={:?}, \
-             drop_locations={:?}, \
-             live_at={:?})",
-            dropped_local,
-            dropped_ty,
-            drop_locations,
-            values::pretty_print_points(self.location_map, live_at.iter()),
+            "add_drop_constraints_for(dropped_local={:?}, dropped_ty={:?}, drop_locations={:?})",
+            dropped_local, dropped_ty, drop_locations,
         );
 
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
@@ -606,6 +598,34 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
             self.typeck.body.source_info(*drop_locations.first().unwrap()).span,
             dropped_ty,
         );
+    }
+
+    /// Some variable with type `dropped_ty` is "drop live" at `live_at` -- i.e., it may be
+    /// dropped later. This means that *some* of the regions in its type must be live at those
+    /// points. The precise set depends on the dropck constraints, and in particular this takes
+    /// `#[may_dangle]` into account.
+    ///
+    /// This is the half of drop-liveness that consumes the drop-live point set, and so the half
+    /// that requires the reverse DFS to have run. It adds no outlives constraints; see
+    /// `add_drop_constraints_for`.
+    fn add_drop_live_points_for(
+        &mut self,
+        dropped_local: Local,
+        dropped_ty: Ty<'tcx>,
+        live_at: &IntervalSet<PointIndex>,
+    ) {
+        debug!(
+            "add_drop_live_points_for(dropped_local={:?}, dropped_ty={:?}, live_at={:?})",
+            dropped_local,
+            dropped_ty,
+            values::pretty_print_points(self.location_map, live_at.iter()),
+        );
+
+        let local_span = self.body().local_decls()[dropped_local].source_info.span;
+        let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
+            let typeck = &self.typeck;
+            move || Self::compute_drop_data(typeck, dropped_ty, local_span)
+        });
 
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
