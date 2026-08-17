@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
-
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
+use rustc_index::{IndexSlice, IndexVec};
 use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Location};
 use rustc_middle::ty::RegionVid;
@@ -32,10 +31,21 @@ use crate::universal_regions::UniversalRegions;
 /// That `LocalizedConstraintGraph` can create these edges on-demand during traversal, and we
 /// therefore model them as a pair of `LocalizedNode` vertices.
 ///
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub(super) struct LocalizedNode {
     pub region: RegionVid,
     pub point: PointIndex,
+}
+
+impl std::hash::Hash for LocalizedNode {
+    /// Hashes the pair as a single `u64`. The derived implementation hashes the two indices
+    /// separately, which costs two `FxHasher` rounds; the localized graph traversal inserts and
+    /// probes one of these per node visited, so it is worth the manual impl.
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let packed = ((self.region.as_u32() as u64) << 32) | (self.point.as_u32() as u64);
+        state.write_u64(packed);
+    }
 }
 
 /// The localized constraint graph indexes the physical and logical edges to lazily compute a given
@@ -45,10 +55,17 @@ pub(super) struct LocalizedConstraintGraph {
     /// when traversing from the node to the successor region.
     edges: FxHashMap<LocalizedNode, FxIndexSet<RegionVid>>,
 
+    /// Whether a region has *any* physical edge, at any point. Physical edges are sparse -- most
+    /// regions have none -- and the traversal would otherwise hash a `LocalizedNode` at every node
+    /// it visits just to find nothing, so this lets it skip the lookup entirely.
+    has_physical_edges: IndexVec<RegionVid, bool>,
+
     /// The logical edges representing the outlives constraints that hold at all points in the CFG,
     /// which we don't localize to avoid creating a lot of unnecessary edges in the graph. Some CFGs
     /// can be big, and we don't need to create such a physical edge for every point in the CFG.
-    logical_edges: FxHashMap<RegionVid, FxIndexSet<RegionVid>>,
+    ///
+    /// Indexed rather than hashed: this is read once per node visited during traversal.
+    logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>>,
 }
 
 /// The visitor interface when traversing a `LocalizedConstraintGraph`.
@@ -68,15 +85,17 @@ impl LocalizedConstraintGraph {
         liveness: &LivenessValues,
         outlives_constraints: impl Iterator<Item = OutlivesConstraint<'tcx>>,
     ) -> Self {
-        let mut edges: FxHashMap<_, FxIndexSet<_>> = FxHashMap::default();
-        let mut logical_edges: FxHashMap<_, FxIndexSet<_>> = FxHashMap::default();
+        let mut edges: FxHashMap<LocalizedNode, FxIndexSet<_>> = FxHashMap::default();
+        let mut logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>> =
+            IndexVec::new();
+        let mut has_physical_edges: IndexVec<RegionVid, bool> = IndexVec::new();
 
         for outlives_constraint in outlives_constraints {
             match outlives_constraint.locations {
                 Locations::All(_) => {
                     logical_edges
-                        .entry(outlives_constraint.sup)
-                        .or_default()
+                        .ensure_contains_elem(outlives_constraint.sup, || None)
+                        .get_or_insert_default()
                         .insert(outlives_constraint.sub);
                 }
 
@@ -86,11 +105,13 @@ impl LocalizedConstraintGraph {
                         point: liveness.point_from_location(location),
                     };
                     edges.entry(node).or_default().insert(outlives_constraint.sub);
+                    *has_physical_edges.ensure_contains_elem(outlives_constraint.sup, || false) =
+                        true;
                 }
             }
         }
 
-        LocalizedConstraintGraph { edges, logical_edges }
+        LocalizedConstraintGraph { edges, has_physical_edges, logical_edges }
     }
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
@@ -99,7 +120,7 @@ impl LocalizedConstraintGraph {
         &self,
         body: &Body<'tcx>,
         liveness: &LivenessValues,
-        live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+        live_region_variances: &IndexSlice<RegionVid, Option<ConstraintDirection>>,
         universal_regions: &UniversalRegions<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
         visitor: &mut impl LocalizedConstraintGraphVisitor,
@@ -151,10 +172,13 @@ impl LocalizedConstraintGraph {
 
                 // The physical edges present at this node are:
                 //
-                // 1. the typeck edges that flow from region to region *at this point*.
-                for &succ in self.edges.get(&node).into_flat_iter() {
-                    let succ = LocalizedNode { region: succ, point: node.point };
-                    successor_found(succ);
+                // 1. the typeck edges that flow from region to region *at this point*. Most
+                // regions have no physical edges at all, so check that before hashing the node.
+                if self.has_physical_edges.get(node.region).copied().unwrap_or(false) {
+                    for &succ in self.edges.get(&node).into_flat_iter() {
+                        let succ = LocalizedNode { region: succ, point: node.point };
+                        successor_found(succ);
+                    }
                 }
 
                 // 2a. the liveness edges that flow *forward*, from this node's point to its
@@ -229,7 +253,9 @@ impl LocalizedConstraintGraph {
                 }
 
                 // And finally, we have the logical edges, materialized at this point.
-                for &logical_succ in self.logical_edges.get(&node.region).into_flat_iter() {
+                for &logical_succ in
+                    self.logical_edges.get(node.region).into_iter().flatten().flatten()
+                {
                     let succ = LocalizedNode { region: logical_succ, point: node.point };
                     successor_found(succ);
                 }
@@ -244,7 +270,7 @@ fn compute_forward_successor(
     region: RegionVid,
     next_point: PointIndex,
     live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
-    live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+    live_region_variances: &IndexSlice<RegionVid, Option<ConstraintDirection>>,
     is_universal_region: bool,
 ) -> Option<LocalizedNode> {
     // 1. Universal regions are semantically live at all points.
@@ -268,8 +294,11 @@ fn compute_forward_successor(
     // propagate liveness when needed.
     //
     // FIXME: add the missing variance information and remove this fallback bidirectional edge.
-    let direction =
-        live_region_variances.get(&region).unwrap_or(&ConstraintDirection::Bidirectional);
+    let direction = live_region_variances
+        .get(region)
+        .copied()
+        .flatten()
+        .unwrap_or(ConstraintDirection::Bidirectional);
 
     match direction {
         ConstraintDirection::Backward => {
@@ -294,7 +323,7 @@ fn compute_backward_successor(
     current_point: PointIndex,
     previous_point: PointIndex,
     live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
-    live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+    live_region_variances: &IndexSlice<RegionVid, Option<ConstraintDirection>>,
 ) -> Option<LocalizedNode> {
     // Liveness flows into the regions live at the next point. So, in a backwards view, we'll link
     // the region from the current point, if it's live there, to the previous point.
@@ -304,8 +333,11 @@ fn compute_backward_successor(
 
     // FIXME: add the missing variance information and remove this fallback bidirectional edge. See
     // the same comment in `compute_forward_successor`.
-    let direction =
-        live_region_variances.get(&region).unwrap_or(&ConstraintDirection::Bidirectional);
+    let direction = live_region_variances
+        .get(region)
+        .copied()
+        .flatten()
+        .unwrap_or(ConstraintDirection::Bidirectional);
 
     match direction {
         ConstraintDirection::Forward => {

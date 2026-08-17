@@ -38,9 +38,8 @@ mod dump;
 pub(crate) mod legacy;
 mod liveness_constraints;
 
-use std::collections::BTreeMap;
-
 use rustc_data_structures::fx::FxHashSet;
+use rustc_index::IndexVec;
 use rustc_index::bit_set::SparseBitMatrix;
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::RegionVid;
@@ -65,7 +64,10 @@ pub(crate) struct PoloniusContext {
 
     /// The expected edge direction per live region: the kind of directed edge we'll create as
     /// liveness constraints depends on the variance of types with respect to each contained region.
-    live_region_variances: BTreeMap<RegionVid, ConstraintDirection>,
+    ///
+    /// This is indexed rather than hashed or sorted: it is read once per node during the localized
+    /// constraint graph traversal, which is hot enough that a map lookup shows up in profiles.
+    live_region_variances: IndexVec<RegionVid, Option<ConstraintDirection>>,
 
     /// The regions that outlive free regions are used to distinguish relevant live locals from
     /// boring locals. A boring local is one whose type contains only such regions. Polonius

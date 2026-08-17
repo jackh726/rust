@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
-
 use rustc_hir::def_id::DefId;
+use rustc_index::IndexVec;
 use rustc_middle::ty::relate::{
     self, Relate, RelateResult, TypeRelation, relate_args_with_variances,
 };
@@ -33,7 +32,7 @@ impl PoloniusContext {
 struct VarianceExtractor<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     ambient_variance: ty::Variance,
-    directions: &'a mut BTreeMap<RegionVid, ConstraintDirection>,
+    directions: &'a mut IndexVec<RegionVid, Option<ConstraintDirection>>,
     universal_regions: &'a UniversalRegions<'tcx>,
 }
 
@@ -74,17 +73,17 @@ impl<'tcx> VarianceExtractor<'_, 'tcx> {
         };
 
         let region = self.universal_regions.to_region_vid(region);
-        self.directions
-            .entry(region)
-            .and_modify(|entry| {
-                // If there's already a recorded direction for this region, we combine the two:
-                // - combining the same direction is idempotent
-                // - combining different directions is trivially bidirectional
-                if entry != &direction {
-                    *entry = ConstraintDirection::Bidirectional;
-                }
-            })
-            .or_insert(direction);
+        let entry = self.directions.ensure_contains_elem(region, || None);
+        match entry {
+            // If there's already a recorded direction for this region, we combine the two:
+            // - combining the same direction is idempotent
+            // - combining different directions is trivially bidirectional
+            Some(recorded) if *recorded != direction => {
+                *entry = Some(ConstraintDirection::Bidirectional);
+            }
+            Some(_) => {}
+            None => *entry = Some(direction),
+        }
     }
 }
 
