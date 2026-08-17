@@ -66,6 +66,21 @@ impl<I: Idx> IntervalSet<I> {
         self.map.iter().map(|&(start, end)| I::new(start as usize)..I::new(end as usize + 1))
     }
 
+    /// Iterates through the intervals stored in the set that end at or after `start`, in order.
+    ///
+    /// This is [`Self::iter_intervals`] restricted to a suffix of the set, for callers that want
+    /// the intervals overlapping a range rather than all of them.
+    pub fn iter_intervals_from(&self, start: I) -> impl Iterator<Item = std::ops::Range<I>>
+    where
+        I: Step,
+    {
+        let start = start.index() as u32;
+        let first = self.map.partition_point(|&(_, end)| end < start);
+        self.map[first..]
+            .iter()
+            .map(|&(start, end)| I::new(start as usize)..I::new(end as usize + 1))
+    }
+
     /// Returns true if we increased the number of elements present.
     pub fn insert(&mut self, point: I) -> bool {
         self.insert_range(point..=point)
