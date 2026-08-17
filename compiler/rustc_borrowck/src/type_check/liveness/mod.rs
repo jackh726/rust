@@ -46,7 +46,16 @@ pub(super) fn generate<'tcx>(
     // unlike NLLs.
     // We do record these regions in the polonius context, since they're used to differentiate
     // relevant and boring locals, which is a key distinction used later in diagnostics.
-    if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled() {
+    //
+    // This extra precision is only ever consumed by the localized constraint graph traversal, which
+    // propagates loans. A body with no loans has nothing to propagate: `compute_loan_liveness`
+    // returns immediately, and the NLL region inference that runs afterwards is happy with the NLL
+    // liveness data. So in that case we can keep the (much cheaper) NLL definition of `free_regions`
+    // without any loss of precision. `boring_nll_locals` is likewise only read while explaining a
+    // borrow, which cannot happen without loans.
+    if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
+        && typeck.borrow_set.len() > 0
+    {
         let (_, boring_locals) =
             compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
         typeck.polonius_context.as_mut().unwrap().boring_nll_locals =
