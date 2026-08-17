@@ -48,7 +48,6 @@ use rustc_mir_dataflow::points::PointIndex;
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
 use crate::dataflow::BorrowIndex;
-use crate::region_infer::values::LivenessValues;
 use crate::{BorrowSet, RegionInferenceContext};
 
 pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
@@ -118,7 +117,7 @@ impl PoloniusContext {
             let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
 
             let mut live_loans = LiveLoans::new(borrow_set.len());
-            let mut visitor = LoanLivenessVisitor { liveness, live_loans: &mut live_loans };
+            let mut visitor = LoanLivenessVisitor { live_loans: &mut live_loans };
             graph.traverse(
                 body,
                 liveness,
@@ -137,12 +136,11 @@ impl PoloniusContext {
 
 /// Visitor to record loan liveness when traversing the localized constraint graph.
 struct LoanLivenessVisitor<'a> {
-    liveness: &'a LivenessValues,
     live_loans: &'a mut LiveLoans,
 }
 
 impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
-    fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
+    fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode, is_live_here: bool) {
         // Record the loan as being live on entry to this point if it reaches a live region
         // there.
         //
@@ -184,7 +182,7 @@ impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
         //
         // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
         // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
-        if self.liveness.is_live_at_point(node.region, node.point) {
+        if is_live_here {
             self.live_loans.insert(node.point, loan);
         }
     }
