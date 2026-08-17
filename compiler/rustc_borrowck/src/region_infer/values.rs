@@ -200,6 +200,11 @@ impl LivenessValues {
         self.location_map.to_location(point)
     }
 
+    #[inline]
+    pub(crate) fn num_points(&self) -> usize {
+        self.location_map.num_points()
+    }
+
     /// When using `-Zpolonius=next`, records the given live loans for the loan scopes and active
     /// loans dataflow computations.
     pub(crate) fn record_live_loans(&mut self, live_loans: LiveLoans) {
@@ -211,7 +216,7 @@ impl LivenessValues {
         self.live_loans
             .as_ref()
             .expect("Accessing live loans requires `-Zpolonius=next`")
-            .contains(point, loan_idx)
+            .contains(loan_idx, point)
     }
 }
 

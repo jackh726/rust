@@ -7,7 +7,6 @@ use rustc_mir_dataflow::points::PointIndex;
 
 use crate::BorrowSet;
 use crate::constraints::OutlivesConstraint;
-use crate::dataflow::BorrowIndex;
 use crate::polonius::ConstraintDirection;
 use crate::region_infer::values::LivenessValues;
 use crate::type_check::Locations;
@@ -53,34 +52,24 @@ impl std::hash::Hash for LocalizedNode {
 pub(super) struct LocalizedConstraintGraph {
     /// The actual, physical, edges we have recorded for a given node. We localize them on-demand
     /// when traversing from the node to the successor region.
-    edges: FxHashMap<LocalizedNode, FxIndexSet<RegionVid>>,
+    pub(super) edges: FxHashMap<LocalizedNode, FxIndexSet<RegionVid>>,
 
-    /// Whether a region has *any* physical edge, at any point. Physical edges are sparse -- most
-    /// regions have none -- and the traversal would otherwise hash a `LocalizedNode` at every node
-    /// it visits just to find nothing, so this lets it skip the lookup entirely.
-    has_physical_edges: IndexVec<RegionVid, bool>,
+    /// The points at which a region has physical edges. Physical edges are sparse -- most regions
+    /// have none -- and the node-based traversal would otherwise hash a `LocalizedNode` at every
+    /// node it visits just to find nothing, so this lets it skip the lookup entirely. The set-based
+    /// traversal walks these points instead of probing the whole reached set.
+    pub(super) physical_points: IndexVec<RegionVid, Vec<PointIndex>>,
 
     /// The logical edges representing the outlives constraints that hold at all points in the CFG,
     /// which we don't localize to avoid creating a lot of unnecessary edges in the graph. Some CFGs
     /// can be big, and we don't need to create such a physical edge for every point in the CFG.
     ///
     /// Indexed rather than hashed: this is read once per node visited during traversal.
-    logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>>,
+    pub(super) logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>>,
 }
 
 /// The visitor interface when traversing a `LocalizedConstraintGraph`.
 pub(super) trait LocalizedConstraintGraphVisitor {
-    /// Callback called when traversing a given `loan` encounters a localized `node` it hasn't
-    /// visited before. `is_live_here` is whether the node's region is live at its point, which the
-    /// traversal has already computed and which would otherwise be looked up twice.
-    fn on_node_traversed(
-        &mut self,
-        _loan: BorrowIndex,
-        _node: LocalizedNode,
-        _is_live_here: bool,
-    ) {
-    }
-
     /// Callback called when discovering a new `successor` node for the `current_node`.
     fn on_successor_discovered(&mut self, _current_node: LocalizedNode, _successor: LocalizedNode) {
     }
@@ -95,7 +84,7 @@ impl LocalizedConstraintGraph {
         let mut edges: FxHashMap<LocalizedNode, FxIndexSet<_>> = FxHashMap::default();
         let mut logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>> =
             IndexVec::new();
-        let mut has_physical_edges: IndexVec<RegionVid, bool> = IndexVec::new();
+        let mut physical_points: IndexVec<RegionVid, Vec<PointIndex>> = IndexVec::new();
 
         for outlives_constraint in outlives_constraints {
             match outlives_constraint.locations {
@@ -111,18 +100,31 @@ impl LocalizedConstraintGraph {
                         region: outlives_constraint.sup,
                         point: liveness.point_from_location(location),
                     };
-                    edges.entry(node).or_default().insert(outlives_constraint.sub);
-                    *has_physical_edges.ensure_contains_elem(outlives_constraint.sup, || false) =
-                        true;
+                    if edges.entry(node).or_default().insert(outlives_constraint.sub) {
+                        physical_points
+                            .ensure_contains_elem(outlives_constraint.sup, Vec::new)
+                            .push(node.point);
+                    }
                 }
             }
         }
 
-        LocalizedConstraintGraph { edges, has_physical_edges, logical_edges }
+        // A region can have several edges at the same point, to different regions: deduplicate the
+        // points, as the set-based traversal only needs to visit each of them once.
+        for points in physical_points.iter_mut() {
+            points.sort_unstable();
+            points.dedup();
+        }
+
+        LocalizedConstraintGraph { edges, physical_points, logical_edges }
     }
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
-    /// nodes and successors.
+    /// successors.
+    ///
+    /// Note: this node-by-node DFS is only used by the polonius MIR dumps, which need the
+    /// individual edges. The loan liveness computation itself uses the set-based traversal in
+    /// [`super::reachability`], which visits the same nodes but does not materialize the edges.
     pub(super) fn traverse<'tcx>(
         &self,
         body: &Body<'tcx>,
@@ -139,7 +141,7 @@ impl LocalizedConstraintGraph {
 
         // Compute reachability per loan by traversing each loan's subgraph starting from where it
         // is introduced.
-        for (loan_idx, loan) in borrow_set.iter_enumerated() {
+        for (_, loan) in borrow_set.iter_enumerated() {
             visited.clear();
             stack.clear();
 
@@ -157,13 +159,10 @@ impl LocalizedConstraintGraph {
                 // We've reached a node we haven't visited before.
                 let location = liveness.location_from_point(node.point);
 
-                // The points where this node's region is live are needed up to three times below:
-                // to record the loan here, and to decide whether the forward and backward liveness
-                // edges exist. Look the row up once.
+                // The points where this node's region is live are needed twice below, to decide
+                // whether the forward and backward liveness edges exist. Look the row up once.
                 let live_points = live_regions.row(node.region);
                 let is_live_here = live_points.is_some_and(|points| points.contains(node.point));
-
-                visitor.on_node_traversed(loan_idx, node, is_live_here);
 
                 // When we find a _new_ successor, we'd like to
                 // - visit it eventually,
@@ -188,7 +187,7 @@ impl LocalizedConstraintGraph {
                 //
                 // 1. the typeck edges that flow from region to region *at this point*. Most
                 // regions have no physical edges at all, so check that before hashing the node.
-                if self.has_physical_edges.get(node.region).copied().unwrap_or(false) {
+                if self.physical_points.get(node.region).is_some_and(|points| !points.is_empty()) {
                     for &succ in self.edges.get(&node).into_flat_iter() {
                         let succ = LocalizedNode { region: succ, point: node.point };
                         successor_found(succ);
