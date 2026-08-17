@@ -1,7 +1,7 @@
 use itertools::{Either, Itertools};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::mir::visit::{TyContext, Visitor};
-use rustc_middle::mir::{Body, Local, Location, SourceInfo};
+use rustc_middle::mir::{Body, Local, Location, SourceInfo, TerminatorKind};
 use rustc_middle::span_bug;
 use rustc_middle::ty::relate::Relate;
 use rustc_middle::ty::{GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable};
@@ -10,6 +10,7 @@ use rustc_mir_dataflow::points::DenseLocationMap;
 use tracing::debug;
 
 use super::TypeChecker;
+use crate::BorrowSet;
 use crate::constraints::OutlivesConstraintSet;
 use crate::polonius::PoloniusContext;
 use crate::region_infer::values::LivenessValues;
@@ -53,6 +54,16 @@ pub(super) fn generate<'tcx>(
     // liveness data. So in that case we can keep the (much cheaper) NLL definition of `free_regions`
     // without any loss of precision. `boring_nll_locals` is likewise only read while explaining a
     // borrow, which cannot happen without loans.
+    //
+    // Restricting the widened set further, by loan reachability, additionally requires that the
+    // outlives constraints we can see here are the final ones. Two things can add more after this
+    // point: a closure's region requirements, applied to its parent in `root_cx`, and the binder
+    // assumptions destructured at the end of `type_check`. Either can create a path from a loan to
+    // a region we would otherwise have left boring, which would lose liveness and miss errors, so
+    // we only restrict when neither applies.
+    let constraints_are_final = typeck.deferred_closure_requirements.is_empty()
+        && !typeck.tcx().assumptions_on_binders();
+
     if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
         && typeck.borrow_set.len() > 0
     {
@@ -60,7 +71,49 @@ pub(super) fn generate<'tcx>(
             compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
         typeck.polonius_context.as_mut().unwrap().boring_nll_locals =
             boring_locals.into_iter().collect();
-        free_regions = typeck.universal_regions.universal_regions_iter().collect();
+
+        // A region's flow-sensitive liveness can only change a polonius answer if a loan can reach
+        // it: `LocalizedConstraintGraph::traverse` only ever starts at a loan's region and follows
+        // `sup -> sub` edges, and a region it never visits is never asked whether it is live. So a
+        // region that outlives a free region but that no loan can reach can stay "boring", exactly
+        // as it would under NLLs, where outlives propagation gives it every point anyway.
+        //
+        // Two things make this sound despite being computed here, before `trace`:
+        //
+        // - The borrow set is complete before type-checking starts, so the set of loans is final.
+        // - `trace` itself adds outlives constraints, via the dropck data that
+        //   `add_drop_live_facts_for` pushes at drop locations, so reachability computed now could
+        //   miss a path that only exists later. Those constraints only ever relate regions of the
+        //   dropped local's type (plus universal regions, which are never boring, and fresh vars
+        //   from instantiating the query, which appear in no local's type and so cannot decide any
+        //   local's relevance). Keeping every region of every dropped local's type reachable
+        //   therefore covers all of them.
+        if !constraints_are_final {
+            free_regions = typeck.universal_regions.universal_regions_iter().collect();
+            let (relevant_live_locals, boring_locals) =
+                compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
+            trace::trace(typeck, location_map, move_data, relevant_live_locals, boring_locals);
+            record_regular_live_regions(
+                typeck.tcx(),
+                &mut typeck.constraints.liveness_constraints,
+                &typeck.universal_regions,
+                &mut typeck.polonius_context,
+                typeck.body,
+            );
+            return;
+        }
+
+        let loan_reachable = regions_reachable_from_loans(
+            typeck.tcx(),
+            typeck.infcx.num_region_vars(),
+            typeck.borrow_set,
+            &typeck.constraints.outlives_constraints,
+            typeck.body,
+        );
+
+        let universal: FxHashSet<RegionVid> =
+            typeck.universal_regions.universal_regions_iter().collect();
+        free_regions.retain(|r| universal.contains(r) || !loan_reachable.contains(r));
     }
     let (relevant_live_locals, boring_locals) =
         compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
@@ -142,6 +195,64 @@ fn regions_that_outlive_free_regions<'tcx>(
 
     // Return the final set of things we visited.
     outlives_free_region
+}
+
+/// The regions a loan can flow into: those reachable from some loan's region by following
+/// `sup: sub` outlives edges, which is the direction the localized constraint graph is traversed in.
+///
+/// `trace` will add further outlives constraints of its own, from the dropck data that
+/// `add_drop_live_facts_for` pushes at drop locations, so plain reachability over the constraints we
+/// have now could miss a path that only exists later. Those constraints only ever relate regions of
+/// one dropped local's type -- plus universal regions, which are never boring, and fresh vars from
+/// instantiating the query, which appear in no local's type and so cannot decide any local's
+/// relevance. So we close over them: once any region of a dropped local's type is reachable, all of
+/// that type's regions are. This terminates because the reachable set only grows.
+fn regions_reachable_from_loans<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    num_region_vars: usize,
+    borrow_set: &BorrowSet<'tcx>,
+    constraint_set: &OutlivesConstraintSet<'tcx>,
+    body: &Body<'tcx>,
+) -> FxHashSet<RegionVid> {
+    let constraint_graph = constraint_set.graph(num_region_vars);
+    // `region_graph` wants a static region to special-case; reachability does not care which one it
+    // is, and naming a real one would only add edges, so use the first region vid.
+    let region_graph = constraint_graph.region_graph(constraint_set, RegionVid::from_u32(0));
+
+    // The regions in the type of each local that is dropped somewhere in the body.
+    let mut dropped_locals: FxHashSet<Local> = FxHashSet::default();
+    for data in body.basic_blocks.iter() {
+        if let TerminatorKind::Drop { place, .. } = data.terminator().kind {
+            dropped_locals.insert(place.local);
+        }
+    }
+    let dropped: Vec<Vec<RegionVid>> = dropped_locals
+        .into_iter()
+        .map(|local| {
+            let mut regions = Vec::new();
+            tcx.for_each_free_region(&body.local_decls[local].ty, |r| regions.push(r.as_var()));
+            regions
+        })
+        .filter(|regions| !regions.is_empty())
+        .collect();
+
+    let mut stack: Vec<RegionVid> = borrow_set.iter().map(|loan| loan.region).collect();
+    let mut reachable: FxHashSet<RegionVid> = stack.iter().copied().collect();
+    loop {
+        while let Some(r) = stack.pop() {
+            stack.extend(region_graph.outgoing_regions(r).filter(|&s| reachable.insert(s)));
+        }
+
+        // Close over the dropck constraints `trace` is going to add.
+        for regions in &dropped {
+            if regions.iter().any(|r| reachable.contains(r)) {
+                stack.extend(regions.iter().copied().filter(|&r| reachable.insert(r)));
+            }
+        }
+        if stack.is_empty() {
+            return reachable;
+        }
+    }
 }
 
 /// Some variables are "regular live" at `location` -- i.e., they may be used later. This means that
