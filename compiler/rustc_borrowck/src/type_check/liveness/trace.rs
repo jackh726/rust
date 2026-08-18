@@ -8,7 +8,9 @@ use rustc_middle::mir::{
 };
 use rustc_middle::traits::query::DropckOutlivesResult;
 use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeVisitable, TypeVisitableExt};
+use rustc_middle::ty::{
+    self, GenericArg, RegionVid, Ty, TyCtxt, TypeVisitable, TypeVisitableExt,
+};
 use rustc_mir_dataflow::impls::MaybeInitializedPlaces;
 use rustc_mir_dataflow::lattice::MaybeReachable;
 use rustc_mir_dataflow::move_paths::{MoveData, MovePathIndex};
@@ -48,8 +50,6 @@ pub(super) fn trace<'tcx>(
     location_map: &DenseLocationMap,
     relevant_live_locals: Vec<Local>,
     boring_locals: Vec<Local>,
-    polonius_only_locals: &DenseBitSet<Local>,
-    dropped_and_initialized: &DenseBitSet<Local>,
     state: &mut DropLivenessState<'_, 'tcx>,
 ) {
     let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness_trace");
@@ -65,11 +65,7 @@ pub(super) fn trace<'tcx>(
 
     results.add_extra_drop_facts(&relevant_live_locals);
 
-    results.compute_for_all_locals(
-        relevant_live_locals,
-        polonius_only_locals,
-        dropped_and_initialized,
-    );
+    results.compute_for_all_locals(relevant_live_locals);
 
     results.dropck_boring_locals(boring_locals);
 }
@@ -123,6 +119,11 @@ impl<'a, 'tcx> DropLivenessState<'a, 'tcx> {
             drop_data: FxIndexMap::default(),
             inits: InitializedPlaces::new(body, move_data),
         }
+    }
+
+    /// The `dropck_outlives` kinds computed for `ty`, if the query has been run for it.
+    pub(crate) fn drop_kinds_for(&self, ty: Ty<'tcx>) -> Option<&[GenericArg<'tcx>]> {
+        self.drop_data.get(&ty).map(|data| &data.dropck_result.kinds[..])
     }
 
     /// Borrows the two halves independently: the point computation needs only the dataflow, and
@@ -604,31 +605,9 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
     ///
     /// Neither the drop-liveness *constraints* nor the dropck overflow reports are this loop's
     /// job: `add_drop_constraints` has done both.
-    fn compute_for_all_locals(
-        &mut self,
-        relevant_live_locals: Vec<Local>,
-        polonius_only_locals: &DenseBitSet<Local>,
-        dropped_and_initialized: &DenseBitSet<Local>,
-    ) {
+    fn compute_for_all_locals(&mut self, relevant_live_locals: Vec<Local>) {
         for local in relevant_live_locals {
             let local_ty = self.cx.body().local_decls[local].ty;
-
-            // NLLs would have left this local boring, so nothing but the localized constraint
-            // graph traversal will ever read its liveness -- and the traversal walks only the
-            // regions a loan reaches. Leave the points for it to ask for.
-            if polonius_only_locals.contains(local) {
-                // `use_live_at` is non-empty exactly when the local has a use: the DFS seeds its
-                // stack from them and inserts at least each one. That is the condition the eager
-                // code recorded the use-liveness variance under, and it costs no DFS to check.
-                let has_uses = self.points.local_use_map.uses(local).next().is_some();
-                self.cx.defer_liveness_for(
-                    local,
-                    local_ty,
-                    has_uses,
-                    dropped_and_initialized.contains(local),
-                );
-                continue;
-            }
 
             self.points.compute(local);
 
@@ -820,39 +799,6 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
         debug!("add_use_live_facts_for(value={:?})", value);
         Self::make_all_regions_live(self.location_map, self.lcx, value, live_at);
-    }
-
-    /// Records everything about `local`'s liveness that has to be known before the traversal
-    /// starts, and leaves the points themselves to `polonius::deferred_liveness`.
-    ///
-    /// That is the variances, which `LoanReachability` borrows for its whole run and so cannot be
-    /// added to once it has begun -- under exactly the conditions the eager code used them, since
-    /// a region with no recorded variance falls back to `Bidirectional` and recording one where
-    /// the old code did not would narrow the directions a loan can flow in.
-    fn defer_liveness_for(
-        &mut self,
-        local: Local,
-        local_ty: Ty<'tcx>,
-        has_uses: bool,
-        has_drops: bool,
-    ) {
-        let tcx = self.lcx.tcx();
-        let param_env = self.lcx.infcx.param_env;
-        let universal_regions = self.lcx.universal_regions;
-        let drop_kinds = has_drops
-            .then(|| &self.drop_data[&local_ty].dropck_result.kinds[..])
-            .filter(|kinds| !kinds.is_empty());
-
-        let polonius_context = self.lcx.polonius_context.as_mut().unwrap();
-        if has_uses {
-            polonius_context.record_live_region_variance(tcx, universal_regions, local_ty);
-        }
-        for &kind in drop_kinds.unwrap_or_default() {
-            polonius_context.record_live_region_variance(tcx, universal_regions, kind);
-        }
-
-        polonius_context
-            .defer_liveness_for(tcx, param_env, universal_regions, local, local_ty, drop_kinds);
     }
 
     /// The half of drop-liveness that produces *outlives constraints*: the `dropck_outlives`

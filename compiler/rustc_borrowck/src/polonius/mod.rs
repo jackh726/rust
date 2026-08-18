@@ -44,7 +44,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_index::IndexVec;
 use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Local};
-use rustc_middle::ty::{GenericArg, RegionVid, Ty, TyCtxt};
+use rustc_middle::ty::{RegionVid, TyCtxt};
 use rustc_middle::ty;
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
@@ -54,7 +54,6 @@ pub(crate) use self::deferred_liveness::{DeferredLiveness, LazyLiveness, lazy_li
 pub(crate) use self::dump::dump_polonius_mir;
 pub(crate) use self::reachability::LiveLoans;
 use self::reachability::LoanReachability;
-use crate::universal_regions::UniversalRegions;
 use crate::{BorrowSet, RegionInferenceContext};
 
 /// This struct holds the necessary
@@ -99,7 +98,7 @@ pub(crate) struct PoloniusContext<'tcx> {
 /// The direction a constraint can flow into. Used to create liveness constraints according to
 /// variance.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum ConstraintDirection {
+pub(crate) enum ConstraintDirection {
     /// For covariant cases, we add a forward edge `O at P1 -> O at P2`.
     Forward,
 
@@ -121,20 +120,9 @@ impl<'tcx> PoloniusContext<'tcx> {
         self.deferred = Some(DeferredLiveness::new(num_locals));
     }
 
-    /// Records that `local`'s liveness is not being computed; see [`DeferredLiveness::defer`].
-    pub(crate) fn defer_liveness_for(
-        &mut self,
-        tcx: TyCtxt<'tcx>,
-        param_env: ty::ParamEnv<'tcx>,
-        universal_regions: &UniversalRegions<'tcx>,
-        local: Local,
-        local_ty: Ty<'tcx>,
-        drop_kinds: Option<&[GenericArg<'tcx>]>,
-    ) {
-        self.deferred
-            .as_mut()
-            .expect("deferring liveness without having asked for it")
-            .defer(tcx, param_env, universal_regions, local, local_ty, drop_kinds);
+    /// The deferred-liveness record, to add to; see [`DeferredLiveness::defer`].
+    pub(crate) fn deferred_liveness_mut(&mut self) -> &mut DeferredLiveness<'tcx> {
+        self.deferred.as_mut().expect("deferring liveness without having asked for it")
     }
 
     /// Computes live loans using the set of loans model for `-Zpolonius=next`.
@@ -195,7 +183,7 @@ impl<'tcx> PoloniusContext<'tcx> {
                 liveness,
                 lazy,
                 &graph,
-                &self.live_region_variances,
+                &mut self.live_region_variances,
                 regioncx.universal_regions(),
             )
             .compute_live_loans(borrow_set);

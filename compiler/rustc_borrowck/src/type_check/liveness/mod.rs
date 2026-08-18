@@ -2,7 +2,6 @@ use itertools::{Either, Itertools};
 use rustc_infer::infer::canonical::QueryRegionConstraints;
 use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_data_structures::fx::FxHashSet;
-use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::{TyContext, Visitor};
 use rustc_middle::mir::{
     Body, ConstraintCategory, Local, Location, SourceInfo, TerminatorKind,
@@ -112,21 +111,9 @@ pub(super) fn generate<'tcx>(
     }
 
     let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
-    let dropped_and_initialized =
-        trace::add_drop_constraints(lcx, location_map, &mut drop_state, &relevant_live_locals);
+    trace::add_drop_constraints(lcx, location_map, &mut drop_state, &relevant_live_locals);
 
-    // Nothing is deferred here: every one of these locals is relevant to NLLs, so its liveness is
-    // needed whether or not the polonius traversal ever asks.
-    let deferred = DenseBitSet::new_empty(lcx.body.local_decls.len());
-    trace::trace(
-        lcx,
-        location_map,
-        relevant_live_locals,
-        boring_locals,
-        &deferred,
-        &dropped_and_initialized,
-        &mut drop_state,
-    );
+    trace::trace(lcx, location_map, relevant_live_locals, boring_locals, &mut drop_state);
 
     // Mark regions that should be live where they appear within rvalues or within a call: like
     // args, regions, and types.
@@ -218,27 +205,30 @@ pub(crate) fn generate_polonius<'tcx>(
         .unwrap()
         .defer_extra_liveness(location_map.num_points(), lcx.body.local_decls.len());
 
-    // The constraints and the variances have to be pushed now -- region inference is next, and
-    // `LoanReachability` borrows the variances for its whole run. The points do not: `trace` is
-    // told that every one of these locals is deferred, so it computes none of them, and the
-    // traversal materializes what it reaches.
+    // The outlives constraints are the one thing that cannot wait: region inference runs next, and
+    // it needs them. Everything else about these locals -- their points, their variances, and the
+    // reverse DFS that produces both -- is left to the traversal, which asks for a local only when
+    // a loan actually reaches one of its regions.
+    //
+    // Note what is *not* here: no `LocalUseMap`, and so no walk of the body. `trace` is not called
+    // at all. On a body where the traversal reaches none of these regions, this loop is all that
+    // ever runs for them.
     let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
     let dropped_and_initialized =
         trace::add_drop_constraints(lcx, location_map, &mut drop_state, &polonius_only);
 
-    let mut deferred = DenseBitSet::new_empty(lcx.body.local_decls.len());
-    for &local in &polonius_only {
-        deferred.insert(local);
+    let (tcx, param_env, universal_regions, body) =
+        (lcx.tcx(), lcx.infcx.param_env, lcx.universal_regions, lcx.body);
+    let deferred = lcx.polonius_context.as_mut().unwrap().deferred_liveness_mut();
+    for local in polonius_only {
+        let local_ty = body.local_decls[local].ty;
+        let drop_kinds = dropped_and_initialized
+            .contains(local)
+            .then(|| drop_state.drop_kinds_for(local_ty))
+            .flatten()
+            .filter(|kinds| !kinds.is_empty());
+        deferred.defer(tcx, param_env, universal_regions, local, local_ty, drop_kinds);
     }
-    trace::trace(
-        lcx,
-        location_map,
-        polonius_only,
-        Vec::new(),
-        &deferred,
-        &dropped_and_initialized,
-        &mut drop_state,
-    );
 }
 
 // The purpose of `compute_relevant_live_locals` is to define the subset of `Local`

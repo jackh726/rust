@@ -26,7 +26,7 @@
 
 use std::collections::VecDeque;
 
-use rustc_index::{IndexSlice, IndexVec};
+use rustc_index::IndexVec;
 use rustc_middle::mir::{BasicBlock, Body, Location};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::PointIndex;
@@ -219,7 +219,7 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     lazy: Option<&'a mut LazyLiveness<'a, 'tcx>>,
 
     graph: &'a LocalizedConstraintGraph,
-    live_region_variances: &'a IndexSlice<RegionVid, Option<ConstraintDirection>>,
+    live_region_variances: &'a mut IndexVec<RegionVid, Option<ConstraintDirection>>,
     universal_regions: &'a UniversalRegions<'tcx>,
 
     num_points: usize,
@@ -267,7 +267,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         liveness: &'a LivenessValues,
         lazy: Option<&'a mut LazyLiveness<'a, 'tcx>>,
         graph: &'a LocalizedConstraintGraph,
-        live_region_variances: &'a IndexSlice<RegionVid, Option<ConstraintDirection>>,
+        live_region_variances: &'a mut IndexVec<RegionVid, Option<ConstraintDirection>>,
         universal_regions: &'a UniversalRegions<'tcx>,
     ) -> Self {
         let num_points = liveness.num_points();
@@ -372,12 +372,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let first_mask = !0 << (entry.as_usize() % WORD_BITS);
         let last_bit = terminator.as_usize() % WORD_BITS;
         let last_mask = if last_bit == WORD_BITS - 1 { !0 } else { (1 << (last_bit + 1)) - 1 };
-
-        // Compute this region's deferred liveness, if it has any and this is the first time we
-        // have asked. Everything below reads it, and `ensure` is what puts it there.
-        if let Some(lazy) = self.lazy.as_mut() {
-            lazy.ensure(region);
-        }
 
         // Take this block's part of the region's delta.
         let mut points = std::mem::replace(&mut self.points_scratch, Box::default());
@@ -586,6 +580,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
     /// Returns `region`'s state, creating it and acquiring its point sets if needed.
     fn ensure_state(&mut self, region: RegionVid) -> &mut RegionState {
+        // A deferred local's liveness -- and its variance, which `make_state` is about to read --
+        // is computed the first time a loan reaches one of its regions. This is that first time.
+        if let Some(lazy) = self.lazy.as_mut() {
+            lazy.ensure(region, self.live_region_variances);
+        }
+
         let num_points = self.num_points;
         if self.states.get(region).is_none_or(Option::is_none) {
             let state = self.make_state(region);
