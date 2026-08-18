@@ -42,6 +42,7 @@ use std::collections::BTreeMap;
 
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::SparseBitMatrix;
+use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::PointIndex;
@@ -49,7 +50,6 @@ use rustc_mir_dataflow::points::PointIndex;
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
 use crate::dataflow::BorrowIndex;
-use crate::region_infer::values::LivenessValues;
 use crate::{BorrowSet, RegionInferenceContext};
 
 pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
@@ -72,6 +72,18 @@ pub(crate) struct PoloniusContext {
     /// currently has more boring locals than NLLs so we record the latter to use in errors and
     /// diagnostics, to focus on the locals we consider relevant and match NLL diagnostics.
     pub(crate) boring_nll_locals: FxHashSet<Local>,
+
+    /// The liveness that only polonius asks for: the points where a region of a local NLLs would
+    /// have left boring is live.
+    ///
+    /// This is kept apart from `liveness_constraints` rather than merged into it because only the
+    /// traversal below reads it. Such a region outlives a free region, so NLL region inference
+    /// gives it every point by outlives propagation anyway -- which is exactly why NLLs never
+    /// compute this in the first place. Seeding `scc_values` with it would be redundant work on a
+    /// value that is about to be widened to everything.
+    ///
+    /// `None` when the widened partition was not used, i.e. when there is nothing extra to record.
+    extra_liveness: Option<SparseIntervalMatrix<RegionVid, PointIndex>>,
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
@@ -89,6 +101,26 @@ enum ConstraintDirection {
 }
 
 impl PoloniusContext {
+    /// Starts recording the liveness only polonius asks for; see `extra_liveness`.
+    ///
+    /// Called when `generate` decides to widen the relevant-local set, which is the only thing
+    /// that produces any.
+    pub(crate) fn record_extra_liveness_for(&mut self, num_points: usize) {
+        self.extra_liveness = Some(SparseIntervalMatrix::new(num_points));
+    }
+
+    /// Records `region` as live at all of `points`, in the polonius-only store.
+    pub(crate) fn add_extra_live_points(
+        &mut self,
+        region: RegionVid,
+        points: &IntervalSet<PointIndex>,
+    ) {
+        self.extra_liveness
+            .as_mut()
+            .expect("recording polonius-only liveness without having asked for it")
+            .union_row(region, points);
+    }
+
     /// Computes live loans using the set of loans model for `-Zpolonius=next`.
     ///
     /// First, creates a constraint graph combining regions and CFG points, by:
@@ -116,10 +148,11 @@ impl PoloniusContext {
             let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
 
             let mut live_loans = LiveLoans::new(borrow_set.len());
-            let mut visitor = LoanLivenessVisitor { liveness, live_loans: &mut live_loans };
+            let mut visitor = LoanLivenessVisitor { live_loans: &mut live_loans };
             graph.traverse(
                 body,
                 liveness,
+                self.extra_liveness.as_ref(),
                 &self.live_region_variances,
                 regioncx.universal_regions(),
                 borrow_set,
@@ -135,12 +168,11 @@ impl PoloniusContext {
 
 /// Visitor to record loan liveness when traversing the localized constraint graph.
 struct LoanLivenessVisitor<'a> {
-    liveness: &'a LivenessValues,
     live_loans: &'a mut LiveLoans,
 }
 
 impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
-    fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
+    fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode, is_live: bool) {
         // Record the loan as being live on entry to this point if it reaches a live region
         // there.
         //
@@ -182,7 +214,7 @@ impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
         //
         // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
         // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
-        if self.liveness.is_live_at_point(node.region, node.point) {
+        if is_live {
             self.live_loans.insert(node.point, loan);
         }
     }

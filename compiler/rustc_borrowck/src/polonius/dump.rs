@@ -41,6 +41,7 @@ pub(crate) fn dump_polonius_mir<'tcx>(
         graph.traverse(
             body,
             regioncx.liveness_constraints(),
+            polonius_context.extra_liveness.as_ref(),
             &polonius_context.live_region_variances,
             regioncx.universal_regions(),
             borrow_set,

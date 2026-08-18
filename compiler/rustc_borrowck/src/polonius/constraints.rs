@@ -55,7 +55,10 @@ pub(super) struct LocalizedConstraintGraph {
 pub(super) trait LocalizedConstraintGraphVisitor {
     /// Callback called when traversing a given `loan` encounters a localized `node` it hasn't
     /// visited before.
-    fn on_node_traversed(&mut self, _loan: BorrowIndex, _node: LocalizedNode) {}
+    ///
+    /// `is_live` is whether the node's region is live at its point, which the traversal has
+    /// already computed against both liveness stores.
+    fn on_node_traversed(&mut self, _loan: BorrowIndex, _node: LocalizedNode, _is_live: bool) {}
 
     /// Callback called when discovering a new `successor` node for the `current_node`.
     fn on_successor_discovered(&mut self, _current_node: LocalizedNode, _successor: LocalizedNode) {
@@ -99,6 +102,7 @@ impl LocalizedConstraintGraph {
         &self,
         body: &Body<'tcx>,
         liveness: &LivenessValues,
+        extra_liveness: Option<&SparseIntervalMatrix<RegionVid, PointIndex>>,
         live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
         universal_regions: &UniversalRegions<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
@@ -128,7 +132,9 @@ impl LocalizedConstraintGraph {
 
                 // We've reached a node we haven't visited before.
                 let location = liveness.location_from_point(node.point);
-                visitor.on_node_traversed(loan_idx, node);
+                let is_live =
+                    is_live_at_point(live_regions, extra_liveness, node.region, node.point);
+                visitor.on_node_traversed(loan_idx, node, is_live);
 
                 // When we find a _new_ successor, we'd like to
                 // - visit it eventually,
@@ -167,6 +173,7 @@ impl LocalizedConstraintGraph {
                         node.region,
                         next_point,
                         live_regions,
+                        extra_liveness,
                         live_region_variances,
                         is_universal_region,
                     ) {
@@ -182,6 +189,7 @@ impl LocalizedConstraintGraph {
                             node.region,
                             next_point,
                             live_regions,
+                            extra_liveness,
                             live_region_variances,
                             is_universal_region,
                         ) {
@@ -201,6 +209,7 @@ impl LocalizedConstraintGraph {
                             node.point,
                             previous_point,
                             live_regions,
+                            extra_liveness,
                             live_region_variances,
                         ) {
                             successor_found(succ);
@@ -220,6 +229,7 @@ impl LocalizedConstraintGraph {
                                 node.point,
                                 previous_point,
                                 live_regions,
+                                extra_liveness,
                                 live_region_variances,
                             ) {
                                 successor_found(succ);
@@ -238,12 +248,25 @@ impl LocalizedConstraintGraph {
     }
 }
 
+/// Whether `region` is live at `point`, according to either liveness store: the values NLL region
+/// inference is seeded from, and the liveness only polonius asks for.
+fn is_live_at_point(
+    live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
+    extra_liveness: Option<&SparseIntervalMatrix<RegionVid, PointIndex>>,
+    region: RegionVid,
+    point: PointIndex,
+) -> bool {
+    live_regions.contains(region, point)
+        || extra_liveness.is_some_and(|extra| extra.contains(region, point))
+}
+
 /// Returns the successor for the current region/point node when propagating a loan through forward
 /// edges, if applicable, according to liveness and variance.
 fn compute_forward_successor(
     region: RegionVid,
     next_point: PointIndex,
     live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
+    extra_liveness: Option<&SparseIntervalMatrix<RegionVid, PointIndex>>,
     live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
     is_universal_region: bool,
 ) -> Option<LocalizedNode> {
@@ -254,7 +277,7 @@ fn compute_forward_successor(
     }
 
     // 2. Otherwise, gather the edges due to explicit region liveness, when applicable.
-    if !live_regions.contains(region, next_point) {
+    if !is_live_at_point(live_regions, extra_liveness, region, next_point) {
         return None;
     }
 
@@ -294,11 +317,12 @@ fn compute_backward_successor(
     current_point: PointIndex,
     previous_point: PointIndex,
     live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
+    extra_liveness: Option<&SparseIntervalMatrix<RegionVid, PointIndex>>,
     live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
 ) -> Option<LocalizedNode> {
     // Liveness flows into the regions live at the next point. So, in a backwards view, we'll link
     // the region from the current point, if it's live there, to the previous point.
-    if !live_regions.contains(region, current_point) {
+    if !is_live_at_point(live_regions, extra_liveness, region, current_point) {
         return None;
     }
 
