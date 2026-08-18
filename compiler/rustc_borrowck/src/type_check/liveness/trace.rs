@@ -540,8 +540,9 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
     /// the reverse DFS -- the loop only pushed when the drop-live set came back non-empty, and
     /// that set is non-empty exactly when this filter leaves something behind.
     ///
-    /// Reporting dropck overflows is deliberately *not* hoisted along with the constraints; see
-    /// `report_drop_overflows`.
+    /// It also reports the dropck overflows, for the same reason: the condition and the span the
+    /// per-local loop used are both available here, so nothing about the diagnostic needs to wait
+    /// for a liveness answer either.
     fn add_drop_constraints_for_relevant_locals(&mut self, relevant_live_locals: &[Local]) {
         let tcx = self.cx.typeck.tcx();
         let mut relevant = DenseBitSet::new_empty(self.cx.body().local_decls.len());
@@ -574,12 +575,18 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
                 .into_iter()
                 .filter(|location| self.inits.initialized_at_terminator(tcx, location.block, mpi))
                 .collect();
-            if initialized.is_empty() {
-                continue;
-            }
+            let Some(&last) = initialized.last() else { continue };
 
             let local_ty = self.cx.body().local_decls[local].ty;
             self.cx.add_drop_constraints_for(local, local_ty, &initialized);
+
+            // The span the per-local loop reported at: it used `drop_locations[0]`, and
+            // `drop_locations` follows `LocalUseMap::drops`, whose linked list is built by
+            // prepending -- so it runs backwards through the body and its first element is the
+            // *last* of these drops. The condition matches too: the loop reported when the
+            // drop-live set came back non-empty, which is exactly when this filter leaves
+            // something behind.
+            self.cx.report_drop_overflows(local, local_ty, last);
         }
     }
 
@@ -594,9 +601,8 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
 
     /// Computes liveness for each of `relevant_live_locals`.
     ///
-    /// The drop-liveness *constraints* are not this loop's job: `add_drop_constraints` has already
-    /// pushed them. Reporting dropck overflows still is, so that the diagnostic stays on the span,
-    /// and for the locals, it was on before.
+    /// Neither the drop-liveness *constraints* nor the dropck overflow reports are this loop's
+    /// job: `add_drop_constraints` has done both.
     fn compute_for_all_locals(
         &mut self,
         relevant_live_locals: Vec<Local>,
@@ -617,8 +623,6 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
             }
 
             if !self.points.drop_live_at.is_empty() {
-                let first_drop = self.points.drop_locations[0];
-                self.cx.report_drop_overflows(local, local_ty, first_drop);
                 self.cx.add_drop_live_points_for(
                     target,
                     local,
@@ -844,12 +848,9 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     /// Reports the `dropck_outlives` overflow for `dropped_ty`, if any, at the drop terminator
     /// `drop_location`.
     ///
-    /// This is deliberately not folded into `add_drop_constraints_for`. That function now also
-    /// runs for locals whose liveness is never computed, and for locals whose drop-live set turns
-    /// out to be empty -- neither of which reported an overflow before, and the former of which
-    /// would report it on the drop terminator's span rather than the local's. Keeping the report
-    /// at the call sites that owned it keeps the diagnostic on the same span, for the same
-    /// locals, in the same order.
+    /// Deliberately not folded into `add_drop_constraints_for`, which also runs for locals whose
+    /// drop-live set turns out to be empty; those never reported an overflow and must not start.
+    /// Its callers apply that condition.
     fn report_drop_overflows(
         &mut self,
         dropped_local: Local,
