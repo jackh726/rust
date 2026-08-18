@@ -83,129 +83,47 @@ mod trace;
 pub(crate) use self::local_use_map::LocalUseMap;
 pub(crate) use self::trace::{InitializedPlaces, LivePoints, live_points_of};
 
-/// Combines liveness analysis with initialization analysis to
-/// determine which variables are live at which points, both due to
-/// ordinary uses and drops. Returns a set of (ty, location) pairs
-/// that indicate which types must be live at which point in the CFG.
-/// This vector is consumed by `constraint_generation`.
+/// Computes the liveness NLL region inference needs, and records what polonius will want.
 ///
-/// N.B., this computation requires normalization; therefore, it must be
-/// performed before
+/// This runs during type-checking because `RegionInferenceContext::new` seeds `scc_values` from
+/// what it writes, and for a body that depends on opaque types that happens early, in
+/// `compute_closure_requirements_modulo_opaques`. The extra liveness polonius asks for has no such
+/// constraint, and does not run here: see [`generate_polonius`].
 pub(super) fn generate<'tcx>(
     lcx: &mut LivenessCx<'_, 'tcx>,
     location_map: &DenseLocationMap,
     move_data: &MoveData<'tcx>,
-    constraints_are_final: bool,
 ) {
     debug!("liveness::generate");
     let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness");
 
-    let mut free_regions = regions_that_outlive_free_regions(
+    let free_regions = regions_that_outlive_free_regions(
         lcx.infcx.num_region_vars(),
         &lcx.universal_regions,
         &lcx.constraints.outlives_constraints,
     );
-
-    // The `dropck_outlives` cache and the maybe-initialized dataflow, shared by the two passes
-    // drop-liveness now runs in: the constraints first, then the points in `trace`.
-    let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
-
-    // The locals only polonius considers relevant: NLLs leave these boring, so the liveness they
-    // contribute is read by nothing but the localized constraint graph traversal. Empty unless the
-    // widening below happens.
-    let mut polonius_only_locals = DenseBitSet::new_empty(lcx.body.local_decls.len());
-
-    // NLLs can avoid computing some liveness data here because its constraints are
-    // location-insensitive, but that doesn't work in polonius: locals whose type contains a region
-    // that outlives a free region are not necessarily live everywhere in a flow-sensitive setting,
-    // unlike NLLs.
-    // We do record these regions in the polonius context, since they're used to differentiate
-    // relevant and boring locals, which is a key distinction used later in diagnostics.
-    //
-    // This extra precision is only ever consumed by the localized constraint graph traversal, which
-    // propagates loans. A body with no loans has nothing to propagate: `compute_loan_liveness`
-    // returns immediately, and the NLL region inference that runs afterwards is happy with the NLL
-    // liveness data. So in that case we can keep the (much cheaper) NLL definition of `free_regions`
-    // without any loss of precision. `boring_nll_locals` is likewise only read while explaining a
-    // borrow, which cannot happen without loans.
-    // Deferring is off when legacy facts are being emitted: `emit_drop_facts` runs while a local's
-    // drop-liveness is recorded, and the traversal is not where those facts belong.
-    if lcx.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
-        && lcx.borrow_set.len() > 0
-        && lcx.polonius_facts.is_none()
-    {
-        let (_, boring_locals) =
-            compute_relevant_live_locals(lcx.tcx(), &free_regions, lcx.body);
-        for &local in &boring_locals {
-            polonius_only_locals.insert(local);
-        }
-
-        let polonius_context = lcx.polonius_context.as_mut().unwrap();
-        polonius_context.boring_nll_locals = boring_locals.into_iter().collect();
-        polonius_context
-            .defer_extra_liveness(location_map.num_points(), lcx.body.local_decls.len());
-
-        // Restricting the widened set by loan reachability additionally requires that the outlives
-        // constraints we can see here are the final ones. Two things can still add more after this
-        // point: a closure's region requirements, applied to its parent in `root_cx`, and the
-        // binder assumptions destructured at the end of `type_check`. Either can create a path from
-        // a loan to a region we would otherwise have left boring, which would lose liveness and
-        // miss errors, so we only restrict when neither applies.
-
-        if constraints_are_final {
-            // A region's flow-sensitive liveness can only change a polonius answer if a loan can
-            // reach it: `LocalizedConstraintGraph::traverse` only ever starts at a loan's region
-            // and follows `sup -> sub` edges, and a region it never visits is never asked whether
-            // it is live. So a region that outlives a free region but that no loan can reach can
-            // stay "boring", exactly as it would under NLLs, where outlives propagation gives it
-            // every point anyway.
-            //
-            // Two things make this sound despite being computed here, before the drop-liveness
-            // constraints exist:
-            //
-            // - The borrow set is complete before type-checking starts, so the set of loans is
-            //   final.
-            // - `add_drop_constraints` below adds outlives constraints, so reachability computed
-            //   now could miss a path that only exists afterwards. Those constraints only ever
-            //   relate regions of one dropped local's type (plus universal regions, which are
-            //   never boring, and fresh vars from instantiating the query, which appear in no
-            //   local's type and so cannot decide any local's relevance). Keeping every region of
-            //   every dropped local's type reachable therefore covers all of them.
-            let loan_reachable = regions_reachable_from_loans(
-                lcx.tcx(),
-                lcx.infcx.num_region_vars(),
-                lcx.borrow_set,
-                &lcx.constraints.outlives_constraints,
-                lcx.body,
-            );
-
-            let universal: FxHashSet<RegionVid> =
-                lcx.universal_regions.universal_regions_iter().collect();
-            // The predicate does not depend on iteration order, so neither does the result.
-            #[allow(rustc::potential_query_instability)]
-            free_regions.retain(|r| universal.contains(r) || !loan_reachable.contains(r));
-        } else {
-            free_regions = lcx.universal_regions.universal_regions_iter().collect();
-        }
-    }
-
     let (relevant_live_locals, boring_locals) =
         compute_relevant_live_locals(lcx.tcx(), &free_regions, lcx.body);
 
-    // Drop-liveness in two passes: the outlives constraints for the relevant locals first, then
-    // the points. Splitting them is what makes the constraint set independent of when, or whether,
-    // any particular local's liveness gets computed.
+    // The relevant/boring partition polonius will widen, recorded before we consume it. It is also
+    // read while explaining a borrow, to keep those diagnostics matching NLLs'.
+    if let Some(polonius_context) = lcx.polonius_context.as_mut() {
+        polonius_context.boring_nll_locals = boring_locals.iter().copied().collect();
+    }
+
+    let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
     let dropped_and_initialized =
         trace::add_drop_constraints(lcx, location_map, &mut drop_state, &relevant_live_locals);
 
-    // Widening only ever moves a local from boring to relevant, so intersecting the two
-    // partitions here is exactly "relevant to polonius, boring to NLLs".
+    // Nothing is deferred here: every one of these locals is relevant to NLLs, so its liveness is
+    // needed whether or not the polonius traversal ever asks.
+    let deferred = DenseBitSet::new_empty(lcx.body.local_decls.len());
     trace::trace(
         lcx,
         location_map,
         relevant_live_locals,
         boring_locals,
-        &polonius_only_locals,
+        &deferred,
         &dropped_and_initialized,
         &mut drop_state,
     );
@@ -218,6 +136,108 @@ pub(super) fn generate<'tcx>(
         &lcx.universal_regions,
         &mut lcx.polonius_context,
         lcx.body,
+    );
+}
+
+/// Widens the relevant-local set for polonius, and defers the liveness that widening asks for.
+///
+/// Unlike [`generate`] this runs *after* type-checking, from
+/// `borrowck_check_region_constraints`. That is not a detail: the widened set is restricted by
+/// loan reachability, which is only sound once the outlives constraints are the final ones. Here
+/// they are, by construction -- closure requirements have been applied and the binder assumptions
+/// destructured -- so the restriction applies to every body, rather than only to the bodies that
+/// happened to contain no closures.
+///
+/// Nothing here feeds NLL region inference. A local NLLs left boring has only regions that outlive
+/// a free region, and outlives propagation gives those every point anyway; the points computed for
+/// them land in `PoloniusContext::extra_liveness`, whose only reader is the traversal. What does
+/// feed region inference is the drop-liveness *constraints*, which is why this still has to run
+/// before `compute_regions`.
+pub(crate) fn generate_polonius<'tcx>(
+    lcx: &mut LivenessCx<'_, 'tcx>,
+    location_map: &DenseLocationMap,
+    move_data: &MoveData<'tcx>,
+) {
+    // A body with no loans has nothing to propagate: `compute_loan_liveness` returns immediately,
+    // and NLL region inference is happy with the NLL liveness data, so the widening would be pure
+    // cost. Deferring is off under `-Znll-facts`, where `emit_drop_facts` runs as part of
+    // recording drop-liveness and the traversal is not where those facts belong.
+    if !lcx.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
+        || lcx.borrow_set.len() == 0
+        || lcx.polonius_facts.is_some()
+    {
+        return;
+    }
+
+    let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness_polonius");
+
+    let mut free_regions = regions_that_outlive_free_regions(
+        lcx.infcx.num_region_vars(),
+        &lcx.universal_regions,
+        &lcx.constraints.outlives_constraints,
+    );
+
+    // A region's flow-sensitive liveness can only change a polonius answer if a loan can reach it:
+    // `LocalizedConstraintGraph::traverse` only ever starts at a loan's region and follows
+    // `sup -> sub` edges, and a region it never visits is never asked whether it is live. So a
+    // region that outlives a free region but that no loan can reach can stay "boring", exactly as
+    // it would under NLLs, where outlives propagation gives it every point anyway.
+    //
+    // The borrow set is complete before type-checking starts, so the set of loans is final, and
+    // the constraint set is final here by construction. `add_drop_constraints` below still adds
+    // some, which is what `regions_reachable_from_loans` closes over.
+    let loan_reachable = regions_reachable_from_loans(
+        lcx.tcx(),
+        lcx.infcx.num_region_vars(),
+        lcx.borrow_set,
+        &lcx.constraints.outlives_constraints,
+        lcx.body,
+    );
+    let universal: FxHashSet<RegionVid> = lcx.universal_regions.universal_regions_iter().collect();
+    // The predicate does not depend on iteration order, so neither does the result.
+    #[allow(rustc::potential_query_instability)]
+    free_regions.retain(|r| universal.contains(r) || !loan_reachable.contains(r));
+
+    // Widening only ever moves a local from boring to relevant, so intersecting the widened set
+    // with the boring half of the NLL partition is exactly "relevant to polonius, boring to NLLs".
+    //
+    // That partition has to be the one `generate` recorded, not one recomputed here: we can see
+    // more constraints than it could, so recomputing would call more locals boring and hand back
+    // locals it already traced.
+    let (widened_relevant, _) = compute_relevant_live_locals(lcx.tcx(), &free_regions, lcx.body);
+    let polonius_only: Vec<Local> = {
+        let nll_boring = &lcx.polonius_context.as_ref().unwrap().boring_nll_locals;
+        widened_relevant.into_iter().filter(|local| nll_boring.contains(local)).collect()
+    };
+    if polonius_only.is_empty() {
+        return;
+    }
+
+    lcx.polonius_context
+        .as_mut()
+        .unwrap()
+        .defer_extra_liveness(location_map.num_points(), lcx.body.local_decls.len());
+
+    // The constraints and the variances have to be pushed now -- region inference is next, and
+    // `LoanReachability` borrows the variances for its whole run. The points do not: `trace` is
+    // told that every one of these locals is deferred, so it computes none of them, and the
+    // traversal materializes what it reaches.
+    let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
+    let dropped_and_initialized =
+        trace::add_drop_constraints(lcx, location_map, &mut drop_state, &polonius_only);
+
+    let mut deferred = DenseBitSet::new_empty(lcx.body.local_decls.len());
+    for &local in &polonius_only {
+        deferred.insert(local);
+    }
+    trace::trace(
+        lcx,
+        location_map,
+        polonius_only,
+        Vec::new(),
+        &deferred,
+        &dropped_and_initialized,
+        &mut drop_state,
     );
 }
 

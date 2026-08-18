@@ -408,13 +408,13 @@ fn borrowck_check_region_constraints<'diag, 'tcx>(
         location_table,
         location_map,
         universal_region_relations,
-        region_bound_pairs: _,
-        known_type_outlives_obligations: _,
-        constraints,
+        region_bound_pairs,
+        known_type_outlives_obligations,
+        mut constraints,
         deferred_closure_requirements,
         deferred_opaque_type_errors,
-        polonius_facts,
-        polonius_context,
+        mut polonius_facts,
+        mut polonius_context,
     }: CollectRegionConstraintsResult<'tcx>,
 ) -> PropagatedBorrowCheckResults<'tcx> {
     assert!(!infcx.has_opaque_types_in_storage());
@@ -422,6 +422,26 @@ fn borrowck_check_region_constraints<'diag, 'tcx>(
     let tcx = root_cx.tcx;
     let body = &body_owned;
     let def = body.source.def_id().expect_local();
+
+    // The liveness only polonius asks for, computed here rather than during type-checking: the
+    // widened set it produces is restricted by loan reachability, which is only sound against the
+    // final outlives constraints. The assert above is what makes them final.
+    type_check::liveness::generate_polonius(
+        &mut type_check::liveness::LivenessCx {
+            infcx: &infcx,
+            body,
+            universal_regions: &universal_region_relations.universal_regions,
+            region_bound_pairs: &region_bound_pairs,
+            known_type_outlives_obligations: &known_type_outlives_obligations,
+            location_table: &location_table,
+            borrow_set: &borrow_set,
+            constraints: &mut constraints,
+            polonius_facts: &mut polonius_facts,
+            polonius_context: &mut polonius_context,
+        },
+        &location_map,
+        &move_data,
+    );
 
     // Compute non-lexical lifetimes using the constraints computed
     // by typechecking the MIR body.

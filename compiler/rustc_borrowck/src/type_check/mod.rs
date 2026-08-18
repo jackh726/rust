@@ -168,8 +168,6 @@ pub(crate) fn type_check<'tcx>(
     typeck.equate_inputs_and_outputs(&normalized_inputs_and_output);
     typeck.check_signature_annotation();
 
-    let constraints_are_final =
-        typeck.deferred_closure_requirements.is_empty() && !infcx.tcx.assumptions_on_binders();
     liveness::generate(
         &mut liveness::LivenessCx {
             infcx: typeck.infcx,
@@ -185,7 +183,6 @@ pub(crate) fn type_check<'tcx>(
         },
         &location_map,
         move_data,
-        constraints_are_final,
     );
 
     let polonius_context = typeck.polonius_context;
