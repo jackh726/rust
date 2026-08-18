@@ -22,7 +22,7 @@ pub(crate) fn dump_polonius_mir<'tcx>(
     regioncx: &RegionInferenceContext<'tcx>,
     closure_region_requirements: &Option<ClosureRegionRequirements<'tcx>>,
     borrow_set: &BorrowSet<'tcx>,
-    polonius_context: Option<&PoloniusContext>,
+    polonius_context: Option<&PoloniusContext<'tcx>>,
 ) {
     let tcx = infcx.tcx;
     if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
@@ -41,7 +41,9 @@ pub(crate) fn dump_polonius_mir<'tcx>(
         graph.traverse(
             body,
             regioncx.liveness_constraints(),
-            polonius_context.extra_liveness.as_ref(),
+            // The widened liveness is not re-materialized for the dump: the constraints it
+            // contributes are the ones the real traversal already recorded.
+            None,
             &polonius_context.live_region_variances,
             regioncx.universal_regions(),
             borrow_set,

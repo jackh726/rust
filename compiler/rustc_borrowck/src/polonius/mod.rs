@@ -34,6 +34,7 @@
 //!
 
 mod constraints;
+mod deferred_liveness;
 mod dump;
 pub(crate) mod legacy;
 mod liveness_constraints;
@@ -42,14 +43,18 @@ use std::collections::BTreeMap;
 
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::SparseBitMatrix;
-use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
+use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Local};
-use rustc_middle::ty::RegionVid;
-use rustc_mir_dataflow::points::PointIndex;
+use rustc_middle::ty;
+use rustc_middle::ty::{GenericArg, RegionVid, Ty, TyCtxt};
+use rustc_mir_dataflow::move_paths::MoveData;
+use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 
 pub(self) use self::constraints::*;
+pub(crate) use self::deferred_liveness::{DeferredLiveness, LazyLiveness, lazy_liveness_inputs};
 pub(crate) use self::dump::dump_polonius_mir;
 use crate::dataflow::BorrowIndex;
+use crate::universal_regions::UniversalRegions;
 use crate::{BorrowSet, RegionInferenceContext};
 
 pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
@@ -59,7 +64,7 @@ pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
 ///    polonius localized constraints, during NLL region inference as well as MIR dumping,
 ///  - data needed by the borrowck error computation and diagnostics.
 #[derive(Default)]
-pub(crate) struct PoloniusContext {
+pub(crate) struct PoloniusContext<'tcx> {
     /// The graph from which we extract the localized outlives constraints.
     graph: Option<LocalizedConstraintGraph>,
 
@@ -84,6 +89,10 @@ pub(crate) struct PoloniusContext {
     ///
     /// `None` when the widened partition was not used, i.e. when there is nothing extra to record.
     extra_liveness: Option<SparseIntervalMatrix<RegionVid, PointIndex>>,
+
+    /// The locals whose liveness `extra_liveness` is waiting for, and what is needed to compute
+    /// it. See [`DeferredLiveness`].
+    deferred: Option<DeferredLiveness<'tcx>>,
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
@@ -100,25 +109,35 @@ enum ConstraintDirection {
     Bidirectional,
 }
 
-impl PoloniusContext {
-    /// Starts recording the liveness only polonius asks for; see `extra_liveness`.
+impl<'tcx> PoloniusContext<'tcx> {
+    /// Starts deferring the liveness only polonius asks for; see `extra_liveness` and
+    /// `deferred_liveness`.
     ///
     /// Called when `generate` decides to widen the relevant-local set, which is the only thing
     /// that produces any.
-    pub(crate) fn record_extra_liveness_for(&mut self, num_points: usize) {
+    pub(crate) fn defer_extra_liveness(&mut self, num_points: usize, num_locals: usize) {
         self.extra_liveness = Some(SparseIntervalMatrix::new(num_points));
+        self.deferred = Some(DeferredLiveness::new(num_locals));
     }
 
-    /// Records `region` as live at all of `points`, in the polonius-only store.
-    pub(crate) fn add_extra_live_points(
+    /// Records that `local`'s liveness is not being computed; see [`DeferredLiveness::defer`].
+    pub(crate) fn defer_liveness_for(
         &mut self,
-        region: RegionVid,
-        points: &IntervalSet<PointIndex>,
+        tcx: TyCtxt<'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
+        universal_regions: &UniversalRegions<'tcx>,
+        local: Local,
+        local_ty: Ty<'tcx>,
+        drop_kinds: Option<&[GenericArg<'tcx>]>,
     ) {
-        self.extra_liveness
-            .as_mut()
-            .expect("recording polonius-only liveness without having asked for it")
-            .union_row(region, points);
+        self.deferred.as_mut().expect("deferring liveness without having asked for it").defer(
+            tcx,
+            param_env,
+            universal_regions,
+            local,
+            local_ty,
+            drop_kinds,
+        );
     }
 
     /// Computes live loans using the set of loans model for `-Zpolonius=next`.
@@ -131,10 +150,14 @@ impl PoloniusContext {
     /// loan scope and active loans computations.
     ///
     /// The constraint data will be used to compute errors and diagnostics.
-    pub(crate) fn compute_loan_liveness<'tcx>(
+    pub(crate) fn compute_loan_liveness(
         &mut self,
+        tcx: TyCtxt<'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
         regioncx: &mut RegionInferenceContext<'tcx>,
         body: &Body<'tcx>,
+        move_data: &MoveData<'tcx>,
+        location_map: &DenseLocationMap,
         borrow_set: &BorrowSet<'tcx>,
     ) {
         let liveness = regioncx.liveness_constraints();
@@ -147,12 +170,35 @@ impl PoloniusContext {
             // step in the chain (the NLL loan scope and active loans computations).
             let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
 
+            // The widened liveness the traversal will ask for, computed as it asks. These have to
+            // be owned out here: `LazyLiveness` borrows both, so a type holding all three would be
+            // self-referential.
+            let (local_use_map, mut inits, mut lazy);
+            let lazy = match (self.deferred.as_mut(), self.extra_liveness.as_mut()) {
+                (Some(deferred), Some(live)) if !deferred.is_empty() => {
+                    (local_use_map, inits) =
+                        lazy_liveness_inputs(deferred, body, move_data, location_map);
+                    lazy = LazyLiveness::new(
+                        tcx,
+                        param_env,
+                        regioncx.universal_regions(),
+                        location_map,
+                        &local_use_map,
+                        &mut inits,
+                        deferred,
+                        live,
+                    );
+                    Some(&mut lazy)
+                }
+                _ => None,
+            };
+
             let mut live_loans = LiveLoans::new(borrow_set.len());
             let mut visitor = LoanLivenessVisitor { live_loans: &mut live_loans };
             graph.traverse(
                 body,
                 liveness,
-                self.extra_liveness.as_ref(),
+                lazy,
                 &self.live_region_variances,
                 regioncx.universal_regions(),
                 borrow_set,
