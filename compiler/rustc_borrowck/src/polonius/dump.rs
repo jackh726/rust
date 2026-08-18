@@ -44,7 +44,9 @@ pub(crate) fn dump_polonius_mir<'tcx>(
             // The widened liveness is not re-materialized for the dump: the constraints it
             // contributes are the ones the real traversal already recorded.
             None,
-            &polonius_context.live_region_variances,
+            // The traversal can record variances for a deferred local it materializes, which the
+            // dump has no business doing after the fact: give it a copy to write to.
+            &mut polonius_context.live_region_variances.clone(),
             regioncx.universal_regions(),
             borrow_set,
             &mut collector,

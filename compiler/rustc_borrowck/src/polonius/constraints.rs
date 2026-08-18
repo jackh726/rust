@@ -103,7 +103,7 @@ impl LocalizedConstraintGraph {
         body: &Body<'tcx>,
         liveness: &LivenessValues,
         mut lazy: Option<&mut LazyLiveness<'_, 'tcx>>,
-        live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+        live_region_variances: &mut BTreeMap<RegionVid, ConstraintDirection>,
         universal_regions: &UniversalRegions<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
         visitor: &mut impl LocalizedConstraintGraphVisitor,
@@ -135,7 +135,7 @@ impl LocalizedConstraintGraph {
                 // time we have asked. Everything below reads it, and `ensure` is what puts it
                 // there.
                 if let Some(lazy) = lazy.as_mut() {
-                    lazy.ensure(node.region);
+                    lazy.ensure(node.region, live_region_variances);
                 }
 
                 let location = liveness.location_from_point(node.point);
