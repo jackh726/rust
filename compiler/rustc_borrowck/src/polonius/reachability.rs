@@ -26,7 +26,6 @@
 
 use std::collections::VecDeque;
 
-use rustc_index::interval::SparseIntervalMatrix;
 use rustc_index::{IndexSlice, IndexVec};
 use rustc_middle::mir::{BasicBlock, Body, Location};
 use rustc_middle::ty::RegionVid;
@@ -34,7 +33,7 @@ use rustc_mir_dataflow::points::PointIndex;
 
 use crate::BorrowSet;
 use crate::dataflow::BorrowIndex;
-use crate::polonius::{ConstraintDirection, LocalizedConstraintGraph, LocalizedNode};
+use crate::polonius::{ConstraintDirection, LazyLiveness, LocalizedConstraintGraph, LocalizedNode};
 use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
@@ -213,10 +212,11 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     body: &'a Body<'tcx>,
     liveness: &'a LivenessValues,
 
-    /// The liveness only polonius asks for; see `PoloniusContext::extra_liveness`. A region is
-    /// live here if either store says so, so every read of `liveness` in this module has to
-    /// consult this one too.
-    extra_liveness: Option<&'a SparseIntervalMatrix<RegionVid, PointIndex>>,
+    /// The liveness only polonius asks for, computed as we ask for it; see
+    /// `polonius::deferred_liveness`. A region is live if either store says so, so every read of
+    /// `liveness` in this module has to consult this one too -- after `ensure`ing it, which is
+    /// what actually computes it.
+    lazy: Option<&'a mut LazyLiveness<'a, 'tcx>>,
 
     graph: &'a LocalizedConstraintGraph,
     live_region_variances: &'a IndexSlice<RegionVid, Option<ConstraintDirection>>,
@@ -265,7 +265,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
     pub(super) fn new(
         body: &'a Body<'tcx>,
         liveness: &'a LivenessValues,
-        extra_liveness: Option<&'a SparseIntervalMatrix<RegionVid, PointIndex>>,
+        lazy: Option<&'a mut LazyLiveness<'a, 'tcx>>,
         graph: &'a LocalizedConstraintGraph,
         live_region_variances: &'a IndexSlice<RegionVid, Option<ConstraintDirection>>,
         universal_regions: &'a UniversalRegions<'tcx>,
@@ -298,7 +298,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         LoanReachability {
             body,
             liveness,
-            extra_liveness,
+            lazy,
             graph,
             live_region_variances,
             universal_regions,
@@ -373,6 +373,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let last_bit = terminator.as_usize() % WORD_BITS;
         let last_mask = if last_bit == WORD_BITS - 1 { !0 } else { (1 << (last_bit + 1)) - 1 };
 
+        // Compute this region's deferred liveness, if it has any and this is the first time we
+        // have asked. Everything below reads it, and `ensure` is what puts it there.
+        if let Some(lazy) = self.lazy.as_mut() {
+            lazy.ensure(region);
+        }
+
         // Take this block's part of the region's delta.
         let mut points = std::mem::replace(&mut self.points_scratch, Box::default());
         let (universal, forward, backward) = {
@@ -403,8 +409,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // many regions, and only a couple of words of it are ever needed at a time.
         let mut live = std::mem::replace(&mut self.live_scratch, Box::default());
         live[w0..=w1].fill(0);
-        let extra_row = self.extra_liveness.and_then(|extra| extra.row(region));
-        for live_points in [self.liveness.points().row(region), extra_row].into_iter().flatten() {
+        let lazy_row = self.lazy.as_ref().and_then(|lazy| lazy.row(region));
+        for live_points in [self.liveness.points().row(region), lazy_row].into_iter().flatten() {
             for interval in live_points.iter_intervals_from(entry) {
                 if interval.start > terminator {
                     break;
@@ -510,10 +516,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
     /// Whether `region` is live at `point`, according to either liveness store.
     fn is_live_at_point(&self, region: RegionVid, point: PointIndex) -> bool {
         self.liveness.is_live_at_point(region, point)
-            || self
-                .extra_liveness
-                .and_then(|extra| extra.row(region))
-                .is_some_and(|row| row.contains(point))
+            || self.lazy.as_ref().is_some_and(|lazy| lazy.is_live_at_point(region, point))
     }
 
     /// Records that the loan currently being traversed reaches `region` at the points in
