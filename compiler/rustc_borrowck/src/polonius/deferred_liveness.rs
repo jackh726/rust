@@ -20,7 +20,7 @@
 //!   exactly what they were, because a region with no variance falls back to `Bidirectional`, and
 //!   recording one where the old code did not would *narrow* the directions a loan can flow in.
 
-use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
+use rustc_data_structures::fx::FxIndexMap;
 use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
@@ -52,7 +52,11 @@ pub(crate) struct DeferredLiveness<'tcx> {
     /// For each region, the deferred locals whose liveness can put points in it. Built from the
     /// locals' own types *and* from their `dropck_outlives` kinds, which can name regions the type
     /// does not.
-    by_region: FxHashMap<RegionVid, Vec<Local>>,
+    ///
+    /// A flat pair list rather than a map of vectors: it is built once, in one pass, and then only
+    /// ever looked up. `LazyLiveness::new` sorts it, and `ensure` binary-searches. A map here costs
+    /// an allocation per region for a vector that almost always holds one element.
+    by_region: Vec<(RegionVid, Local)>,
 
     /// The locals already materialized, so that a local shared by several regions is computed once.
     done: DenseBitSet<Local>,
@@ -63,7 +67,7 @@ impl<'tcx> DeferredLiveness<'tcx> {
         DeferredLiveness {
             locals: Vec::new(),
             drop_kinds: FxIndexMap::default(),
-            by_region: FxHashMap::default(),
+            by_region: Vec::new(),
             done: DenseBitSet::new_empty(num_locals),
         }
     }
@@ -89,10 +93,9 @@ impl<'tcx> DeferredLiveness<'tcx> {
 
         let by_region = &mut self.by_region;
         let mut index = |region: RegionVid| {
-            let locals = by_region.entry(region).or_default();
             // One local's regions arrive together, so this catches the repeats.
-            if locals.last() != Some(&local) {
-                locals.push(local);
+            if by_region.last() != Some(&(region, local)) {
+                by_region.push((region, local));
             }
         };
         live_points_of(tcx, param_env, universal_regions, local_ty, &mut index);
@@ -111,6 +114,18 @@ impl<'tcx> DeferredLiveness<'tcx> {
 
     pub(crate) fn locals(&self) -> &[Local] {
         &self.locals
+    }
+
+    /// Puts the index in the order `locals_for` searches it in. Called once, before the traversal.
+    fn sort_index(&mut self) {
+        self.by_region.sort_unstable();
+    }
+
+    /// The deferred locals whose liveness can put points in `region`.
+    fn locals_for(&self, region: RegionVid) -> &[(RegionVid, Local)] {
+        let lo = self.by_region.partition_point(|&(r, _)| r < region);
+        let hi = self.by_region[lo..].partition_point(|&(r, _)| r == region);
+        &self.by_region[lo..lo + hi]
     }
 }
 
@@ -139,6 +154,7 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
         deferred: &'a mut DeferredLiveness<'tcx>,
         live: &'a mut SparseIntervalMatrix<RegionVid, PointIndex>,
     ) -> Self {
+        deferred.sort_index();
         LazyLiveness {
             tcx,
             param_env,
@@ -160,15 +176,18 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
         region: RegionVid,
         directions: &mut IndexVec<RegionVid, Option<ConstraintDirection>>,
     ) {
-        let Some(locals) = self.deferred.by_region.get(&region) else { return };
-        if locals.iter().all(|&local| self.deferred.done.contains(local)) {
+        let locals = self.deferred.locals_for(region);
+        if locals.iter().all(|&(_, local)| self.deferred.done.contains(local)) {
             return;
         }
 
         // The borrow of `by_region` has to end before `materialize` can touch `self`. A region is
         // usually named by one or two locals, and the all-done case above is the common one.
-        let pending: Vec<Local> =
-            locals.iter().copied().filter(|&local| !self.deferred.done.contains(local)).collect();
+        let pending: Vec<Local> = locals
+            .iter()
+            .map(|&(_, local)| local)
+            .filter(|&local| !self.deferred.done.contains(local))
+            .collect();
         for local in pending {
             self.materialize(local, directions);
         }
