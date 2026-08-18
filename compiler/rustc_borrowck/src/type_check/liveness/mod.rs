@@ -20,6 +20,9 @@ use crate::universal_regions::UniversalRegions;
 mod local_use_map;
 mod trace;
 
+pub(crate) use self::local_use_map::LocalUseMap;
+pub(crate) use self::trace::{InitializedPlaces, LivePoints, live_points_of};
+
 /// Combines liveness analysis with initialization analysis to
 /// determine which variables are live at which points, both due to
 /// ordinary uses and drops. Returns a set of (ty, location) pairs
@@ -64,8 +67,11 @@ pub(super) fn generate<'tcx>(
     // liveness data. So in that case we can keep the (much cheaper) NLL definition of `free_regions`
     // without any loss of precision. `boring_nll_locals` is likewise only read while explaining a
     // borrow, which cannot happen without loans.
+    // Deferring is off when legacy facts are being emitted: `emit_drop_facts` runs while a local's
+    // drop-liveness is recorded, and the traversal is not where those facts belong.
     if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
         && typeck.borrow_set.len() > 0
+        && typeck.polonius_facts.is_none()
     {
         let (_, boring_locals) =
             compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
@@ -75,7 +81,8 @@ pub(super) fn generate<'tcx>(
 
         let polonius_context = typeck.polonius_context.as_mut().unwrap();
         polonius_context.boring_nll_locals = boring_locals.into_iter().collect();
-        polonius_context.record_extra_liveness_for(location_map.num_points());
+        polonius_context
+            .defer_extra_liveness(location_map.num_points(), typeck.body.local_decls.len());
 
         // Restricting the widened set by loan reachability additionally requires that the outlives
         // constraints we can see here are the final ones. Two things can still add more after this
@@ -129,7 +136,8 @@ pub(super) fn generate<'tcx>(
     // Drop-liveness in two passes: the outlives constraints for the relevant locals first, then
     // the points. Splitting them is what makes the constraint set independent of when, or whether,
     // any particular local's liveness gets computed.
-    trace::add_drop_constraints(typeck, location_map, &mut drop_state, &relevant_live_locals);
+    let dropped_and_initialized =
+        trace::add_drop_constraints(typeck, location_map, &mut drop_state, &relevant_live_locals);
 
     // Widening only ever moves a local from boring to relevant, so intersecting the two
     // partitions here is exactly "relevant to polonius, boring to NLLs".
@@ -139,6 +147,7 @@ pub(super) fn generate<'tcx>(
         relevant_live_locals,
         boring_locals,
         &polonius_only_locals,
+        &dropped_and_initialized,
         &mut drop_state,
     );
 
@@ -286,7 +295,7 @@ fn record_regular_live_regions<'tcx>(
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &mut LivenessValues,
     universal_regions: &UniversalRegions<'tcx>,
-    polonius_context: &mut Option<PoloniusContext>,
+    polonius_context: &mut Option<PoloniusContext<'tcx>>,
     body: &Body<'tcx>,
 ) {
     let mut visitor =
@@ -301,7 +310,7 @@ struct LiveVariablesVisitor<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &'a mut LivenessValues,
     universal_regions: &'a UniversalRegions<'tcx>,
-    polonius_context: &'a mut Option<PoloniusContext>,
+    polonius_context: &'a mut Option<PoloniusContext<'tcx>>,
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for LiveVariablesVisitor<'a, 'tcx> {
