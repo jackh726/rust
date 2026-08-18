@@ -25,7 +25,8 @@ use tracing::debug;
 use crate::polonius;
 use crate::region_infer::values;
 use crate::type_check::liveness::local_use_map::LocalUseMap;
-use crate::type_check::{NormalizeLocation, TypeChecker};
+use crate::type_check::NormalizeLocation;
+use crate::type_check::liveness::LivenessCx;
 use crate::universal_regions::UniversalRegions;
 
 /// This is the heart of the liveness computation. For each variable X
@@ -43,7 +44,7 @@ use crate::universal_regions::UniversalRegions;
 /// `dropck_outlives` result of the variable's type (in particular,
 /// this respects `#[may_dangle]` annotations).
 pub(super) fn trace<'tcx>(
-    typeck: &mut TypeChecker<'_, 'tcx>,
+    lcx: &mut LivenessCx<'_, 'tcx>,
     location_map: &DenseLocationMap,
     relevant_live_locals: Vec<Local>,
     boring_locals: Vec<Local>,
@@ -51,15 +52,15 @@ pub(super) fn trace<'tcx>(
     dropped_and_initialized: &DenseBitSet<Local>,
     state: &mut DropLivenessState<'_, 'tcx>,
 ) {
-    let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness_trace");
+    let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness_trace");
 
-    let (tcx, body) = (typeck.tcx(), typeck.body);
-    let local_use_map = &LocalUseMap::build(&relevant_live_locals, location_map, typeck.body);
+    let (tcx, body) = (lcx.tcx(), lcx.body);
+    let local_use_map = &LocalUseMap::build(&relevant_live_locals, location_map, lcx.body);
     let (drop_data, inits) = state.split();
 
     let mut results = LivenessResults {
         points: LivePoints::new(tcx, location_map, local_use_map, inits),
-        cx: LivenessContext { typeck, location_map, body, drop_data },
+        cx: LivenessContext { lcx, location_map, body, drop_data },
     };
 
     results.add_extra_drop_facts(&relevant_live_locals);
@@ -84,19 +85,19 @@ pub(super) fn trace<'tcx>(
 /// `relevant_live_locals` is the whole of it: a boring local's liveness is never computed, so it
 /// never had, and never will have, drop constraints of its own.
 pub(super) fn add_drop_constraints<'tcx>(
-    typeck: &mut TypeChecker<'_, 'tcx>,
+    lcx: &mut LivenessCx<'_, 'tcx>,
     location_map: &DenseLocationMap,
     state: &mut DropLivenessState<'_, 'tcx>,
     relevant_live_locals: &[Local],
 ) -> DenseBitSet<Local> {
-    let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness_drop_constraints");
+    let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness_drop_constraints");
 
     // This pass reads the body's `Drop` terminators, never a local's uses, so unlike `trace` it
     // needs no use map -- which is worth having: building an empty one is three vectors the size
     // of the body's local count.
-    let body = typeck.body;
+    let body = lcx.body;
     let (drop_data, inits) = state.split();
-    let cx = LivenessContext { typeck, location_map, body, drop_data };
+    let cx = LivenessContext { lcx, location_map, body, drop_data };
 
     DropConstraints { cx, inits }.add_drop_constraints_for_relevant_locals(relevant_live_locals)
 }
@@ -163,7 +164,7 @@ struct LivenessContext<'a, 'b, 'typeck, 'tcx> {
     /// Current type-checker, giving us our inference context etc.
     ///
     /// This also stores the body we're currently analyzing.
-    typeck: &'a mut TypeChecker<'typeck, 'tcx>,
+    lcx: &'a mut LivenessCx<'typeck, 'tcx>,
 
     /// Defines the `PointIndex` mapping
     location_map: &'a DenseLocationMap,
@@ -539,7 +540,7 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
         &mut self,
         relevant_live_locals: &[Local],
     ) -> DenseBitSet<Local> {
-        let tcx = self.cx.typeck.tcx();
+        let tcx = self.cx.lcx.tcx();
         let num_locals = self.cx.body().local_decls.len();
         let mut dropped_and_initialized = DenseBitSet::new_empty(num_locals);
         let mut relevant = DenseBitSet::new_empty(num_locals);
@@ -652,13 +653,13 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
             let local_ty = self.cx.body().local_decls[local].ty;
             let local_span = self.cx.body().local_decls[local].source_info.span;
             let drop_data = self.cx.drop_data.entry(local_ty).or_insert_with({
-                let typeck = &self.cx.typeck;
-                move || LivenessContext::compute_drop_data(typeck, local_ty, local_span)
+                let lcx = &self.cx.lcx;
+                move || LivenessContext::compute_drop_data(lcx, local_ty, local_span)
             });
 
             drop_data.dropck_result.report_overflows(
-                self.cx.typeck.infcx.tcx,
-                self.cx.typeck.body.local_decls[local].source_info.span,
+                self.cx.lcx.infcx.tcx,
+                self.cx.lcx.body.local_decls[local].source_info.span,
                 local_ty,
             );
         }
@@ -678,7 +679,7 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
         // and probably maybe plausibly does not need to go back in.
         // It may be necessary to just pick out the parts of
         // `add_drop_live_facts_for()` that make sense.
-        let Some(facts) = self.cx.typeck.polonius_facts.as_ref() else { return };
+        let Some(facts) = self.cx.lcx.polonius_facts.as_ref() else { return };
         let facts_to_add: Vec<_> = {
             let relevant_live_locals: FxIndexSet<_> =
                 relevant_live_locals.iter().copied().collect();
@@ -692,7 +693,7 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
                         return None;
                     }
 
-                    let location = self.cx.typeck.location_table.to_location(location_index);
+                    let location = self.cx.lcx.location_table.to_location(location_index);
                     Some((local, local_ty, location))
                 })
                 .collect()
@@ -818,7 +819,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     /// points `live_at`.
     fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
         debug!("add_use_live_facts_for(value={:?})", value);
-        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at);
+        Self::make_all_regions_live(self.location_map, self.lcx, value, live_at);
     }
 
     /// Records everything about `local`'s liveness that has to be known before the traversal
@@ -835,14 +836,14 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         has_uses: bool,
         has_drops: bool,
     ) {
-        let tcx = self.typeck.tcx();
-        let param_env = self.typeck.infcx.param_env;
-        let universal_regions = self.typeck.universal_regions;
+        let tcx = self.lcx.tcx();
+        let param_env = self.lcx.infcx.param_env;
+        let universal_regions = self.lcx.universal_regions;
         let drop_kinds = has_drops
             .then(|| &self.drop_data[&local_ty].dropck_result.kinds[..])
             .filter(|kinds| !kinds.is_empty());
 
-        let polonius_context = self.typeck.polonius_context.as_mut().unwrap();
+        let polonius_context = self.lcx.polonius_context.as_mut().unwrap();
         if has_uses {
             polonius_context.record_live_region_variance(tcx, universal_regions, local_ty);
         }
@@ -875,13 +876,13 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
 
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
         let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
-            let typeck = &self.typeck;
-            move || Self::compute_drop_data(typeck, dropped_ty, local_span)
+            let lcx = &self.lcx;
+            move || Self::compute_drop_data(lcx, dropped_ty, local_span)
         });
 
         if let Some(data) = &drop_data.region_constraint_data {
             for &drop_location in drop_locations {
-                self.typeck.push_region_constraints(
+                self.lcx.push_region_constraints(
                     drop_location.to_locations(),
                     ConstraintCategory::Boring,
                     data,
@@ -905,13 +906,13 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     ) {
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
         let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
-            let typeck = &self.typeck;
-            move || Self::compute_drop_data(typeck, dropped_ty, local_span)
+            let lcx = &self.lcx;
+            move || Self::compute_drop_data(lcx, dropped_ty, local_span)
         });
 
         drop_data.dropck_result.report_overflows(
-            self.typeck.infcx.tcx,
-            self.typeck.body.source_info(drop_location).span,
+            self.lcx.infcx.tcx,
+            self.lcx.body.source_info(drop_location).span,
             dropped_ty,
         );
     }
@@ -939,27 +940,27 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
 
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
         let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
-            let typeck = &self.typeck;
-            move || Self::compute_drop_data(typeck, dropped_ty, local_span)
+            let lcx = &self.lcx;
+            move || Self::compute_drop_data(lcx, dropped_ty, local_span)
         });
 
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
         for &kind in &drop_data.dropck_result.kinds {
-            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at);
+            Self::make_all_regions_live(self.location_map, self.lcx, kind, live_at);
             polonius::legacy::emit_drop_facts(
-                self.typeck.tcx(),
+                self.lcx.tcx(),
                 dropped_local,
                 &kind,
-                self.typeck.universal_regions,
-                self.typeck.polonius_facts,
+                self.lcx.universal_regions,
+                self.lcx.polonius_facts,
             );
         }
     }
 
     fn make_all_regions_live(
         location_map: &DenseLocationMap,
-        typeck: &mut TypeChecker<'_, 'tcx>,
+        lcx: &mut LivenessCx<'_, 'tcx>,
         value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
         live_at: &IntervalSet<PointIndex>,
     ) {
@@ -970,27 +971,27 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         );
 
         value.visit_with(&mut FreeRegionsVisitor {
-            tcx: typeck.tcx(),
-            param_env: typeck.infcx.param_env,
+            tcx: lcx.tcx(),
+            param_env: lcx.infcx.param_env,
             op: |r| {
-                let live_region_vid = typeck.universal_regions.to_region_vid(r);
+                let live_region_vid = lcx.universal_regions.to_region_vid(r);
 
-                typeck.constraints.liveness_constraints.add_points(live_region_vid, live_at);
+                lcx.constraints.liveness_constraints.add_points(live_region_vid, live_at);
             },
         });
 
         // When using `-Zpolonius=next`, we record the variance of each live region.
-        if let Some(polonius_context) = typeck.polonius_context.as_mut() {
+        if let Some(polonius_context) = lcx.polonius_context.as_mut() {
             polonius_context.record_live_region_variance(
-                typeck.infcx.tcx,
-                typeck.universal_regions,
+                lcx.infcx.tcx,
+                lcx.universal_regions,
                 value,
             );
         }
     }
 
     fn compute_drop_data(
-        typeck: &TypeChecker<'_, 'tcx>,
+        lcx: &LivenessCx<'_, 'tcx>,
         dropped_ty: Ty<'tcx>,
         span: Span,
     ) -> DropData<'tcx> {
@@ -998,7 +999,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
 
         let goal = DropckOutlives { dropped_ty };
 
-        match typeck.infcx.fully_perform(goal, DUMMY_SP) {
+        match lcx.infcx.fully_perform(goal, DUMMY_SP) {
             Ok(TypeOpOutput { output, constraints, .. }) => {
                 DropData { dropck_result: output, region_constraint_data: constraints }
             }
@@ -1010,11 +1011,11 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
                 //
                 // Do this inside of a probe because we don't particularly care (or want)
                 // any region side-effects of this operation in our infcx.
-                typeck.infcx.probe(|_| {
-                    let ocx = ObligationCtxt::new_with_diagnostics(&typeck.infcx);
+                lcx.infcx.probe(|_| {
+                    let ocx = ObligationCtxt::new_with_diagnostics(&lcx.infcx);
                     let errors = match dropck_outlives::compute_dropck_outlives_with_errors(
                         &ocx,
-                        typeck.infcx.param_env.and(goal),
+                        lcx.infcx.param_env.and(goal),
                         span,
                     ) {
                         Ok(_) => ocx.evaluate_obligations_error_on_ambiguity(),
@@ -1024,7 +1025,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
                     // Could have no errors if a type lowering error, say, caused the query
                     // to fail.
                     if let TraitErrors::HasErrors(errors) = errors {
-                        typeck.infcx.err_ctxt().report_fulfillment_errors(errors);
+                        lcx.infcx.err_ctxt().report_fulfillment_errors(errors);
                     }
                 });
                 DropData { dropck_result: Default::default(), region_constraint_data: None }

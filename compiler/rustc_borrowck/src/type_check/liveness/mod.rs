@@ -1,21 +1,81 @@
 use itertools::{Either, Itertools};
+use rustc_infer::infer::canonical::QueryRegionConstraints;
+use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::{TyContext, Visitor};
-use rustc_middle::mir::{Body, Local, Location, SourceInfo, TerminatorKind};
+use rustc_middle::mir::{
+    Body, ConstraintCategory, Local, Location, SourceInfo, TerminatorKind,
+};
 use rustc_middle::span_bug;
 use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable};
+use rustc_middle::ty::{
+    self, GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable,
+};
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
-use tracing::debug;
+use tracing::{debug, instrument};
 
-use super::TypeChecker;
+use super::MirTypeckRegionConstraints;
+use crate::BorrowckInferCtxt;
 use crate::BorrowSet;
 use crate::constraints::OutlivesConstraintSet;
 use crate::polonius::PoloniusContext;
+use crate::polonius::legacy::{PoloniusFacts, PoloniusLocationTable};
 use crate::region_infer::values::LivenessValues;
+use crate::type_check::Locations;
+use crate::type_check::constraint_conversion;
 use crate::universal_regions::UniversalRegions;
+
+/// What liveness needs in order to run, and all it needs.
+///
+/// Liveness reads the body and the inference context, pushes outlives constraints, and writes
+/// liveness values -- it does not type-check anything. Pulling those out of `TypeChecker` is what
+/// lets the half of liveness that only polonius wants run *after* type-checking is over, in the
+/// phase where the constraint set is final by construction.
+pub(crate) struct LivenessCx<'a, 'tcx> {
+    pub(crate) infcx: &'a BorrowckInferCtxt<'tcx>,
+    pub(crate) body: &'a Body<'tcx>,
+    pub(crate) universal_regions: &'a UniversalRegions<'tcx>,
+    pub(crate) region_bound_pairs: &'a RegionBoundPairs<'tcx>,
+    pub(crate) known_type_outlives_obligations: &'a [ty::PolyTypeOutlivesClause<'tcx>],
+    pub(crate) location_table: &'a PoloniusLocationTable,
+    pub(crate) borrow_set: &'a BorrowSet<'tcx>,
+    pub(crate) constraints: &'a mut MirTypeckRegionConstraints<'tcx>,
+    pub(crate) polonius_facts: &'a mut Option<PoloniusFacts>,
+    pub(crate) polonius_context: &'a mut Option<PoloniusContext<'tcx>>,
+}
+
+impl<'tcx> LivenessCx<'_, 'tcx> {
+    pub(crate) fn tcx(&self) -> TyCtxt<'tcx> {
+        self.infcx.tcx
+    }
+
+    /// The one thing here that is not a plain field access: converting a query's region
+    /// constraints and pushing them. Same as `TypeChecker::push_region_constraints`, and drawing
+    /// on the same inputs -- which is why they can live on this smaller context.
+    #[instrument(skip(self, data), level = "debug")]
+    pub(crate) fn push_region_constraints(
+        &mut self,
+        locations: Locations,
+        category: ConstraintCategory<'tcx>,
+        data: &QueryRegionConstraints<'tcx>,
+    ) {
+        debug!("constraints generated: {:#?}", data);
+
+        constraint_conversion::ConstraintConversion::new(
+            self.infcx,
+            self.universal_regions,
+            self.region_bound_pairs,
+            self.known_type_outlives_obligations,
+            locations,
+            locations.span(self.body),
+            category,
+            self.constraints,
+        )
+        .convert_all(data);
+    }
+}
 
 mod local_use_map;
 mod trace;
@@ -32,27 +92,28 @@ pub(crate) use self::trace::{InitializedPlaces, LivePoints, live_points_of};
 /// N.B., this computation requires normalization; therefore, it must be
 /// performed before
 pub(super) fn generate<'tcx>(
-    typeck: &mut TypeChecker<'_, 'tcx>,
+    lcx: &mut LivenessCx<'_, 'tcx>,
     location_map: &DenseLocationMap,
     move_data: &MoveData<'tcx>,
+    constraints_are_final: bool,
 ) {
     debug!("liveness::generate");
-    let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness");
+    let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness");
 
     let mut free_regions = regions_that_outlive_free_regions(
-        typeck.infcx.num_region_vars(),
-        &typeck.universal_regions,
-        &typeck.constraints.outlives_constraints,
+        lcx.infcx.num_region_vars(),
+        &lcx.universal_regions,
+        &lcx.constraints.outlives_constraints,
     );
 
     // The `dropck_outlives` cache and the maybe-initialized dataflow, shared by the two passes
     // drop-liveness now runs in: the constraints first, then the points in `trace`.
-    let mut drop_state = trace::DropLivenessState::new(typeck.body, move_data);
+    let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
 
     // The locals only polonius considers relevant: NLLs leave these boring, so the liveness they
     // contribute is read by nothing but the localized constraint graph traversal. Empty unless the
     // widening below happens.
-    let mut polonius_only_locals = DenseBitSet::new_empty(typeck.body.local_decls.len());
+    let mut polonius_only_locals = DenseBitSet::new_empty(lcx.body.local_decls.len());
 
     // NLLs can avoid computing some liveness data here because its constraints are
     // location-insensitive, but that doesn't work in polonius: locals whose type contains a region
@@ -69,20 +130,20 @@ pub(super) fn generate<'tcx>(
     // borrow, which cannot happen without loans.
     // Deferring is off when legacy facts are being emitted: `emit_drop_facts` runs while a local's
     // drop-liveness is recorded, and the traversal is not where those facts belong.
-    if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
-        && typeck.borrow_set.len() > 0
-        && typeck.polonius_facts.is_none()
+    if lcx.tcx().sess.opts.unstable_opts.polonius.is_next_enabled()
+        && lcx.borrow_set.len() > 0
+        && lcx.polonius_facts.is_none()
     {
         let (_, boring_locals) =
-            compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
+            compute_relevant_live_locals(lcx.tcx(), &free_regions, lcx.body);
         for &local in &boring_locals {
             polonius_only_locals.insert(local);
         }
 
-        let polonius_context = typeck.polonius_context.as_mut().unwrap();
+        let polonius_context = lcx.polonius_context.as_mut().unwrap();
         polonius_context.boring_nll_locals = boring_locals.into_iter().collect();
         polonius_context
-            .defer_extra_liveness(location_map.num_points(), typeck.body.local_decls.len());
+            .defer_extra_liveness(location_map.num_points(), lcx.body.local_decls.len());
 
         // Restricting the widened set by loan reachability additionally requires that the outlives
         // constraints we can see here are the final ones. Two things can still add more after this
@@ -90,8 +151,6 @@ pub(super) fn generate<'tcx>(
         // binder assumptions destructured at the end of `type_check`. Either can create a path from
         // a loan to a region we would otherwise have left boring, which would lose liveness and
         // miss errors, so we only restrict when neither applies.
-        let constraints_are_final = typeck.deferred_closure_requirements.is_empty()
-            && !typeck.tcx().assumptions_on_binders();
 
         if constraints_are_final {
             // A region's flow-sensitive liveness can only change a polonius answer if a loan can
@@ -113,36 +172,36 @@ pub(super) fn generate<'tcx>(
             //   local's type and so cannot decide any local's relevance). Keeping every region of
             //   every dropped local's type reachable therefore covers all of them.
             let loan_reachable = regions_reachable_from_loans(
-                typeck.tcx(),
-                typeck.infcx.num_region_vars(),
-                typeck.borrow_set,
-                &typeck.constraints.outlives_constraints,
-                typeck.body,
+                lcx.tcx(),
+                lcx.infcx.num_region_vars(),
+                lcx.borrow_set,
+                &lcx.constraints.outlives_constraints,
+                lcx.body,
             );
 
             let universal: FxHashSet<RegionVid> =
-                typeck.universal_regions.universal_regions_iter().collect();
+                lcx.universal_regions.universal_regions_iter().collect();
             // The predicate does not depend on iteration order, so neither does the result.
             #[allow(rustc::potential_query_instability)]
             free_regions.retain(|r| universal.contains(r) || !loan_reachable.contains(r));
         } else {
-            free_regions = typeck.universal_regions.universal_regions_iter().collect();
+            free_regions = lcx.universal_regions.universal_regions_iter().collect();
         }
     }
 
     let (relevant_live_locals, boring_locals) =
-        compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
+        compute_relevant_live_locals(lcx.tcx(), &free_regions, lcx.body);
 
     // Drop-liveness in two passes: the outlives constraints for the relevant locals first, then
     // the points. Splitting them is what makes the constraint set independent of when, or whether,
     // any particular local's liveness gets computed.
     let dropped_and_initialized =
-        trace::add_drop_constraints(typeck, location_map, &mut drop_state, &relevant_live_locals);
+        trace::add_drop_constraints(lcx, location_map, &mut drop_state, &relevant_live_locals);
 
     // Widening only ever moves a local from boring to relevant, so intersecting the two
     // partitions here is exactly "relevant to polonius, boring to NLLs".
     trace::trace(
-        typeck,
+        lcx,
         location_map,
         relevant_live_locals,
         boring_locals,
@@ -154,11 +213,11 @@ pub(super) fn generate<'tcx>(
     // Mark regions that should be live where they appear within rvalues or within a call: like
     // args, regions, and types.
     record_regular_live_regions(
-        typeck.tcx(),
-        &mut typeck.constraints.liveness_constraints,
-        &typeck.universal_regions,
-        &mut typeck.polonius_context,
-        typeck.body,
+        lcx.tcx(),
+        &mut lcx.constraints.liveness_constraints,
+        &lcx.universal_regions,
+        &mut lcx.polonius_context,
+        lcx.body,
     );
 }
 

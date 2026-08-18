@@ -12,7 +12,6 @@ use rustc_hir::attrs::lang_items::LangItem;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
 use rustc_index::{IndexSlice, IndexVec};
-use rustc_infer::infer::canonical::QueryRegionConstraints;
 use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_infer::infer::region_constraints::RegionConstraintData;
 use rustc_infer::infer::{
@@ -169,7 +168,25 @@ pub(crate) fn type_check<'tcx>(
     typeck.equate_inputs_and_outputs(&normalized_inputs_and_output);
     typeck.check_signature_annotation();
 
-    liveness::generate(&mut typeck, &location_map, move_data);
+    let constraints_are_final =
+        typeck.deferred_closure_requirements.is_empty() && !infcx.tcx.assumptions_on_binders();
+    liveness::generate(
+        &mut liveness::LivenessCx {
+            infcx: typeck.infcx,
+            body: typeck.body,
+            universal_regions: typeck.universal_regions,
+            region_bound_pairs: typeck.region_bound_pairs,
+            known_type_outlives_obligations: typeck.known_type_outlives_obligations,
+            location_table: typeck.location_table,
+            borrow_set: typeck.borrow_set,
+            constraints: typeck.constraints,
+            polonius_facts: typeck.polonius_facts,
+            polonius_context: &mut typeck.polonius_context,
+        },
+        &location_map,
+        move_data,
+        constraints_are_final,
+    );
 
     let polonius_context = typeck.polonius_context;
 
@@ -401,28 +418,6 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
             let annotation = self.instantiate_canonical(span, user_ty);
             self.ascribe_user_type(inferred_ty, annotation, span);
         }
-    }
-
-    #[instrument(skip(self, data), level = "debug")]
-    fn push_region_constraints(
-        &mut self,
-        locations: Locations,
-        category: ConstraintCategory<'tcx>,
-        data: &QueryRegionConstraints<'tcx>,
-    ) {
-        debug!("constraints generated: {:#?}", data);
-
-        constraint_conversion::ConstraintConversion::new(
-            self.infcx,
-            self.universal_regions,
-            self.region_bound_pairs,
-            self.known_type_outlives_obligations,
-            locations,
-            locations.span(self.body),
-            category,
-            self.constraints,
-        )
-        .convert_all(data);
     }
 
     /// Try to relate `sub <: sup`
