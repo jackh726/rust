@@ -46,6 +46,7 @@ pub(super) fn trace<'tcx>(
     location_map: &DenseLocationMap,
     relevant_live_locals: Vec<Local>,
     boring_locals: Vec<Local>,
+    polonius_only_locals: &DenseBitSet<Local>,
     state: &mut DropLivenessState<'_, 'tcx>,
 ) {
     let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness_trace");
@@ -61,7 +62,7 @@ pub(super) fn trace<'tcx>(
 
     results.add_extra_drop_facts(&relevant_live_locals);
 
-    results.compute_for_all_locals(relevant_live_locals);
+    results.compute_for_all_locals(relevant_live_locals, polonius_only_locals);
 
     results.dropck_boring_locals(boring_locals);
 }
@@ -177,6 +178,19 @@ struct LivenessContext<'a, 'b, 'typeck, 'tcx> {
 }
 
 type MaybeInitDomain = MaybeReachable<MixedBitSet<MovePathIndex>>;
+
+/// Which of the two liveness stores a local's points belong in.
+#[derive(Copy, Clone)]
+enum LivenessTarget {
+    /// `MirTypeckRegionConstraints::liveness_constraints`: what NLL region inference is seeded
+    /// with, and what everything downstream reads.
+    LivenessConstraints,
+
+    /// `PoloniusContext::extra_liveness`: the widened liveness only the localized constraint graph
+    /// traversal asks for.
+    Extra,
+}
+use LivenessTarget::{Extra, LivenessConstraints};
 
 struct DropData<'tcx> {
     dropck_result: DropckOutlivesResult<'tcx>,
@@ -583,20 +597,34 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
     /// The drop-liveness *constraints* are not this loop's job: `add_drop_constraints` has already
     /// pushed them. Reporting dropck overflows still is, so that the diagnostic stays on the span,
     /// and for the locals, it was on before.
-    fn compute_for_all_locals(&mut self, relevant_live_locals: Vec<Local>) {
+    fn compute_for_all_locals(
+        &mut self,
+        relevant_live_locals: Vec<Local>,
+        polonius_only_locals: &DenseBitSet<Local>,
+    ) {
         for local in relevant_live_locals {
             self.points.compute(local);
 
             let local_ty = self.cx.body().local_decls[local].ty;
+            // NLLs would have left this local boring, so its liveness is only read by the
+            // localized constraint graph traversal, and is recorded apart from the liveness NLL
+            // region inference is seeded with. See `PoloniusContext::extra_liveness`.
+            let target =
+                if polonius_only_locals.contains(local) { Extra } else { LivenessConstraints };
 
             if !self.points.use_live_at.is_empty() {
-                self.cx.add_use_live_facts_for(local_ty, &self.points.use_live_at);
+                self.cx.add_use_live_facts_for(target, local_ty, &self.points.use_live_at);
             }
 
             if !self.points.drop_live_at.is_empty() {
                 let first_drop = self.points.drop_locations[0];
                 self.cx.report_drop_overflows(local, local_ty, first_drop);
-                self.cx.add_drop_live_points_for(local, local_ty, &self.points.drop_live_at);
+                self.cx.add_drop_live_points_for(
+                    target,
+                    local,
+                    local_ty,
+                    &self.points.drop_live_at,
+                );
             }
         }
     }
@@ -662,7 +690,7 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
         for (local, local_ty, location) in facts_to_add {
             self.cx.report_drop_overflows(local, local_ty, location);
             self.cx.add_drop_constraints_for(local, local_ty, &[location]);
-            self.cx.add_drop_live_points_for(local, local_ty, &live_at);
+            self.cx.add_drop_live_points_for(LivenessConstraints, local, local_ty, &live_at);
         }
     }
 
@@ -766,9 +794,14 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
 
     /// Stores the result that all regions in `value` are live for the
     /// points `live_at`.
-    fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
+    fn add_use_live_facts_for(
+        &mut self,
+        target: LivenessTarget,
+        value: Ty<'tcx>,
+        live_at: &IntervalSet<PointIndex>,
+    ) {
         debug!("add_use_live_facts_for(value={:?})", value);
-        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at);
+        Self::make_all_regions_live(self.location_map, self.typeck, target, value, live_at);
     }
 
     /// The half of drop-liveness that produces *outlives constraints*: the `dropck_outlives`
@@ -846,6 +879,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     /// `add_drop_constraints_for`.
     fn add_drop_live_points_for(
         &mut self,
+        target: LivenessTarget,
         dropped_local: Local,
         dropped_ty: Ty<'tcx>,
         live_at: &IntervalSet<PointIndex>,
@@ -866,7 +900,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
         for &kind in &drop_data.dropck_result.kinds {
-            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at);
+            Self::make_all_regions_live(self.location_map, self.typeck, target, kind, live_at);
             polonius::legacy::emit_drop_facts(
                 self.typeck.tcx(),
                 dropped_local,
@@ -880,6 +914,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     fn make_all_regions_live(
         location_map: &DenseLocationMap,
         typeck: &mut TypeChecker<'_, 'tcx>,
+        target: LivenessTarget,
         value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
         live_at: &IntervalSet<PointIndex>,
     ) {
@@ -895,7 +930,21 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
             op: |r| {
                 let live_region_vid = typeck.universal_regions.to_region_vid(r);
 
-                typeck.constraints.liveness_constraints.add_points(live_region_vid, live_at);
+                match target {
+                    LivenessConstraints => {
+                        typeck
+                            .constraints
+                            .liveness_constraints
+                            .add_points(live_region_vid, live_at);
+                    }
+                    Extra => {
+                        typeck
+                            .polonius_context
+                            .as_mut()
+                            .unwrap()
+                            .add_extra_live_points(live_region_vid, live_at);
+                    }
+                }
             },
         });
 

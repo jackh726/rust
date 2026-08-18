@@ -1,5 +1,6 @@
 use itertools::{Either, Itertools};
 use rustc_data_structures::fx::FxHashSet;
+use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::{TyContext, Visitor};
 use rustc_middle::mir::{Body, Local, Location, SourceInfo, TerminatorKind};
 use rustc_middle::span_bug;
@@ -45,6 +46,11 @@ pub(super) fn generate<'tcx>(
     // drop-liveness now runs in: the constraints first, then the points in `trace`.
     let mut drop_state = trace::DropLivenessState::new(typeck.body, move_data);
 
+    // The locals only polonius considers relevant: NLLs leave these boring, so the liveness they
+    // contribute is read by nothing but the localized constraint graph traversal. Empty unless the
+    // widening below happens.
+    let mut polonius_only_locals = DenseBitSet::new_empty(typeck.body.local_decls.len());
+
     // NLLs can avoid computing some liveness data here because its constraints are
     // location-insensitive, but that doesn't work in polonius: locals whose type contains a region
     // that outlives a free region are not necessarily live everywhere in a flow-sensitive setting,
@@ -63,8 +69,13 @@ pub(super) fn generate<'tcx>(
     {
         let (_, boring_locals) =
             compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
-        typeck.polonius_context.as_mut().unwrap().boring_nll_locals =
-            boring_locals.into_iter().collect();
+        for &local in &boring_locals {
+            polonius_only_locals.insert(local);
+        }
+
+        let polonius_context = typeck.polonius_context.as_mut().unwrap();
+        polonius_context.boring_nll_locals = boring_locals.into_iter().collect();
+        polonius_context.record_extra_liveness_for(location_map.num_points());
 
         // Restricting the widened set by loan reachability additionally requires that the outlives
         // constraints we can see here are the final ones. Two things can still add more after this
@@ -120,7 +131,16 @@ pub(super) fn generate<'tcx>(
     // any particular local's liveness gets computed.
     trace::add_drop_constraints(typeck, location_map, &mut drop_state, &relevant_live_locals);
 
-    trace::trace(typeck, location_map, relevant_live_locals, boring_locals, &mut drop_state);
+    // Widening only ever moves a local from boring to relevant, so intersecting the two
+    // partitions here is exactly "relevant to polonius, boring to NLLs".
+    trace::trace(
+        typeck,
+        location_map,
+        relevant_live_locals,
+        boring_locals,
+        &polonius_only_locals,
+        &mut drop_state,
+    );
 
     // Mark regions that should be live where they appear within rvalues or within a call: like
     // args, regions, and types.
