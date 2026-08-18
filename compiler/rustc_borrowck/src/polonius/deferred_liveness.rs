@@ -21,6 +21,7 @@
 //!   recording one where the old code did not would *narrow* the directions a loan can flow in.
 
 use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
+use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
 use rustc_middle::mir::{Body, Local};
@@ -28,6 +29,8 @@ use rustc_middle::ty::{self, GenericArg, RegionVid, Ty, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 
+use crate::polonius::ConstraintDirection;
+use crate::polonius::liveness_constraints::record_variance;
 use crate::type_check::liveness::{InitializedPlaces, LivePoints, LocalUseMap, live_points_of};
 use crate::universal_regions::UniversalRegions;
 
@@ -147,12 +150,16 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
     }
 
     /// Computes the liveness of every deferred local that can contribute points to `region`, if it
-    /// has not been computed already.
+    /// has not been computed already, recording its variances into `directions` as it goes.
     ///
     /// The memo is per local rather than per region on purpose: one local's reverse DFS answers
     /// for every region in its type at once, so a region that shares a local with one already
     /// materialized costs nothing.
-    pub(crate) fn ensure(&mut self, region: RegionVid) {
+    pub(crate) fn ensure(
+        &mut self,
+        region: RegionVid,
+        directions: &mut IndexVec<RegionVid, Option<ConstraintDirection>>,
+    ) {
         let Some(locals) = self.deferred.by_region.get(&region) else { return };
         if locals.iter().all(|&local| self.deferred.done.contains(local)) {
             return;
@@ -163,11 +170,15 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
         let pending: Vec<Local> =
             locals.iter().copied().filter(|&local| !self.deferred.done.contains(local)).collect();
         for local in pending {
-            self.materialize(local);
+            self.materialize(local, directions);
         }
     }
 
-    fn materialize(&mut self, local: Local) {
+    fn materialize(
+        &mut self,
+        local: Local,
+        directions: &mut IndexVec<RegionVid, Option<ConstraintDirection>>,
+    ) {
         if !self.deferred.done.insert(local) {
             return;
         }
@@ -178,7 +189,13 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
             (self.tcx, self.param_env, self.universal_regions);
         let local_ty = self.points.body().local_decls[local].ty;
 
+        // The variances are recorded here, alongside the points, and so under exactly the
+        // conditions the eager code used them -- which is now checked rather than approximated,
+        // because the reverse DFS has just run. A region with no recorded variance falls back to
+        // `Bidirectional`, so recording one the eager code would not have *narrows* where a loan
+        // can flow: the conditions matter.
         if !self.points.use_live_at.is_empty() {
+            record_variance(tcx, directions, universal_regions, local_ty);
             let (live, use_live_at) = (&mut *self.live, &self.points.use_live_at);
             live_points_of(tcx, param_env, universal_regions, local_ty, |region| {
                 live.union_row(region, use_live_at);
@@ -188,6 +205,9 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
         if !self.points.drop_live_at.is_empty()
             && let Some(kinds) = self.deferred.drop_kinds.get(&local_ty)
         {
+            for kind in kinds {
+                record_variance(tcx, directions, universal_regions, *kind);
+            }
             let (live, drop_live_at) = (&mut *self.live, &self.points.drop_live_at);
             for kind in kinds {
                 live_points_of(tcx, param_env, universal_regions, *kind, |region| {
