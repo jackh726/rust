@@ -41,8 +41,10 @@ mod reachability;
 
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::IndexVec;
+use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::RegionVid;
+use rustc_mir_dataflow::points::PointIndex;
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
@@ -71,6 +73,18 @@ pub(crate) struct PoloniusContext {
     /// currently has more boring locals than NLLs so we record the latter to use in errors and
     /// diagnostics, to focus on the locals we consider relevant and match NLL diagnostics.
     pub(crate) boring_nll_locals: FxHashSet<Local>,
+
+    /// The liveness that only polonius asks for: the points where a region of a local NLLs would
+    /// have left boring is live.
+    ///
+    /// This is kept apart from `liveness_constraints` rather than merged into it because only the
+    /// traversal below reads it. Such a region outlives a free region, so NLL region inference
+    /// gives it every point by outlives propagation anyway -- which is exactly why NLLs never
+    /// compute this in the first place. Seeding `scc_values` with it would be redundant work on a
+    /// value that is about to be widened to everything.
+    ///
+    /// `None` when the widened partition was not used, i.e. when there is nothing extra to record.
+    extra_liveness: Option<SparseIntervalMatrix<RegionVid, PointIndex>>,
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
@@ -88,6 +102,26 @@ enum ConstraintDirection {
 }
 
 impl PoloniusContext {
+    /// Starts recording the liveness only polonius asks for; see `extra_liveness`.
+    ///
+    /// Called when `generate` decides to widen the relevant-local set, which is the only thing
+    /// that produces any.
+    pub(crate) fn record_extra_liveness_for(&mut self, num_points: usize) {
+        self.extra_liveness = Some(SparseIntervalMatrix::new(num_points));
+    }
+
+    /// Records `region` as live at all of `points`, in the polonius-only store.
+    pub(crate) fn add_extra_live_points(
+        &mut self,
+        region: RegionVid,
+        points: &IntervalSet<PointIndex>,
+    ) {
+        self.extra_liveness
+            .as_mut()
+            .expect("recording polonius-only liveness without having asked for it")
+            .union_row(region, points);
+    }
+
     /// Computes live loans using the set of loans model for `-Zpolonius=next`.
     ///
     /// First, creates a constraint graph combining regions and CFG points, by:
@@ -117,6 +151,7 @@ impl PoloniusContext {
             let live_loans = LoanReachability::new(
                 body,
                 liveness,
+                self.extra_liveness.as_ref(),
                 &graph,
                 &self.live_region_variances,
                 regioncx.universal_regions(),

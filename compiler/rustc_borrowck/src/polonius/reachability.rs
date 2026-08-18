@@ -26,6 +26,7 @@
 
 use std::collections::VecDeque;
 
+use rustc_index::interval::SparseIntervalMatrix;
 use rustc_index::{IndexSlice, IndexVec};
 use rustc_middle::mir::{BasicBlock, Body, Location};
 use rustc_middle::ty::RegionVid;
@@ -211,6 +212,12 @@ struct RegionState {
 pub(super) struct LoanReachability<'a, 'tcx> {
     body: &'a Body<'tcx>,
     liveness: &'a LivenessValues,
+
+    /// The liveness only polonius asks for; see `PoloniusContext::extra_liveness`. A region is
+    /// live here if either store says so, so every read of `liveness` in this module has to
+    /// consult this one too.
+    extra_liveness: Option<&'a SparseIntervalMatrix<RegionVid, PointIndex>>,
+
     graph: &'a LocalizedConstraintGraph,
     live_region_variances: &'a IndexSlice<RegionVid, Option<ConstraintDirection>>,
     universal_regions: &'a UniversalRegions<'tcx>,
@@ -258,6 +265,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
     pub(super) fn new(
         body: &'a Body<'tcx>,
         liveness: &'a LivenessValues,
+        extra_liveness: Option<&'a SparseIntervalMatrix<RegionVid, PointIndex>>,
         graph: &'a LocalizedConstraintGraph,
         live_region_variances: &'a IndexSlice<RegionVid, Option<ConstraintDirection>>,
         universal_regions: &'a UniversalRegions<'tcx>,
@@ -290,6 +298,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         LoanReachability {
             body,
             liveness,
+            extra_liveness,
             graph,
             live_region_variances,
             universal_regions,
@@ -394,7 +403,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // many regions, and only a couple of words of it are ever needed at a time.
         let mut live = std::mem::replace(&mut self.live_scratch, Box::default());
         live[w0..=w1].fill(0);
-        if let Some(live_points) = self.liveness.points().row(region) {
+        let extra_row = self.extra_liveness.and_then(|extra| extra.row(region));
+        for live_points in [self.liveness.points().row(region), extra_row].into_iter().flatten() {
             for interval in live_points.iter_intervals_from(entry) {
                 if interval.start > terminator {
                     break;
@@ -455,7 +465,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         if forward && test_bit(&points, terminator) {
             for successor in body[block].terminator().successors() {
                 let point = self.block_entry[successor];
-                if universal || self.liveness.is_live_at_point(region, point) {
+                if universal || self.is_live_at_point(region, point) {
                     self.add_point(region, point, successor);
                 }
             }
@@ -495,6 +505,15 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         points[w0..=w1].fill(0);
         self.points_scratch = points;
+    }
+
+    /// Whether `region` is live at `point`, according to either liveness store.
+    fn is_live_at_point(&self, region: RegionVid, point: PointIndex) -> bool {
+        self.liveness.is_live_at_point(region, point)
+            || self
+                .extra_liveness
+                .and_then(|extra| extra.row(region))
+                .is_some_and(|row| row.contains(point))
     }
 
     /// Records that the loan currently being traversed reaches `region` at the points in
