@@ -1,30 +1,24 @@
 use itertools::{Either, Itertools};
+use rustc_data_structures::fx::FxHashSet;
 use rustc_infer::infer::canonical::QueryRegionConstraints;
 use rustc_infer::infer::outlives::env::RegionBoundPairs;
-use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::mir::visit::{TyContext, Visitor};
-use rustc_middle::mir::{
-    Body, ConstraintCategory, Local, Location, SourceInfo, TerminatorKind,
-};
+use rustc_middle::mir::{Body, ConstraintCategory, Local, Location, SourceInfo};
 use rustc_middle::span_bug;
 use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{
-    self, GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable,
-};
+use rustc_middle::ty::{self, GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable};
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
 use tracing::{debug, instrument};
 
 use super::MirTypeckRegionConstraints;
-use crate::BorrowckInferCtxt;
-use crate::BorrowSet;
 use crate::constraints::OutlivesConstraintSet;
 use crate::polonius::PoloniusContext;
 use crate::polonius::legacy::{PoloniusFacts, PoloniusLocationTable};
 use crate::region_infer::values::LivenessValues;
-use crate::type_check::Locations;
-use crate::type_check::constraint_conversion;
+use crate::type_check::{Locations, constraint_conversion};
 use crate::universal_regions::UniversalRegions;
+use crate::{BorrowSet, BorrowckInferCtxt};
 
 /// What liveness needs in order to run, and all it needs.
 ///
@@ -129,11 +123,8 @@ pub(super) fn generate<'tcx>(
 /// Widens the relevant-local set for polonius, and defers the liveness that widening asks for.
 ///
 /// Unlike [`generate`] this runs *after* type-checking, from
-/// `borrowck_check_region_constraints`. That is not a detail: the widened set is restricted by
-/// loan reachability, which is only sound once the outlives constraints are the final ones. Here
-/// they are, by construction -- closure requirements have been applied and the binder assumptions
-/// destructured -- so the restriction applies to every body, rather than only to the bodies that
-/// happened to contain no closures.
+/// `borrowck_check_region_constraints`, where the outlives constraints are final by construction:
+/// closure requirements have been applied and the binder assumptions destructured.
 ///
 /// Nothing here feeds NLL region inference. A local NLLs left boring has only regions that outlive
 /// a free region, and outlives propagation gives those every point anyway; the points computed for
@@ -158,32 +149,15 @@ pub(crate) fn generate_polonius<'tcx>(
 
     let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness_polonius");
 
-    let mut free_regions = regions_that_outlive_free_regions(
-        lcx.infcx.num_region_vars(),
-        &lcx.universal_regions,
-        &lcx.constraints.outlives_constraints,
-    );
-
-    // A region's flow-sensitive liveness can only change a polonius answer if a loan can reach it:
-    // `LocalizedConstraintGraph::traverse` only ever starts at a loan's region and follows
-    // `sup -> sub` edges, and a region it never visits is never asked whether it is live. So a
-    // region that outlives a free region but that no loan can reach can stay "boring", exactly as
-    // it would under NLLs, where outlives propagation gives it every point anyway.
+    // The widened set: only the universal regions are boring. Under NLLs a region that outlives a
+    // free region can stay boring because outlives propagation gives it every point anyway; under
+    // polonius the traversal asks about points directly, so it cannot.
     //
-    // The borrow set is complete before type-checking starts, so the set of loans is final, and
-    // the constraint set is final here by construction. `add_drop_constraints` below still adds
-    // some, which is what `regions_reachable_from_loans` closes over.
-    let loan_reachable = regions_reachable_from_loans(
-        lcx.tcx(),
-        lcx.infcx.num_region_vars(),
-        lcx.borrow_set,
-        &lcx.constraints.outlives_constraints,
-        lcx.body,
-    );
-    let universal: FxHashSet<RegionVid> = lcx.universal_regions.universal_regions_iter().collect();
-    // The predicate does not depend on iteration order, so neither does the result.
-    #[allow(rustc::potential_query_instability)]
-    free_regions.retain(|r| universal.contains(r) || !loan_reachable.contains(r));
+    // There is no attempt here to guess which of these the traversal will actually ask about.
+    // Being in this set costs a local nothing but a row in an index: its liveness is computed only
+    // if a loan reaches one of its regions.
+    let free_regions: FxHashSet<RegionVid> =
+        lcx.universal_regions.universal_regions_iter().collect();
 
     // Widening only ever moves a local from boring to relevant, so intersecting the widened set
     // with the boring half of the NLL partition is exactly "relevant to polonius, boring to NLLs".
@@ -295,67 +269,6 @@ fn regions_that_outlive_free_regions<'tcx>(
 
     // Return the final set of things we visited.
     outlives_free_region
-}
-
-/// The regions a loan can flow into: those reachable from some loan's region by following
-/// `sup: sub` outlives edges, which is the direction the localized constraint graph is traversed in.
-///
-/// `add_drop_constraints` will add further outlives constraints of its own, from the dropck data it
-/// pushes at drop locations, so plain reachability over the constraints we have now could miss a
-/// path that only exists later. Those constraints only ever relate regions of one dropped local's
-/// type -- plus universal regions, which are never boring, and fresh vars from instantiating the
-/// query, which appear in no local's type and so cannot decide any local's relevance. So we close
-/// over them: once any region of a dropped local's type is reachable, all of that type's regions
-/// are. This terminates because the reachable set only grows.
-fn regions_reachable_from_loans<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    num_region_vars: usize,
-    borrow_set: &BorrowSet<'tcx>,
-    constraint_set: &OutlivesConstraintSet<'tcx>,
-    body: &Body<'tcx>,
-) -> FxHashSet<RegionVid> {
-    let constraint_graph = constraint_set.graph(num_region_vars);
-    // `region_graph` wants a static region to special-case; reachability does not care which one it
-    // is, and naming a real one would only add edges, so use the first region vid.
-    let region_graph = constraint_graph.region_graph(constraint_set, RegionVid::from_u32(0));
-
-    // The regions in the type of each local that is dropped somewhere in the body.
-    let mut dropped_locals: FxHashSet<Local> = FxHashSet::default();
-    for data in body.basic_blocks.iter() {
-        if let TerminatorKind::Drop { place, .. } = data.terminator().kind {
-            dropped_locals.insert(place.local);
-        }
-    }
-    // The set is only iterated to build `dropped`, which is used as an unordered collection of
-    // unordered region sets, so the result does not depend on the order.
-    #[allow(rustc::potential_query_instability)]
-    let dropped: Vec<Vec<RegionVid>> = dropped_locals
-        .into_iter()
-        .map(|local| {
-            let mut regions = Vec::new();
-            tcx.for_each_free_region(&body.local_decls[local].ty, |r| regions.push(r.as_var()));
-            regions
-        })
-        .filter(|regions| !regions.is_empty())
-        .collect();
-
-    let mut stack: Vec<RegionVid> = borrow_set.iter().map(|loan| loan.region).collect();
-    let mut reachable: FxHashSet<RegionVid> = stack.iter().copied().collect();
-    loop {
-        while let Some(r) = stack.pop() {
-            stack.extend(region_graph.outgoing_regions(r).filter(|&s| reachable.insert(s)));
-        }
-
-        // Close over the dropck constraints `add_drop_constraints` is going to add.
-        for regions in &dropped {
-            if regions.iter().any(|r| reachable.contains(r)) {
-                stack.extend(regions.iter().copied().filter(|&r| reachable.insert(r)));
-            }
-        }
-        if stack.is_empty() {
-            return reachable;
-        }
-    }
 }
 
 /// Some variables are "regular live" at `location` -- i.e., they may be used later. This means that
