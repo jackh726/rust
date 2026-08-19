@@ -1,3 +1,4 @@
+use rustc_data_structures::fx::FxHashSet;
 use rustc_hir::def_id::DefId;
 use rustc_index::IndexVec;
 use rustc_middle::ty::relate::{
@@ -10,13 +11,101 @@ use crate::universal_regions::UniversalRegions;
 
 impl PoloniusContext {
     /// Record the variance of each region contained within the given value.
+    ///
+    /// Prefer [`VarianceRecorder::record`], which skips the values it has already walked. This is
+    /// for the callers that have no repetition to skip.
     pub(crate) fn record_live_region_variance<'tcx>(
         &mut self,
         tcx: TyCtxt<'tcx>,
         universal_regions: &UniversalRegions<'tcx>,
-        value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
+        value: impl VarianceValue<'tcx>,
     ) {
         record_variance(tcx, &mut self.live_region_variances, universal_regions, value);
+    }
+}
+
+/// Records variances, walking any one value only once.
+///
+/// Variance is a property of a region, recorded once per body into
+/// `PoloniusContext::live_region_variances` -- but it is asked for per *location*, by the MIR
+/// visitor in `record_regular_live_regions` and per local in `trace`. The same interned type
+/// arriving from thirty locations is thirty full [`VarianceExtractor`] walks producing the same
+/// answer, and that relation is not cheap: on `combine` it is the whole of what liveness costs
+/// under polonius over NLLs.
+///
+/// Skipping a repeat is sound because the walk is deterministic and always starts from the same
+/// ambient variance, so a value walked twice records exactly what it recorded the first time. It
+/// has to stay that way: a region with no recorded variance falls back to `Bidirectional`, so
+/// *failing* to record something would narrow where a loan can flow.
+#[derive(Default)]
+pub(crate) struct VarianceRecorder<'tcx> {
+    walked: FxHashSet<VarianceKey<'tcx>>,
+}
+
+impl<'tcx> VarianceRecorder<'tcx> {
+    /// Records the variance of each region in `value`, unless `value` has been recorded already.
+    pub(crate) fn record<V: VarianceValue<'tcx>>(
+        &mut self,
+        tcx: TyCtxt<'tcx>,
+        universal_regions: &UniversalRegions<'tcx>,
+        polonius_context: &mut PoloniusContext,
+        value: V,
+    ) {
+        if V::WORTH_MEMOIZING && !self.walked.insert(value.variance_key()) {
+            return;
+        }
+        polonius_context.record_live_region_variance(tcx, universal_regions, value);
+    }
+}
+
+/// Identifies a value whose variances have been recorded. Everything here is interned, so this
+/// compares and hashes as a pointer.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum VarianceKey<'tcx> {
+    Arg(ty::GenericArg<'tcx>),
+    Args(ty::GenericArgsRef<'tcx>),
+}
+
+/// A value the variance extractor can be run over, and which can say which value it is.
+///
+/// The four shapes below are all that reach it. A type and a generic argument holding that type
+/// deliberately share a key: `Relate` for `GenericArg` dispatches straight to the type's, so the
+/// two walks record the same thing.
+pub(crate) trait VarianceValue<'tcx>:
+    TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>> + Copy
+{
+    /// Whether walking this shape costs more than looking it up. A lone region does not: relating
+    /// one is a single call, cheaper than hashing it.
+    const WORTH_MEMOIZING: bool = true;
+
+    fn variance_key(self) -> VarianceKey<'tcx>;
+}
+
+impl<'tcx> VarianceValue<'tcx> for Ty<'tcx> {
+    fn variance_key(self) -> VarianceKey<'tcx> {
+        VarianceKey::Arg(self.into())
+    }
+}
+
+impl<'tcx> VarianceValue<'tcx> for ty::Region<'tcx> {
+    const WORTH_MEMOIZING: bool = false;
+
+    fn variance_key(self) -> VarianceKey<'tcx> {
+        VarianceKey::Arg(self.into())
+    }
+}
+
+impl<'tcx> VarianceValue<'tcx> for ty::GenericArg<'tcx> {
+    fn variance_key(self) -> VarianceKey<'tcx> {
+        VarianceKey::Arg(self)
+    }
+}
+
+/// Note that `Relate` for a generic argument *list* relates every argument invariantly, which is
+/// not what relating each argument on its own would do. The list is its own key for that reason.
+impl<'tcx> VarianceValue<'tcx> for ty::GenericArgsRef<'tcx> {
+    fn variance_key(self) -> VarianceKey<'tcx> {
+        VarianceKey::Args(self)
     }
 }
 

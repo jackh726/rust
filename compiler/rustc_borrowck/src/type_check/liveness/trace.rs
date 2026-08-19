@@ -22,6 +22,7 @@ use rustc_trait_selection::traits::query::dropck_outlives;
 use rustc_trait_selection::traits::query::type_op::{DropckOutlives, TypeOpOutput};
 use tracing::debug;
 
+use crate::polonius::{VarianceRecorder, VarianceValue};
 use crate::region_infer::values;
 use crate::type_check::NormalizeLocation;
 use crate::type_check::liveness::LivenessCx;
@@ -58,7 +59,13 @@ pub(super) fn trace<'tcx>(
 
     let mut results = LivenessResults {
         points: LivePoints::new(tcx, location_map, local_use_map, inits),
-        cx: LivenessContext { lcx, location_map, body, drop_data },
+        cx: LivenessContext {
+            lcx,
+            location_map,
+            body,
+            drop_data,
+            variances: VarianceRecorder::default(),
+        },
     };
 
     results.add_extra_drop_facts(&relevant_live_locals);
@@ -91,7 +98,13 @@ pub(super) fn add_drop_constraints<'tcx>(
     // of the body's local count.
     let body = lcx.body;
     let (drop_data, inits) = state.split();
-    let cx = LivenessContext { lcx, location_map, body, drop_data };
+    let cx = LivenessContext {
+        lcx,
+        location_map,
+        body,
+        drop_data,
+        variances: VarianceRecorder::default(),
+    };
 
     DropConstraints { cx, inits }.add_drop_constraints_for_relevant_locals(relevant_live_locals)
 }
@@ -170,6 +183,10 @@ struct LivenessContext<'a, 'b, 'typeck, 'tcx> {
     /// Cache for the results of the `dropck_outlives` query, shared with whichever other pass of
     /// drop-liveness ran first.
     drop_data: &'a mut FxIndexMap<Ty<'tcx>, DropData<'tcx>>,
+
+    /// The values whose variances have been recorded. Locals share types, and a local's own type
+    /// is related again for each of its `dropck_outlives` kinds, so the repeats are worth skipping.
+    variances: VarianceRecorder<'tcx>,
 }
 
 type MaybeInitDomain = MaybeReachable<MixedBitSet<MovePathIndex>>;
@@ -781,7 +798,13 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     /// points `live_at`.
     fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
         debug!("add_use_live_facts_for(value={:?})", value);
-        Self::make_all_regions_live(self.location_map, self.lcx, value, live_at);
+        Self::make_all_regions_live(
+            self.location_map,
+            self.lcx,
+            &mut self.variances,
+            value,
+            live_at,
+        );
     }
 
     /// The half of drop-liveness that produces *outlives constraints*: the `dropck_outlives`
@@ -875,7 +898,13 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
         for &kind in &drop_data.dropck_result.kinds {
-            Self::make_all_regions_live(self.location_map, self.lcx, kind, live_at);
+            Self::make_all_regions_live(
+                self.location_map,
+                self.lcx,
+                &mut self.variances,
+                kind,
+                live_at,
+            );
             polonius::legacy::emit_drop_facts(
                 self.lcx.tcx(),
                 dropped_local,
@@ -936,7 +965,8 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     fn make_all_regions_live(
         location_map: &DenseLocationMap,
         lcx: &mut LivenessCx<'_, 'tcx>,
-        value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
+        variances: &mut VarianceRecorder<'tcx>,
+        value: impl VarianceValue<'tcx>,
         live_at: &IntervalSet<PointIndex>,
     ) {
         debug!("make_all_regions_live(value={:?})", value);
@@ -957,11 +987,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
 
         // When using `-Zpolonius=next`, we record the variance of each live region.
         if let Some(polonius_context) = lcx.polonius_context.as_mut() {
-            polonius_context.record_live_region_variance(
-                lcx.infcx.tcx,
-                lcx.universal_regions,
-                value,
-            );
+            variances.record(lcx.infcx.tcx, lcx.universal_regions, polonius_context, value);
         }
     }
 }

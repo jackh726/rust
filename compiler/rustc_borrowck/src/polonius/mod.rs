@@ -51,6 +51,7 @@ use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 pub(self) use self::constraints::*;
 pub(crate) use self::deferred_liveness::{DeferredLiveness, LazyLiveness, lazy_liveness_inputs};
 pub(crate) use self::dump::dump_polonius_mir;
+pub(crate) use self::liveness_constraints::{VarianceRecorder, VarianceValue};
 use self::reachability::LoanReachability;
 use crate::{BorrowSet, BorrowckInferCtxt, RegionInferenceContext};
 
