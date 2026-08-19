@@ -8,7 +8,7 @@ use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeVisitable};
 use super::{ConstraintDirection, PoloniusContext};
 use crate::universal_regions::UniversalRegions;
 
-impl<'cx> PoloniusContext<'cx> {
+impl PoloniusContext {
     /// Record the variance of each region contained within the given value.
     pub(crate) fn record_live_region_variance<'tcx>(
         &mut self,

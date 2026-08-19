@@ -44,8 +44,7 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_index::IndexVec;
 use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Local};
-use rustc_middle::ty::{RegionVid, TyCtxt};
-use rustc_middle::ty;
+use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 
@@ -54,14 +53,14 @@ pub(crate) use self::deferred_liveness::{DeferredLiveness, LazyLiveness, lazy_li
 pub(crate) use self::dump::dump_polonius_mir;
 pub(crate) use self::reachability::LiveLoans;
 use self::reachability::LoanReachability;
-use crate::{BorrowSet, RegionInferenceContext};
+use crate::{BorrowSet, BorrowckInferCtxt, RegionInferenceContext};
 
 /// This struct holds the necessary
 ///  - liveness data, created during MIR typeck, and which will be used to lazily compute the
 ///    polonius localized constraints, during NLL region inference as well as MIR dumping,
 ///  - data needed by the borrowck error computation and diagnostics.
 #[derive(Default)]
-pub(crate) struct PoloniusContext<'tcx> {
+pub(crate) struct PoloniusContext {
     /// The graph from which we extract the localized outlives constraints.
     graph: Option<LocalizedConstraintGraph>,
 
@@ -92,7 +91,7 @@ pub(crate) struct PoloniusContext<'tcx> {
 
     /// The locals whose liveness `extra_liveness` is waiting for, and what is needed to compute
     /// it. See [`DeferredLiveness`].
-    deferred: Option<DeferredLiveness<'tcx>>,
+    deferred: Option<DeferredLiveness>,
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
@@ -109,7 +108,7 @@ pub(crate) enum ConstraintDirection {
     Bidirectional,
 }
 
-impl<'tcx> PoloniusContext<'tcx> {
+impl PoloniusContext {
     /// Starts deferring the liveness only polonius asks for; see `extra_liveness` and
     /// `deferred_liveness`.
     ///
@@ -121,7 +120,7 @@ impl<'tcx> PoloniusContext<'tcx> {
     }
 
     /// The deferred-liveness record, to add to; see [`DeferredLiveness::defer`].
-    pub(crate) fn deferred_liveness_mut(&mut self) -> &mut DeferredLiveness<'tcx> {
+    pub(crate) fn deferred_liveness_mut(&mut self) -> &mut DeferredLiveness {
         self.deferred.as_mut().expect("deferring liveness without having asked for it")
     }
 
@@ -135,10 +134,9 @@ impl<'tcx> PoloniusContext<'tcx> {
     /// loan scope and active loans computations.
     ///
     /// The constraint data will be used to compute errors and diagnostics.
-    pub(crate) fn compute_loan_liveness(
+    pub(crate) fn compute_loan_liveness<'tcx>(
         &mut self,
-        tcx: TyCtxt<'tcx>,
-        param_env: ty::ParamEnv<'tcx>,
+        infcx: &BorrowckInferCtxt<'tcx>,
         regioncx: &mut RegionInferenceContext<'tcx>,
         body: &Body<'tcx>,
         move_data: &MoveData<'tcx>,
@@ -164,8 +162,7 @@ impl<'tcx> PoloniusContext<'tcx> {
                     (local_use_map, inits) =
                         lazy_liveness_inputs(deferred, body, move_data, location_map);
                     lazy = LazyLiveness::new(
-                        tcx,
-                        param_env,
+                        infcx,
                         regioncx.universal_regions(),
                         location_map,
                         &local_use_map,
