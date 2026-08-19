@@ -61,9 +61,6 @@ use crate::{BorrowSet, RegionInferenceContext};
 ///  - data needed by the borrowck error computation and diagnostics.
 #[derive(Default)]
 pub(crate) struct PoloniusContext<'tcx> {
-    /// The graph from which we extract the localized outlives constraints.
-    graph: Option<LocalizedConstraintGraph>,
-
     /// The expected edge direction per live region: the kind of directed edge we'll create as
     /// liveness constraints depends on the variance of types with respect to each contained region.
     ///
@@ -152,7 +149,7 @@ impl<'tcx> PoloniusContext<'tcx> {
             // From the outlives constraints, liveness, and variances, we can compute reachability
             // on the lazy localized constraint graph to trace the liveness of loans, for the next
             // step in the chain (the NLL loan scope and active loans computations).
-            let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
+            let mut graph = LocalizedConstraintGraph::new(regioncx.definitions.len());
 
             // The widened liveness the traversal will ask for, computed as it asks. These have to
             // be owned out here: `LazyLiveness` borrows both, so a type holding all three would be
@@ -177,19 +174,19 @@ impl<'tcx> PoloniusContext<'tcx> {
                 _ => None,
             };
 
+            let (constraints, constraint_graph) = regioncx.constraint_graph();
             let loans_out_of_scope = LoanReachability::new(
                 body,
                 liveness,
                 lazy,
-                &graph,
+                &mut graph,
+                constraints,
+                constraint_graph,
                 &mut self.live_region_variances,
                 regioncx.universal_regions(),
             )
             .compute_loans_out_of_scope(borrow_set);
             regioncx.record_loans_out_of_scope(loans_out_of_scope);
-
-            // The graph can be traversed again during MIR dumping, so we store it here.
-            self.graph = Some(graph);
         }
     }
 }

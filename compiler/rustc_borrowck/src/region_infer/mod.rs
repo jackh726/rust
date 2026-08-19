@@ -441,6 +441,14 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         self.constraints.outlives().iter().copied()
     }
 
+    /// The outlives constraints, together with the graph indexing them by their `sup` region, for
+    /// looking up the constraints of one region rather than iterating all of them.
+    pub(crate) fn constraint_graph(
+        &self,
+    ) -> (&OutlivesConstraintSet<'tcx>, &NormalConstraintGraph) {
+        (&self.constraints, &self.constraint_graph)
+    }
+
     /// Adds annotations for `#[rustc_regions]`; see `UniversalRegions::annotate`.
     pub(crate) fn annotate(&self, tcx: TyCtxt<'tcx>, err: &mut Diag<'_, ()>) {
         self.universal_regions().annotate(tcx, err)

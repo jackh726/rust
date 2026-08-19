@@ -34,8 +34,10 @@ use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::PointIndex;
 
 use crate::BorrowSet;
+use crate::constraints::OutlivesConstraintSet;
+use crate::constraints::graph::NormalConstraintGraph;
 use crate::dataflow::BorrowIndex;
-use crate::polonius::{ConstraintDirection, LazyLiveness, LocalizedConstraintGraph, LocalizedNode};
+use crate::polonius::{ConstraintDirection, LazyLiveness, LocalizedConstraintGraph};
 use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
@@ -195,7 +197,12 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// what actually computes it.
     lazy: Option<&'a mut LazyLiveness<'a, 'tcx>>,
 
-    graph: &'a LocalizedConstraintGraph,
+    graph: &'a mut LocalizedConstraintGraph,
+
+    /// The outlives constraints, and the index from a region to its own, which is what the graph
+    /// builds its rows from as the traversal reaches new regions.
+    constraints: &'a OutlivesConstraintSet<'tcx>,
+    constraint_graph: &'a NormalConstraintGraph,
     live_region_variances: &'a mut IndexVec<RegionVid, Option<ConstraintDirection>>,
     universal_regions: &'a UniversalRegions<'tcx>,
 
@@ -252,7 +259,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         body: &'a Body<'tcx>,
         liveness: &'a LivenessValues,
         lazy: Option<&'a mut LazyLiveness<'a, 'tcx>>,
-        graph: &'a LocalizedConstraintGraph,
+        graph: &'a mut LocalizedConstraintGraph,
+        constraints: &'a OutlivesConstraintSet<'tcx>,
+        constraint_graph: &'a NormalConstraintGraph,
         live_region_variances: &'a mut IndexVec<RegionVid, Option<ConstraintDirection>>,
         universal_regions: &'a UniversalRegions<'tcx>,
     ) -> Self {
@@ -286,6 +295,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             liveness,
             lazy,
             graph,
+            constraints,
+            constraint_graph,
             live_region_variances,
             universal_regions,
             num_points,
@@ -463,6 +474,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
     /// work is proportional to the `(loan, region, block)` triples a loan reaches rather than to
     /// the size of the body.
     fn process(&mut self, region: RegionVid, block: BasicBlock, row: &mut [Word]) {
+        // The graph rows for a region are built the first time it is processed, rather than for
+        // every region in the body up front.
+        self.graph.ensure(region, self.liveness, self.constraints, self.constraint_graph);
+
         let (w0, w1) = self.block_words[block];
         let entry = self.block_entry[block];
         let terminator = self.block_terminator[block];
@@ -579,31 +594,35 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
         self.live_scratch = live;
 
-        let graph = self.graph;
+        // The graph rows are moved out for the rest of this: they belong to `region`, and nothing
+        // reached from them looks at `region`'s own rows, so they are only missing for a window in
+        // which no one asks.
+        let (physical_edges, logical_edges) = self.graph.take_rows(region);
 
         // 3. The logical edges: constraints that hold at all points, so all the points reached here
         // flow to the target regions.
-        if let Some(Some(successors)) = graph.logical_edges.get(region) {
-            for &successor in successors {
-                self.add_words(successor, &points, w0, w1, block);
-            }
+        for &successor in &logical_edges {
+            self.add_words(successor, &points, w0, w1, block);
         }
 
         // 4. The physical edges: constraints that hold at a single point, so they only apply when
         // that point has been reached. They are sorted, so we can jump to this block's range.
-        if let Some(physical_points) = graph.physical_points.get(region) {
-            let start = physical_points.partition_point(|&point| point < entry);
-            for &point in &physical_points[start..] {
-                if point > terminator {
-                    break;
-                }
-                if test_bit(&points, point) {
-                    for &successor in &graph.edges[&LocalizedNode { region, point }] {
-                        self.add_point(successor, point, block);
-                    }
+        let start = physical_edges.partition_point(|&(point, _)| point < entry);
+        let mut idx = start;
+        while let Some(&(point, _)) = physical_edges.get(idx) {
+            if point > terminator {
+                break;
+            }
+            let successors = LocalizedConstraintGraph::successors_at(&physical_edges, point);
+            if test_bit(&points, point) {
+                for &(_, successor) in successors {
+                    self.add_point(successor, point, block);
                 }
             }
+            idx += successors.len();
         }
+
+        self.graph.put_rows(region, physical_edges, logical_edges);
 
         points[w0..=w1].fill(0);
         self.points_scratch = points;
