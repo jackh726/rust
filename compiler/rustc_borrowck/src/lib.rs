@@ -311,7 +311,7 @@ struct CollectRegionConstraintsResult<'tcx> {
     deferred_closure_requirements: DeferredClosureRequirements<'tcx>,
     deferred_opaque_type_errors: Vec<DeferredOpaqueTypeError<'tcx>>,
     polonius_facts: Option<AllFacts<RustcFacts>>,
-    polonius_context: Option<PoloniusContext<'tcx>>,
+    polonius_context: Option<PoloniusContext>,
 }
 
 /// Start borrow checking by collecting the region constraints for
@@ -423,9 +423,9 @@ fn borrowck_check_region_constraints<'diag, 'tcx>(
     let body = &body_owned;
     let def = body.source.def_id().expect_local();
 
-    // The liveness only polonius asks for, computed here rather than during type-checking: the
-    // widened set it produces is restricted by loan reachability, which is only sound against the
-    // final outlives constraints. The assert above is what makes them final.
+    // The liveness only polonius asks for, recorded here rather than during type-checking: the
+    // widened set it produces is read off the final outlives constraints, which the assert above
+    // is what makes final.
     type_check::liveness::generate_polonius(
         &mut type_check::liveness::LivenessCx {
             infcx: &infcx,
@@ -440,7 +440,6 @@ fn borrowck_check_region_constraints<'diag, 'tcx>(
             polonius_context: &mut polonius_context,
         },
         &location_map,
-        &move_data,
     );
 
     // Compute non-lexical lifetimes using the constraints computed
@@ -819,7 +818,7 @@ pub(crate) struct MirBorrowckCtxt<'a, 'diag, 'tcx> {
     /// Results of Polonius analysis.
     polonius_output: Option<&'a PoloniusOutput>,
     /// When using `-Zpolonius=next`: the data used to compute errors and diagnostics.
-    polonius_context: Option<&'a PoloniusContext<'tcx>>,
+    polonius_context: Option<&'a PoloniusContext>,
 }
 
 // Check that:

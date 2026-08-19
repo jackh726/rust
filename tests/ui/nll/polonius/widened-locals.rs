@@ -7,11 +7,8 @@
 // its points are what the loans are judged against. If it went missing, or produced the wrong
 // points, these loans would look dead at the assignment and the errors would go with them.
 //
-// Note what this does *not* cover: the drop-liveness half of the widened set. Disabling widening
-// altogether fails ~200 tests in this suite, but disabling only the widened locals' drop-liveness
-// fails none of them, this file included -- the errors here come from use-liveness. A widened
-// local's regions all outlive a free region, so a loan that reaches one is already live to the end
-// of the body, which may be why nothing observes the difference.
+// This does not cover the drop-liveness half of the widened set; see the note on that branch in
+// `polonius::deferred_liveness`.
 
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ revisions: nll polonius_next
