@@ -44,15 +44,14 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_index::IndexVec;
 use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Local};
-use rustc_middle::ty::{RegionVid, TyCtxt};
 use rustc_middle::ty;
+use rustc_middle::ty::{RegionVid, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 
 pub(self) use self::constraints::*;
 pub(crate) use self::deferred_liveness::{DeferredLiveness, LazyLiveness, lazy_liveness_inputs};
 pub(crate) use self::dump::dump_polonius_mir;
-pub(crate) use self::reachability::LiveLoans;
 use self::reachability::LoanReachability;
 use crate::{BorrowSet, RegionInferenceContext};
 
@@ -178,7 +177,7 @@ impl<'tcx> PoloniusContext<'tcx> {
                 _ => None,
             };
 
-            let live_loans = LoanReachability::new(
+            let loans_out_of_scope = LoanReachability::new(
                 body,
                 liveness,
                 lazy,
@@ -186,8 +185,8 @@ impl<'tcx> PoloniusContext<'tcx> {
                 &mut self.live_region_variances,
                 regioncx.universal_regions(),
             )
-            .compute_live_loans(borrow_set);
-            regioncx.record_live_loans(live_loans);
+            .compute_loans_out_of_scope(borrow_set);
+            regioncx.record_loans_out_of_scope(loans_out_of_scope);
 
             // The graph can be traversed again during MIR dumping, so we store it here.
             self.graph = Some(graph);

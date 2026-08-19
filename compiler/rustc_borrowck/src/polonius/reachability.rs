@@ -26,7 +26,9 @@
 
 use std::collections::VecDeque;
 
+use rustc_data_structures::fx::FxIndexMap;
 use rustc_index::IndexVec;
+use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::{BasicBlock, Body, Location};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::PointIndex;
@@ -152,31 +154,6 @@ fn backward_fill(
     }
 }
 
-/// The points at which each loan is live, when using `-Zpolonius=next`.
-#[derive(Clone)] // FIXME(#146079)
-pub(crate) struct LiveLoans {
-    num_points: usize,
-    /// The set of points at which a given loan is live, materialized on demand.
-    rows: IndexVec<BorrowIndex, Option<Box<[Word]>>>,
-}
-
-impl LiveLoans {
-    fn new(num_loans: usize, num_points: usize) -> Self {
-        LiveLoans { num_points, rows: IndexVec::from_fn_n(|_| None, num_loans) }
-    }
-
-    fn row_mut(&mut self, loan: BorrowIndex) -> &mut [Word] {
-        let num_points = self.num_points;
-        self.rows[loan].get_or_insert_with(|| empty_points(num_points))
-    }
-
-    /// Returns whether the `loan` is live at the given `point`.
-    pub(crate) fn contains(&self, loan: BorrowIndex, point: PointIndex) -> bool {
-        let (word, mask) = word_and_mask(point);
-        self.rows[loan].as_ref().is_some_and(|row| row[word] & mask != 0)
-    }
-}
-
 /// The per-region state of the traversal. The edge-direction data is computed once per body; the
 /// reachability buffers are only held while a loan is actually reaching the region, and are
 /// recycled between loans.
@@ -259,6 +236,15 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// A scratch buffer holding the liveness of the region being processed, over the words of the
     /// block being processed.
     live_scratch: Box<[Word]>,
+
+    /// The inclusive word span written into the current loan's point set, so that it can be
+    /// cleared between loans without touching the whole body.
+    row_lo: usize,
+    row_hi: usize,
+
+    /// The CFG walk that finds where a loan goes out of scope, reused across loans.
+    visited: DenseBitSet<BasicBlock>,
+    visit_stack: Vec<BasicBlock>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -315,22 +301,39 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             points_scratch: empty_points(num_points),
             fill_scratch: empty_points(num_points),
             live_scratch: empty_points(num_points),
+            row_lo: usize::MAX,
+            row_hi: 0,
+            visited: DenseBitSet::new_empty(body.basic_blocks.len()),
+            visit_stack: Vec::new(),
         }
     }
 
-    /// Traverses the graph once per loan, and returns the points at which each loan is live.
-    pub(super) fn compute_live_loans(&mut self, borrow_set: &BorrowSet<'tcx>) -> LiveLoans {
-        let mut live_loans = LiveLoans::new(borrow_set.len(), self.num_points);
+    /// Traverses the graph once per loan, and returns where each loan goes out of scope.
+    ///
+    /// The traversal computes the set of points a loan is live at, and that set used to be handed
+    /// out whole, as `LiveLoans`, for `Borrows` to walk afterwards. But the walk reads a short
+    /// prefix of it -- forwards from where the loan is issued, stopping at the first point it is
+    /// not live, and not descending into successors past that -- so a row per loan, sized to the
+    /// whole body, was built and then almost entirely ignored. Doing the walk here, while the row
+    /// is in hand, means one row exists at a time and it is recycled.
+    pub(super) fn compute_loans_out_of_scope(
+        &mut self,
+        borrow_set: &BorrowSet<'tcx>,
+    ) -> FxIndexMap<Location, Vec<BorrowIndex>> {
+        let mut out_of_scope: FxIndexMap<Location, Vec<BorrowIndex>> = FxIndexMap::default();
+        let mut row = empty_points(self.num_points);
 
         for (loan_idx, loan) in borrow_set.iter_enumerated() {
             // The loan enters the graph at the region and point it is introduced at.
             let start = loan.reserve_location;
             self.add_point(loan.region, self.liveness.point_from_location(start), start.block);
 
-            let row = live_loans.row_mut(loan_idx);
+            (self.row_lo, self.row_hi) = (usize::MAX, 0);
             while let Some((region, block)) = self.worklist.pop_front() {
-                self.process(region, block, row);
+                self.process(region, block, &mut row);
             }
+
+            self.record_loan_out_of_scope(loan_idx, start, &row, &mut out_of_scope);
 
             // Release the per-loan state.
             let mut touched = std::mem::take(&mut self.touched);
@@ -350,9 +353,106 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
             touched.clear();
             self.touched = touched;
+
+            // Recycle the row. Only the words this loan actually reached need clearing, which is
+            // why the whole point set can be a single reused buffer.
+            if self.row_lo <= self.row_hi {
+                row[self.row_lo..=self.row_hi].fill(0);
+            }
         }
 
-        live_loans
+        out_of_scope
+    }
+
+    /// Records where `loan_idx` goes out of scope: the first point, walking forwards from where it
+    /// is issued, at which it is not live.
+    ///
+    /// A loan is live while it is contained within some live region, so this is looking for the
+    /// first point where no region the loan reached is live -- which `row` already says.
+    fn record_loan_out_of_scope(
+        &mut self,
+        loan_idx: BorrowIndex,
+        loan_issued_at: Location,
+        row: &[Word],
+        out_of_scope: &mut FxIndexMap<Location, Vec<BorrowIndex>>,
+    ) {
+        let first_block = loan_issued_at.block;
+        let first_bb_data = &self.body.basic_blocks[first_block];
+
+        // The first block starts at the statement where the loan is issued, rather than at the
+        // block entry.
+        if let Some(kill) = self.loan_kill_location(
+            loan_issued_at,
+            row,
+            first_block,
+            loan_issued_at.statement_index,
+            first_bb_data.statements.len(),
+        ) {
+            out_of_scope.entry(kill).or_default().push(loan_idx);
+            return;
+        }
+
+        for succ in first_bb_data.terminator().successors() {
+            if self.visited.insert(succ) {
+                self.visit_stack.push(succ);
+            }
+        }
+
+        // We may end up visiting `first_block` again. This is not an issue: we know at this point
+        // that the loan is not killed in the range above, so checking the whole block gives the
+        // same answer.
+        while let Some(block) = self.visit_stack.pop() {
+            let bb_data = &self.body[block];
+            if let Some(kill) =
+                self.loan_kill_location(loan_issued_at, row, block, 0, bb_data.statements.len())
+            {
+                // The loan dies within this block, so its successors are not reached from here.
+                out_of_scope.entry(kill).or_default().push(loan_idx);
+                continue;
+            }
+
+            for succ in bb_data.terminator().successors() {
+                if self.visited.insert(succ) {
+                    self.visit_stack.push(succ);
+                }
+            }
+        }
+
+        self.visited.clear();
+        debug_assert!(self.visit_stack.is_empty(), "visit stack should be empty");
+    }
+
+    /// The lowest statement in `start..=end` at which the loan is not live, if any.
+    fn loan_kill_location(
+        &self,
+        loan_issued_at: Location,
+        row: &[Word],
+        block: BasicBlock,
+        start: usize,
+        end: usize,
+    ) -> Option<Location> {
+        // Points are dense and in statement order within a block, so the block's entry point plus
+        // the statement index is the point, without going back through the location map.
+        let entry = self.block_entry[block].as_usize();
+        for statement_index in start..=end {
+            let location = Location { block, statement_index };
+
+            // A loan is always live at the point it is issued: it reaches its own region, which is
+            // live there.
+            if location == loan_issued_at {
+                continue;
+            }
+
+            let point = PointIndex::from_usize(entry + statement_index);
+            debug_assert_eq!(point, self.liveness.point_from_location(location));
+            if test_bit(row, point) {
+                continue;
+            }
+
+            return Some(location);
+        }
+
+        None
     }
 
     /// Propagates the points newly reached for `region` within `block` to its successors in the
@@ -445,6 +545,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         {
             let state = self.states[region].as_mut().unwrap();
             let (mut new_lo, mut new_hi) = (usize::MAX, 0);
+            self.row_lo = self.row_lo.min(w0);
+            self.row_hi = self.row_hi.max(w1);
             for word in w0..=w1 {
                 row[word] |= points[word] & live[word];
                 if points[word] & !state.reached[word] != 0 {

@@ -285,140 +285,6 @@ pub fn calculate_borrows_out_of_scope_at_location<'tcx>(
     OutOfScopePrecomputer::compute(body, regioncx, borrow_set)
 }
 
-struct PoloniusOutOfScopePrecomputer<'a, 'tcx> {
-    visited: DenseBitSet<mir::BasicBlock>,
-    visit_stack: Vec<mir::BasicBlock>,
-    body: &'a Body<'tcx>,
-    regioncx: &'a RegionInferenceContext<'tcx>,
-
-    loans_out_of_scope_at_location: FxIndexMap<Location, Vec<BorrowIndex>>,
-}
-
-impl<'tcx> PoloniusOutOfScopePrecomputer<'_, 'tcx> {
-    fn compute(
-        body: &Body<'tcx>,
-        regioncx: &RegionInferenceContext<'tcx>,
-        borrow_set: &BorrowSet<'tcx>,
-    ) -> FxIndexMap<Location, Vec<BorrowIndex>> {
-        // The in-tree polonius analysis computes loans going out of scope using the
-        // set-of-loans model.
-        let mut prec = PoloniusOutOfScopePrecomputer {
-            visited: DenseBitSet::new_empty(body.basic_blocks.len()),
-            visit_stack: vec![],
-            body,
-            regioncx,
-            loans_out_of_scope_at_location: FxIndexMap::default(),
-        };
-        for (loan_idx, loan_data) in borrow_set.iter_enumerated() {
-            let loan_issued_at = loan_data.reserve_location;
-            prec.precompute_loans_out_of_scope(loan_idx, loan_issued_at);
-        }
-
-        prec.loans_out_of_scope_at_location
-    }
-
-    /// Loans are in scope while they are live: whether they are contained within any live region.
-    /// In the location-insensitive analysis, a loan will be contained in a region if the issuing
-    /// region can reach it in the subset graph. So this is a reachability problem.
-    fn precompute_loans_out_of_scope(&mut self, loan_idx: BorrowIndex, loan_issued_at: Location) {
-        let first_block = loan_issued_at.block;
-        let first_bb_data = &self.body.basic_blocks[first_block];
-
-        // The first block we visit is the one where the loan is issued, starting from the statement
-        // where the loan is issued: at `loan_issued_at`.
-        let first_lo = loan_issued_at.statement_index;
-        let first_hi = first_bb_data.statements.len();
-
-        if let Some(kill_location) =
-            self.loan_kill_location(loan_idx, loan_issued_at, first_block, first_lo, first_hi)
-        {
-            debug!("loan {:?} gets killed at {:?}", loan_idx, kill_location);
-            self.loans_out_of_scope_at_location.entry(kill_location).or_default().push(loan_idx);
-
-            // The loan dies within the first block, we're done and can early return.
-            return;
-        }
-
-        // The loan is not dead. Add successor BBs to the work list, if necessary.
-        for succ_bb in first_bb_data.terminator().successors() {
-            if self.visited.insert(succ_bb) {
-                self.visit_stack.push(succ_bb);
-            }
-        }
-
-        // We may end up visiting `first_block` again. This is not an issue: we know at this point
-        // that the loan is not killed in the `first_lo..=first_hi` range, so checking the
-        // `0..first_lo` range and the `0..first_hi` range gives the same result.
-        while let Some(block) = self.visit_stack.pop() {
-            let bb_data = &self.body[block];
-            let num_stmts = bb_data.statements.len();
-            if let Some(kill_location) =
-                self.loan_kill_location(loan_idx, loan_issued_at, block, 0, num_stmts)
-            {
-                debug!("loan {:?} gets killed at {:?}", loan_idx, kill_location);
-                self.loans_out_of_scope_at_location
-                    .entry(kill_location)
-                    .or_default()
-                    .push(loan_idx);
-
-                // The loan dies within this block, so we don't need to visit its successors.
-                continue;
-            }
-
-            // Add successor BBs to the work list, if necessary.
-            for succ_bb in bb_data.terminator().successors() {
-                if self.visited.insert(succ_bb) {
-                    self.visit_stack.push(succ_bb);
-                }
-            }
-        }
-
-        self.visited.clear();
-        assert!(self.visit_stack.is_empty(), "visit stack should be empty");
-    }
-
-    /// Returns the lowest statement in `start..=end`, where the loan goes out of scope, if any.
-    /// This is the statement where the issuing region can't reach any of the regions that are live
-    /// at this point.
-    fn loan_kill_location(
-        &self,
-        loan_idx: BorrowIndex,
-        loan_issued_at: Location,
-        block: BasicBlock,
-        start: usize,
-        end: usize,
-    ) -> Option<Location> {
-        for statement_index in start..=end {
-            let location = Location { block, statement_index };
-
-            // Check whether the issuing region can reach local regions that are live at this point:
-            // - a loan is always live at its issuing location because it can reach the issuing
-            // region, which is always live at this location.
-            if location == loan_issued_at {
-                continue;
-            }
-
-            // - the loan goes out of scope at `location` if it's not contained within any regions
-            // live at this point.
-            //
-            // FIXME: if the issuing region `i` can reach a live region `r` at point `p`, and `r` is
-            // live at point `q`, then it's guaranteed that `i` would reach `r` at point `q`.
-            // Reachability is location-insensitive, and we could take advantage of that, by jumping
-            // to a further point than just the next statement: we can jump to the furthest point
-            // within the block where `r` is live.
-            if self.regioncx.is_loan_live_at(loan_idx, location) {
-                continue;
-            }
-
-            // No live region is reachable from the issuing region: the loan is killed at this
-            // point.
-            return Some(location);
-        }
-
-        None
-    }
-}
-
 impl<'a, 'tcx> Borrows<'a, 'tcx> {
     pub fn new(
         tcx: TyCtxt<'tcx>,
@@ -430,7 +296,9 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
             if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
                 calculate_borrows_out_of_scope_at_location(body, regioncx, borrow_set)
             } else {
-                PoloniusOutOfScopePrecomputer::compute(body, regioncx, borrow_set)
+                // Under `-Zpolonius=next` this is computed by the localized constraint graph
+                // traversal, which is where the loan liveness it comes from is known.
+                regioncx.polonius_loans_out_of_scope().clone()
             };
         Borrows { tcx, body, borrow_set, borrows_out_of_scope_at_location }
     }

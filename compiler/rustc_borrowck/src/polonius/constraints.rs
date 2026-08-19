@@ -1,6 +1,6 @@
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
-use rustc_index::{IndexSlice, IndexVec};
 use rustc_index::interval::IntervalSet;
+use rustc_index::{IndexSlice, IndexVec};
 use rustc_middle::mir::{Body, Location};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::PointIndex;
@@ -82,8 +82,7 @@ impl LocalizedConstraintGraph {
         outlives_constraints: impl Iterator<Item = OutlivesConstraint<'tcx>>,
     ) -> Self {
         let mut edges: FxHashMap<LocalizedNode, FxIndexSet<_>> = FxHashMap::default();
-        let mut logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>> =
-            IndexVec::new();
+        let mut logical_edges: IndexVec<RegionVid, Option<FxIndexSet<RegionVid>>> = IndexVec::new();
         let mut physical_points: IndexVec<RegionVid, Vec<PointIndex>> = IndexVec::new();
 
         for outlives_constraint in outlives_constraints {

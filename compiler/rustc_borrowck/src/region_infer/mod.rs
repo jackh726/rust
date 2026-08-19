@@ -30,7 +30,6 @@ use crate::constraints::{ConstraintSccIndex, OutlivesConstraint, OutlivesConstra
 use crate::dataflow::BorrowIndex;
 use crate::diagnostics::{RegionErrorKind, RegionErrors, UniverseInfo};
 use crate::handle_placeholders::{LoweredConstraints, RegionTracker};
-use crate::polonius::LiveLoans;
 use crate::polonius::legacy::PoloniusOutput;
 use crate::region_infer::values::{LivenessValues, RegionElement, RegionValues};
 use crate::type_check::Locations;
@@ -85,6 +84,10 @@ pub struct RegionInferenceContext<'tcx> {
     /// definition contains information about where the region came
     /// from as well as its final inferred value.
     pub(crate) definitions: Frozen<IndexVec<RegionVid, RegionDefinition<'tcx>>>,
+
+    /// When using `-Zpolonius=next`, where each loan goes out of scope, computed by the localized
+    /// constraint graph traversal. Empty when the body has no loans, and under NLLs.
+    polonius_loans_out_of_scope: FxIndexMap<Location, Vec<BorrowIndex>>,
 
     /// The liveness constraints added to each region. For most
     /// regions, these start out empty and steadily grow, though for
@@ -406,6 +409,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         Self {
             definitions,
             liveness_constraints,
+            polonius_loans_out_of_scope: FxIndexMap::default(),
             constraints: outlives_constraints,
             constraint_graph,
             constraint_sccs,
@@ -1878,18 +1882,22 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         &self.liveness_constraints
     }
 
-    /// When using `-Zpolonius=next`, records the given live loans for the loan scopes and active
-    /// loans dataflow computations.
-    pub(crate) fn record_live_loans(&mut self, live_loans: LiveLoans) {
-        self.liveness_constraints.record_live_loans(live_loans);
+    /// When using `-Zpolonius=next`, records where each loan goes out of scope, for the loan
+    /// scopes and active loans dataflow computations.
+    ///
+    /// This is computed by the localized constraint graph traversal, which is where the liveness
+    /// it is derived from is known; see `LoanReachability::compute_loans_out_of_scope`.
+    pub(crate) fn record_loans_out_of_scope(
+        &mut self,
+        loans_out_of_scope: FxIndexMap<Location, Vec<BorrowIndex>>,
+    ) {
+        self.polonius_loans_out_of_scope = loans_out_of_scope;
     }
 
-    /// Returns whether the `loan_idx` is live at the given `location`: whether its issuing
-    /// region is contained within the type of a variable that is live at this point.
-    /// Note: for now, the sets of live loans is only available when using `-Zpolonius=next`.
-    pub(crate) fn is_loan_live_at(&self, loan_idx: BorrowIndex, location: Location) -> bool {
-        let point = self.liveness_constraints.point_from_location(location);
-        self.liveness_constraints.is_loan_live_at(loan_idx, point)
+    /// Where each loan goes out of scope, when using `-Zpolonius=next`. Empty if the body has no
+    /// loans: then nothing goes out of scope, and the traversal did not run.
+    pub(crate) fn polonius_loans_out_of_scope(&self) -> &FxIndexMap<Location, Vec<BorrowIndex>> {
+        &self.polonius_loans_out_of_scope
     }
 }
 
