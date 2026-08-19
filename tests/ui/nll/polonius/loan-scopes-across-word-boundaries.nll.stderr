@@ -1,0 +1,67 @@
+error[E0506]: cannot assign to `v` because it is borrowed
+  --> $DIR/loan-scopes-across-word-boundaries.rs:27:5
+   |
+LL |     let r = &v;
+   |             -- `v` is borrowed here
+LL |     v += 1;
+   |     ^^^^^^ `v` is assigned to here but it was already borrowed
+LL |     let _ = *r;
+   |             -- borrow later used here
+
+error[E0506]: cannot assign to `v` because it is borrowed
+  --> $DIR/loan-scopes-across-word-boundaries.rs:37:5
+   |
+LL |     let r = &v;
+   |             -- `v` is borrowed here
+LL |     v += 1;
+   |     ^^^^^^ `v` is assigned to here but it was already borrowed
+LL |     let _ = *r;
+   |             -- borrow later used here
+
+error[E0506]: cannot assign to `v` because it is borrowed
+  --> $DIR/loan-scopes-across-word-boundaries.rs:45:5
+   |
+LL |     let r = &v;
+   |             -- `v` is borrowed here
+LL |     v += 1;
+   |     ^^^^^^ `v` is assigned to here but it was already borrowed
+LL |     let _ = *r;
+   |             -- borrow later used here
+
+error[E0506]: cannot assign to `v` because it is borrowed
+  --> $DIR/loan-scopes-across-word-boundaries.rs:55:5
+   |
+LL |     let r = &v;
+   |             -- `v` is borrowed here
+LL |     pad!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32);
+LL |     v += 1;
+   |     ^^^^^^ `v` is assigned to here but it was already borrowed
+LL |     let _ = *r;
+   |             -- borrow later used here
+
+error[E0506]: cannot assign to `v` because it is borrowed
+  --> $DIR/loan-scopes-across-word-boundaries.rs:63:5
+   |
+LL |     let r = &v;
+   |             -- `v` is borrowed here
+LL |     pad!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33);
+LL |     v += 1;
+   |     ^^^^^^ `v` is assigned to here but it was already borrowed
+LL |     let _ = *r;
+   |             -- borrow later used here
+
+error[E0506]: cannot assign to `v` because it is borrowed
+  --> $DIR/loan-scopes-across-word-boundaries.rs:93:9
+   |
+LL |     let r = &v;
+   |             -- `v` is borrowed here
+...
+LL |         v += 1;
+   |         ^^^^^^ `v` is assigned to here but it was already borrowed
+LL |     }
+LL |     let _ = *r;
+   |             -- borrow later used here
+
+error: aborting due to 6 previous errors
+
+For more information about this error, try `rustc --explain E0506`.

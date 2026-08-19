@@ -434,6 +434,11 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
     }
 
     /// The lowest statement in `start..=end` at which the loan is not live, if any.
+    ///
+    /// This is the innermost thing the out-of-scope walk does, and the walk visits more blocks
+    /// than the graph traversal processes worklist items, so it looks for the first *clear* bit
+    /// a word at a time rather than testing one bit per statement. A block's points span one or
+    /// two words, so this is one or two iterations however many statements there are.
     fn loan_kill_location(
         &self,
         loan_issued_at: Location,
@@ -445,22 +450,39 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // Points are dense and in statement order within a block, so the block's entry point plus
         // the statement index is the point, without going back through the location map.
         let entry = self.block_entry[block].as_usize();
-        for statement_index in start..=end {
-            let location = Location { block, statement_index };
+        let (lo, hi) = (entry + start, entry + end);
+        debug_assert_eq!(
+            PointIndex::from_usize(lo),
+            self.liveness.point_from_location(Location { block, statement_index: start })
+        );
 
-            // A loan is always live at the point it is issued: it reaches its own region, which is
-            // live there.
-            if location == loan_issued_at {
-                continue;
+        // A loan is always live at the point it is issued: it reaches its own region, which is
+        // live there. The row does not say so, so add it back for the word it falls in.
+        let (issued_word, issued_mask) = word_and_mask(PointIndex::from_usize(
+            self.block_entry[loan_issued_at.block].as_usize() + loan_issued_at.statement_index,
+        ));
+
+        for word in lo / WORD_BITS..=hi / WORD_BITS {
+            let mut live = row[word];
+            if word == issued_word {
+                live |= issued_mask;
             }
 
-            let point = PointIndex::from_usize(entry + statement_index);
-            debug_assert_eq!(point, self.liveness.point_from_location(location));
-            if test_bit(row, point) {
-                continue;
+            // Mask down to the points of this block that are in range: the first and last words
+            // are shared with the neighbouring blocks.
+            let mut dead = !live;
+            if word == lo / WORD_BITS {
+                dead &= !0 << (lo % WORD_BITS);
+            }
+            if word == hi / WORD_BITS {
+                let last_bit = hi % WORD_BITS;
+                dead &= if last_bit == WORD_BITS - 1 { !0 } else { (1 << (last_bit + 1)) - 1 };
             }
 
-            return Some(location);
+            if dead != 0 {
+                let point = word * WORD_BITS + dead.trailing_zeros() as usize;
+                return Some(Location { block, statement_index: point - entry });
+            }
         }
 
         None
