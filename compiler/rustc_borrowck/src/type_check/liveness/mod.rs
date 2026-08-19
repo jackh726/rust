@@ -36,7 +36,7 @@ pub(crate) struct LivenessCx<'a, 'tcx> {
     pub(crate) borrow_set: &'a BorrowSet<'tcx>,
     pub(crate) constraints: &'a mut MirTypeckRegionConstraints<'tcx>,
     pub(crate) polonius_facts: &'a mut Option<PoloniusFacts>,
-    pub(crate) polonius_context: &'a mut Option<PoloniusContext<'tcx>>,
+    pub(crate) polonius_context: &'a mut Option<PoloniusContext>,
 }
 
 impl<'tcx> LivenessCx<'_, 'tcx> {
@@ -74,7 +74,9 @@ mod local_use_map;
 mod trace;
 
 pub(crate) use self::local_use_map::LocalUseMap;
-pub(crate) use self::trace::{InitializedPlaces, LivePoints, live_points_of};
+pub(crate) use self::trace::{
+    DropData, InitializedPlaces, LivePoints, compute_drop_data, live_points_of,
+};
 
 /// Computes the liveness NLL region inference needs, and records what polonius will want.
 ///
@@ -126,15 +128,13 @@ pub(super) fn generate<'tcx>(
 /// `borrowck_check_region_constraints`, where the outlives constraints are final by construction:
 /// closure requirements have been applied and the binder assumptions destructured.
 ///
-/// Nothing here feeds NLL region inference. A local NLLs left boring has only regions that outlive
-/// a free region, and outlives propagation gives those every point anyway; the points computed for
-/// them land in `PoloniusContext::extra_liveness`, whose only reader is the traversal. What does
-/// feed region inference is the drop-liveness *constraints*, which is why this still has to run
-/// before `compute_regions`.
+/// Nothing here feeds NLL region inference, and nothing here pushes an outlives constraint. A
+/// local NLLs left boring has only regions that outlive a free region, and outlives propagation
+/// gives those every point anyway; what is computed for them lands in
+/// `PoloniusContext::extra_liveness`, whose only reader is the traversal.
 pub(crate) fn generate_polonius<'tcx>(
     lcx: &mut LivenessCx<'_, 'tcx>,
     location_map: &DenseLocationMap,
-    move_data: &MoveData<'tcx>,
 ) {
     // A body with no loans has nothing to propagate: `compute_loan_liveness` returns immediately,
     // and NLL region inference is happy with the NLL liveness data, so the widening would be pure
@@ -179,29 +179,18 @@ pub(crate) fn generate_polonius<'tcx>(
         .unwrap()
         .defer_extra_liveness(location_map.num_points(), lcx.body.local_decls.len());
 
-    // The outlives constraints are the one thing that cannot wait: region inference runs next, and
-    // it needs them. Everything else about these locals -- their points, their variances, and the
-    // reverse DFS that produces both -- is left to the traversal, which asks for a local only when
-    // a loan actually reaches one of its regions.
+    // Nothing about these locals is computed here: not their points, not their variances, not the
+    // `dropck_outlives` their drop-liveness needs, and so not the reverse DFS or the
+    // `MaybeInitializedPlaces` dataflow either. All of it is left to the traversal, which asks for
+    // a local only when a loan actually reaches one of its regions.
     //
-    // Note what is *not* here: no `LocalUseMap`, and so no walk of the body. `trace` is not called
-    // at all. On a body where the traversal reaches none of these regions, this loop is all that
-    // ever runs for them.
-    let mut drop_state = trace::DropLivenessState::new(lcx.body, move_data);
-    let dropped_and_initialized =
-        trace::add_drop_constraints(lcx, location_map, &mut drop_state, &polonius_only);
-
+    // On a body where the traversal reaches none of these regions, this loop is all that ever runs
+    // for them, and all it does is walk each local's type once.
     let (tcx, param_env, universal_regions, body) =
         (lcx.tcx(), lcx.infcx.param_env, lcx.universal_regions, lcx.body);
     let deferred = lcx.polonius_context.as_mut().unwrap().deferred_liveness_mut();
     for local in polonius_only {
-        let local_ty = body.local_decls[local].ty;
-        let drop_kinds = dropped_and_initialized
-            .contains(local)
-            .then(|| drop_state.drop_kinds_for(local_ty))
-            .flatten()
-            .filter(|kinds| !kinds.is_empty());
-        deferred.defer(tcx, param_env, universal_regions, local, local_ty, drop_kinds);
+        deferred.defer(tcx, param_env, universal_regions, local, body.local_decls[local].ty);
     }
 }
 
@@ -277,7 +266,7 @@ fn record_regular_live_regions<'tcx>(
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &mut LivenessValues,
     universal_regions: &UniversalRegions<'tcx>,
-    polonius_context: &mut Option<PoloniusContext<'tcx>>,
+    polonius_context: &mut Option<PoloniusContext>,
     body: &Body<'tcx>,
 ) {
     let mut visitor =
@@ -292,7 +281,7 @@ struct LiveVariablesVisitor<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &'a mut LivenessValues,
     universal_regions: &'a UniversalRegions<'tcx>,
-    polonius_context: &'a mut Option<PoloniusContext<'tcx>>,
+    polonius_context: &'a mut Option<PoloniusContext>,
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for LiveVariablesVisitor<'a, 'tcx> {

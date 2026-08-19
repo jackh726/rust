@@ -6,52 +6,51 @@
 //! on `serde_core` and `icu_datetime` is a minority of the regions that have liveness at all. The
 //! rest is computed and never read.
 //!
-//! So we do not compute it up front. `trace` records what would be needed --
-//! [`DeferredLiveness`] -- and the traversal materializes a local's points the first time it asks
-//! about one of its regions.
+//! So we do not compute it up front. [`generate_polonius`] records what would be needed --
+//! [`DeferredLiveness`], which is one walk of each local's type -- and the traversal materializes
+//! a local the first time it asks about one of its regions: the reverse DFS that finds its
+//! use-live and drop-live points, the `dropck_outlives` query its drop-liveness needs, and the
+//! variances of everything involved.
 //!
-//! Two things stay eager, both because they cannot be undone once the traversal has started:
+//! Nothing here pushes an outlives constraint, which is what lets all of it happen this late.
+//! `generate` pushes the drop constraints for the locals NLLs care about, and for the locals only
+//! polonius cares about there are none to push: NLLs do not trace a boring local, so they never
+//! had any either.
 //!
-//! - The **outlives constraints**, which is what the passes before this one were for: the drop
-//!   constraints are pushed by `add_drop_constraints` for every relevant local, so materializing a
-//!   local's liveness adds points and nothing else.
-//! - The **variances**, which `LoanReachability` borrows for its whole run. Recording is per local
-//!   type rather than per point, so it is cheap; the conditions it is recorded under have to stay
-//!   exactly what they were, because a region with no variance falls back to `Bidirectional`, and
-//!   recording one where the old code did not would *narrow* the directions a loan can flow in.
+//! [`generate_polonius`]: crate::type_check::liveness::generate_polonius
 
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_index::IndexVec;
 use rustc_index::bit_set::DenseBitSet;
 use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
 use rustc_middle::mir::{Body, Local};
-use rustc_middle::ty::{self, GenericArg, RegionVid, Ty, TyCtxt};
+use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 
+use crate::BorrowckInferCtxt;
 use crate::polonius::ConstraintDirection;
 use crate::polonius::liveness_constraints::record_variance;
-use crate::type_check::liveness::{InitializedPlaces, LivePoints, LocalUseMap, live_points_of};
+use crate::type_check::liveness::{
+    DropData, InitializedPlaces, LivePoints, LocalUseMap, compute_drop_data, live_points_of,
+};
 use crate::universal_regions::UniversalRegions;
 
-/// What `trace` leaves behind so that a local's liveness can be computed after type-checking is
-/// over: the locals themselves, the `dropck_outlives` results their drop-liveness needs, and an
-/// index from a region to the locals that can contribute points to it.
-pub(crate) struct DeferredLiveness<'tcx> {
+/// What `generate_polonius` leaves behind so that a local's liveness can be computed after
+/// type-checking is over: the locals themselves, and an index from a region to the locals that can
+/// contribute points to it.
+pub(crate) struct DeferredLiveness {
     /// The locals whose liveness was not computed.
     locals: Vec<Local>,
 
-    /// The `dropck_outlives` kinds per dropped local type, harvested from `add_drop_constraints`.
+    /// For each region, the deferred locals whose liveness can put points in it, built from the
+    /// locals' own types.
     ///
-    /// Carried rather than re-queried: the query runs through the type-op, which instantiates its
-    /// canonical result into the inference context, so asking again would hand back *fresh* region
-    /// variables rather than the ones the constraints were pushed for. It also reports errors on
-    /// failure, which would duplicate diagnostics.
-    drop_kinds: FxIndexMap<Ty<'tcx>, Vec<GenericArg<'tcx>>>,
-
-    /// For each region, the deferred locals whose liveness can put points in it. Built from the
-    /// locals' own types *and* from their `dropck_outlives` kinds, which can name regions the type
-    /// does not.
+    /// The types are enough, even though drop-liveness records points for the `dropck_outlives`
+    /// kinds rather than for the type: the query is canonical, so every region in its answer is
+    /// either one of `dropped_ty`'s own, or `'static`, or a fresh variable from instantiating the
+    /// response. A fresh variable appears in no outlives constraint -- nothing here pushes one --
+    /// so no loan can reach it, and nothing ever asks about it.
     ///
     /// A flat pair list rather than a map of vectors: it is built once, in one pass, and then only
     /// ever looked up. `LazyLiveness::new` sorts it, and `ensure` binary-searches. A map here costs
@@ -62,32 +61,28 @@ pub(crate) struct DeferredLiveness<'tcx> {
     done: DenseBitSet<Local>,
 }
 
-impl<'tcx> DeferredLiveness<'tcx> {
+impl DeferredLiveness {
     pub(crate) fn new(num_locals: usize) -> Self {
         DeferredLiveness {
             locals: Vec::new(),
-            drop_kinds: FxIndexMap::default(),
             by_region: Vec::new(),
             done: DenseBitSet::new_empty(num_locals),
         }
     }
 
     /// Records that `local`'s liveness is not being computed, and which regions it would have
-    /// contributed to. `drop_kinds` is its `dropck_outlives` result if it is dropped somewhere it
-    /// is initialized, and `None` if it is not: exactly the condition under which the eager code
-    /// would have consulted one.
+    /// contributed to.
     ///
     /// The index is built with `live_points_of`, the same region enumeration `materialize` writes
     /// through. That has to match exactly: a region this misses is a region whose liveness would
     /// never be materialized, because nothing would ever ask for it.
-    pub(crate) fn defer(
+    pub(crate) fn defer<'tcx>(
         &mut self,
         tcx: TyCtxt<'tcx>,
         param_env: ty::ParamEnv<'tcx>,
         universal_regions: &UniversalRegions<'tcx>,
         local: Local,
         local_ty: Ty<'tcx>,
-        drop_kinds: Option<&[GenericArg<'tcx>]>,
     ) {
         self.locals.push(local);
 
@@ -99,13 +94,6 @@ impl<'tcx> DeferredLiveness<'tcx> {
             }
         };
         live_points_of(tcx, param_env, universal_regions, local_ty, &mut index);
-
-        if let Some(kinds) = drop_kinds {
-            for kind in kinds {
-                live_points_of(tcx, param_env, universal_regions, *kind, &mut index);
-            }
-            self.drop_kinds.entry(local_ty).or_insert_with(|| kinds.to_vec());
-        }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -132,11 +120,21 @@ impl<'tcx> DeferredLiveness<'tcx> {
 /// The traversal's view of [`DeferredLiveness`]: everything needed to turn a region into the
 /// points its deferred locals are live at, plus the store those points land in.
 pub(crate) struct LazyLiveness<'a, 'tcx> {
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
+    /// Needed for the `dropck_outlives` query, which is run here rather than during
+    /// type-checking. It creates region variables of its own, in the response it instantiates;
+    /// those are unconstrained, so nothing downstream of region inference looks at them.
+    infcx: &'a BorrowckInferCtxt<'tcx>,
     universal_regions: &'a UniversalRegions<'tcx>,
     points: LivePoints<'a, 'a, 'tcx>,
-    deferred: &'a mut DeferredLiveness<'tcx>,
+    deferred: &'a mut DeferredLiveness,
+
+    /// Cache for the results of `dropck_outlives`, per dropped local type.
+    ///
+    /// The query itself is cached by the compiler, but the type-op around it is not: each call
+    /// canonicalizes the goal and instantiates the response, which is the expensive half and the
+    /// reason `generate_polonius` no longer runs it. Materialized locals share types often enough
+    /// that running it once each would give some of that back.
+    drop_data: FxIndexMap<Ty<'tcx>, DropData<'tcx>>,
 
     /// Where the materialized points go. Empty to begin with: `trace` writes nothing here, it only
     /// defers.
@@ -145,22 +143,21 @@ pub(crate) struct LazyLiveness<'a, 'tcx> {
 
 impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
     pub(crate) fn new(
-        tcx: TyCtxt<'tcx>,
-        param_env: ty::ParamEnv<'tcx>,
+        infcx: &'a BorrowckInferCtxt<'tcx>,
         universal_regions: &'a UniversalRegions<'tcx>,
         location_map: &'a DenseLocationMap,
         local_use_map: &'a LocalUseMap,
         inits: &'a mut InitializedPlaces<'a, 'tcx>,
-        deferred: &'a mut DeferredLiveness<'tcx>,
+        deferred: &'a mut DeferredLiveness,
         live: &'a mut SparseIntervalMatrix<RegionVid, PointIndex>,
     ) -> Self {
         deferred.sort_index();
         LazyLiveness {
-            tcx,
-            param_env,
+            infcx,
             universal_regions,
-            points: LivePoints::new(tcx, location_map, local_use_map, inits),
+            points: LivePoints::new(infcx.tcx, location_map, local_use_map, inits),
             deferred,
+            drop_data: FxIndexMap::default(),
             live,
         }
     }
@@ -204,8 +201,8 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
 
         self.points.compute(local);
 
-        let (tcx, param_env, universal_regions) =
-            (self.tcx, self.param_env, self.universal_regions);
+        let (infcx, universal_regions) = (self.infcx, self.universal_regions);
+        let (tcx, param_env) = (infcx.tcx, infcx.param_env);
         let local_ty = self.points.body().local_decls[local].ty;
 
         // The variances are recorded here, alongside the points, and so under exactly the
@@ -221,15 +218,29 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
             });
         }
 
-        if !self.points.drop_live_at.is_empty()
-            && let Some(kinds) = self.deferred.drop_kinds.get(&local_ty)
-        {
-            for kind in kinds {
-                record_variance(tcx, directions, universal_regions, *kind);
+        // The `dropck_outlives` query runs here, and only here: a local that is dropped but whose
+        // liveness no loan ever asks about never runs it at all.
+        //
+        // Its overflows are deliberately not reported here. Every local this runs for is boring to
+        // NLLs, so `dropck_boring_locals` has already run the query for it during `generate` and
+        // reported them, at the local's own span -- that pass exists for exactly this, to detect
+        // unbound recursion in drop glue whether or not liveness is computed. Reporting again here
+        // would duplicate it, and would make a diagnostic depend on which regions a loan happened
+        // to reach.
+        if !self.points.drop_live_at.is_empty() {
+            let span = self.points.body().local_decls[local].source_info.span;
+            let drop_data = self
+                .drop_data
+                .entry(local_ty)
+                .or_insert_with(|| compute_drop_data(infcx, local_ty, span));
+            let kinds = &drop_data.dropck_result.kinds;
+
+            for &kind in kinds {
+                record_variance(tcx, directions, universal_regions, kind);
             }
             let (live, drop_live_at) = (&mut *self.live, &self.points.drop_live_at);
-            for kind in kinds {
-                live_points_of(tcx, param_env, universal_regions, *kind, |region| {
+            for &kind in kinds {
+                live_points_of(tcx, param_env, universal_regions, kind, |region| {
                     live.union_row(region, drop_live_at);
                 });
             }
@@ -249,7 +260,7 @@ impl<'a, 'tcx> LazyLiveness<'a, 'tcx> {
 /// Builds the pieces `LazyLiveness` borrows. They have to be owned by the caller: `LivePoints`
 /// borrows both, so a type holding all three would be self-referential.
 pub(crate) fn lazy_liveness_inputs<'a, 'tcx>(
-    deferred: &DeferredLiveness<'tcx>,
+    deferred: &DeferredLiveness,
     body: &'a Body<'tcx>,
     move_data: &'a MoveData<'tcx>,
     location_map: &'a DenseLocationMap,

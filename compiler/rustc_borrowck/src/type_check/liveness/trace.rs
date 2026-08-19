@@ -8,9 +8,7 @@ use rustc_middle::mir::{
 };
 use rustc_middle::traits::query::DropckOutlivesResult;
 use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{
-    self, GenericArg, RegionVid, Ty, TyCtxt, TypeVisitable, TypeVisitableExt,
-};
+use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeVisitable, TypeVisitableExt};
 use rustc_mir_dataflow::impls::MaybeInitializedPlaces;
 use rustc_mir_dataflow::lattice::MaybeReachable;
 use rustc_mir_dataflow::move_paths::{MoveData, MovePathIndex};
@@ -24,12 +22,12 @@ use rustc_trait_selection::traits::query::dropck_outlives;
 use rustc_trait_selection::traits::query::type_op::{DropckOutlives, TypeOpOutput};
 use tracing::debug;
 
-use crate::polonius;
 use crate::region_infer::values;
-use crate::type_check::liveness::local_use_map::LocalUseMap;
 use crate::type_check::NormalizeLocation;
 use crate::type_check::liveness::LivenessCx;
+use crate::type_check::liveness::local_use_map::LocalUseMap;
 use crate::universal_regions::UniversalRegions;
+use crate::{BorrowckInferCtxt, polonius};
 
 /// This is the heart of the liveness computation. For each variable X
 /// that requires a liveness computation, it walks over all the uses
@@ -85,7 +83,7 @@ pub(super) fn add_drop_constraints<'tcx>(
     location_map: &DenseLocationMap,
     state: &mut DropLivenessState<'_, 'tcx>,
     relevant_live_locals: &[Local],
-) -> DenseBitSet<Local> {
+) {
     let _timer = lcx.tcx().prof.generic_activity("borrowck_liveness_drop_constraints");
 
     // This pass reads the body's `Drop` terminators, never a local's uses, so unlike `trace` it
@@ -119,11 +117,6 @@ impl<'a, 'tcx> DropLivenessState<'a, 'tcx> {
             drop_data: FxIndexMap::default(),
             inits: InitializedPlaces::new(body, move_data),
         }
-    }
-
-    /// The `dropck_outlives` kinds computed for `ty`, if the query has been run for it.
-    pub(crate) fn drop_kinds_for(&self, ty: Ty<'tcx>) -> Option<&[GenericArg<'tcx>]> {
-        self.drop_data.get(&ty).map(|data| &data.dropck_result.kinds[..])
     }
 
     /// Borrows the two halves independently: the point computation needs only the dataflow, and
@@ -181,9 +174,8 @@ struct LivenessContext<'a, 'b, 'typeck, 'tcx> {
 
 type MaybeInitDomain = MaybeReachable<MixedBitSet<MovePathIndex>>;
 
-
-struct DropData<'tcx> {
-    dropck_result: DropckOutlivesResult<'tcx>,
+pub(crate) struct DropData<'tcx> {
+    pub(crate) dropck_result: DropckOutlivesResult<'tcx>,
     region_constraint_data: Option<&'tcx QueryRegionConstraints<'tcx>>,
 }
 
@@ -537,13 +529,9 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
     /// Returns the locals it found an effective drop for -- i.e. the locals whose drop-live set
     /// will come back non-empty. Both the drop-liveness variances and the deferred-liveness index
     /// are conditioned on that, and neither can wait for the reverse DFS to confirm it.
-    fn add_drop_constraints_for_relevant_locals(
-        &mut self,
-        relevant_live_locals: &[Local],
-    ) -> DenseBitSet<Local> {
+    fn add_drop_constraints_for_relevant_locals(&mut self, relevant_live_locals: &[Local]) {
         let tcx = self.cx.lcx.tcx();
         let num_locals = self.cx.body().local_decls.len();
-        let mut dropped_and_initialized = DenseBitSet::new_empty(num_locals);
         let mut relevant = DenseBitSet::new_empty(num_locals);
         for &local in relevant_live_locals {
             relevant.insert(local);
@@ -566,6 +554,8 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
         drops.sort_unstable_keys();
 
         for (local, drop_locations) in drops {
+            let local_ty = self.cx.body().local_decls[local].ty;
+
             // A drop only has an effect where the local is (partly) initialized. This is the same
             // filter `compute_drop_live_points_for` applies when seeding its DFS, and it is why
             // this cannot be a purely syntactic scan.
@@ -576,7 +566,6 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
                 .collect();
             let Some(&last) = initialized.last() else { continue };
 
-            let local_ty = self.cx.body().local_decls[local].ty;
             self.cx.add_drop_constraints_for(local, local_ty, &initialized);
 
             // The span the per-local loop reported at: it used `drop_locations[0]`, and
@@ -586,12 +575,8 @@ impl<'tcx> DropConstraints<'_, '_, '_, '_, 'tcx> {
             // drop-live set came back non-empty, which is exactly when this filter leaves
             // something behind.
             self.cx.report_drop_overflows(local, local_ty, last);
-            dropped_and_initialized.insert(local);
         }
-
-        dropped_and_initialized
     }
-
 }
 
 struct LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
@@ -600,7 +585,6 @@ struct LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
 }
 
 impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
-
     /// Computes liveness for each of `relevant_live_locals`.
     ///
     /// Neither the drop-liveness *constraints* nor the dropck overflow reports are this loop's
@@ -633,7 +617,7 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
             let local_span = self.cx.body().local_decls[local].source_info.span;
             let drop_data = self.cx.drop_data.entry(local_ty).or_insert_with({
                 let lcx = &self.cx.lcx;
-                move || LivenessContext::compute_drop_data(lcx, local_ty, local_span)
+                move || compute_drop_data(lcx.infcx, local_ty, local_span)
             });
 
             drop_data.dropck_result.report_overflows(
@@ -685,7 +669,6 @@ impl<'a, 'b, 'c, 'typeck, 'tcx> LivenessResults<'a, 'b, 'c, 'typeck, 'tcx> {
             self.cx.add_drop_live_points_for(local, local_ty, &live_at);
         }
     }
-
 }
 
 impl<'a, 'tcx> InitializedPlaces<'a, 'tcx> {
@@ -823,7 +806,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
         let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
             let lcx = &self.lcx;
-            move || Self::compute_drop_data(lcx, dropped_ty, local_span)
+            move || compute_drop_data(lcx.infcx, dropped_ty, local_span)
         });
 
         if let Some(data) = &drop_data.region_constraint_data {
@@ -835,7 +818,6 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
                 );
             }
         }
-
     }
 
     /// Reports the `dropck_outlives` overflow for `dropped_ty`, if any, at the drop terminator
@@ -853,7 +835,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
         let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
             let lcx = &self.lcx;
-            move || Self::compute_drop_data(lcx, dropped_ty, local_span)
+            move || compute_drop_data(lcx.infcx, dropped_ty, local_span)
         });
 
         drop_data.dropck_result.report_overflows(
@@ -887,7 +869,7 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
         let local_span = self.body().local_decls()[dropped_local].source_info.span;
         let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
             let lcx = &self.lcx;
-            move || Self::compute_drop_data(lcx, dropped_ty, local_span)
+            move || compute_drop_data(lcx.infcx, dropped_ty, local_span)
         });
 
         // All things in the `outlives` array may be touched by
@@ -903,7 +885,54 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
             );
         }
     }
+}
 
+/// Runs the `dropck_outlives` query for `dropped_ty`: what must be live where a value of that
+/// type is dropped, and the region constraints the answer depends on.
+pub(crate) fn compute_drop_data<'tcx>(
+    infcx: &BorrowckInferCtxt<'tcx>,
+    dropped_ty: Ty<'tcx>,
+    span: Span,
+) -> DropData<'tcx> {
+    debug!("compute_drop_data(dropped_ty={:?})", dropped_ty);
+
+    let goal = DropckOutlives { dropped_ty };
+
+    match infcx.fully_perform(goal, DUMMY_SP) {
+        Ok(TypeOpOutput { output, constraints, .. }) => {
+            DropData { dropck_result: output, region_constraint_data: constraints }
+        }
+        Err(ErrorGuaranteed { .. }) => {
+            // We don't run dropck on HIR, and dropck looks inside fields of
+            // types, so there's no guarantee that it succeeds. We also
+            // can't rely on the `ErrorGuaranteed` from `fully_perform` here
+            // because it comes from delay_span_bug.
+            //
+            // Do this inside of a probe because we don't particularly care (or want)
+            // any region side-effects of this operation in our infcx.
+            infcx.probe(|_| {
+                let ocx = ObligationCtxt::new_with_diagnostics(infcx);
+                let errors = match dropck_outlives::compute_dropck_outlives_with_errors(
+                    &ocx,
+                    infcx.param_env.and(goal),
+                    span,
+                ) {
+                    Ok(_) => ocx.evaluate_obligations_error_on_ambiguity(),
+                    Err(e) => TraitErrors::HasErrors(e),
+                };
+
+                // Could have no errors if a type lowering error, say, caused the query
+                // to fail.
+                if let TraitErrors::HasErrors(errors) = errors {
+                    infcx.err_ctxt().report_fulfillment_errors(errors);
+                }
+            });
+            DropData { dropck_result: Default::default(), region_constraint_data: None }
+        }
+    }
+}
+
+impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
     fn make_all_regions_live(
         location_map: &DenseLocationMap,
         lcx: &mut LivenessCx<'_, 'tcx>,
@@ -933,49 +962,6 @@ impl<'b, 'tcx> LivenessContext<'_, 'b, '_, 'tcx> {
                 lcx.universal_regions,
                 value,
             );
-        }
-    }
-
-    fn compute_drop_data(
-        lcx: &LivenessCx<'_, 'tcx>,
-        dropped_ty: Ty<'tcx>,
-        span: Span,
-    ) -> DropData<'tcx> {
-        debug!("compute_drop_data(dropped_ty={:?})", dropped_ty);
-
-        let goal = DropckOutlives { dropped_ty };
-
-        match lcx.infcx.fully_perform(goal, DUMMY_SP) {
-            Ok(TypeOpOutput { output, constraints, .. }) => {
-                DropData { dropck_result: output, region_constraint_data: constraints }
-            }
-            Err(ErrorGuaranteed { .. }) => {
-                // We don't run dropck on HIR, and dropck looks inside fields of
-                // types, so there's no guarantee that it succeeds. We also
-                // can't rely on the `ErrorGuaranteed` from `fully_perform` here
-                // because it comes from delay_span_bug.
-                //
-                // Do this inside of a probe because we don't particularly care (or want)
-                // any region side-effects of this operation in our infcx.
-                lcx.infcx.probe(|_| {
-                    let ocx = ObligationCtxt::new_with_diagnostics(&lcx.infcx);
-                    let errors = match dropck_outlives::compute_dropck_outlives_with_errors(
-                        &ocx,
-                        lcx.infcx.param_env.and(goal),
-                        span,
-                    ) {
-                        Ok(_) => ocx.evaluate_obligations_error_on_ambiguity(),
-                        Err(e) => TraitErrors::HasErrors(e),
-                    };
-
-                    // Could have no errors if a type lowering error, say, caused the query
-                    // to fail.
-                    if let TraitErrors::HasErrors(errors) = errors {
-                        lcx.infcx.err_ctxt().report_fulfillment_errors(errors);
-                    }
-                });
-                DropData { dropck_result: Default::default(), region_constraint_data: None }
-            }
         }
     }
 }
