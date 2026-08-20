@@ -54,6 +54,8 @@ use rustc_mir_dataflow::points::PointIndex;
 use crate::BorrowSet;
 use crate::dataflow::BorrowIndex;
 use crate::polonius::{ConstraintDirection, LocalizedConstraintGraph};
+#[cfg(debug_assertions)]
+use crate::polonius::{LocalizedConstraintGraphVisitor, LocalizedNode};
 use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
@@ -188,6 +190,19 @@ impl LiveLoans {
     fn row_mut(&mut self, loan: BorrowIndex) -> &mut [Word] {
         let num_points = self.num_points;
         self.rows[loan].get_or_insert_with(|| empty_points(num_points))
+    }
+
+    /// Records that `loan` is live at `point`.
+    #[cfg(debug_assertions)]
+    fn insert(&mut self, loan: BorrowIndex, point: PointIndex) {
+        let (word, mask) = word_and_mask(point);
+        self.row_mut(loan)[word] |= mask;
+    }
+
+    /// The raw point set of a loan, for the debug crosscheck below.
+    #[cfg(debug_assertions)]
+    fn row(&self, loan: BorrowIndex) -> Option<&[Word]> {
+        self.rows[loan].as_deref()
     }
 
     /// Returns whether the `loan` is live at the given `point`.
@@ -382,6 +397,17 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             touched.clear();
             self.touched = touched;
         }
+
+        #[cfg(debug_assertions)]
+        debug_check_against_dfs(
+            self.body,
+            self.liveness,
+            self.graph,
+            self.live_region_variances,
+            self.universal_regions,
+            borrow_set,
+            &live_loans,
+        );
 
         live_loans
     }
@@ -632,6 +658,71 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                     ConstraintDirection::Backward | ConstraintDirection::Bidirectional
                 ),
             in_loan: false,
+        }
+    }
+}
+
+/// Recomputes loan liveness with the node-by-node DFS and checks that it agrees with the
+/// set-based traversal.
+///
+/// The two are meant to be the same least fixpoint of the same edge relation, and the DFS is still
+/// around for the polonius MIR dumps, so a debug-assertions build can afford to check that claim on
+/// every body it compiles rather than leaving the two implementations to drift. It is not cheap --
+/// it is the quadratic traversal this module exists to replace -- so it is `debug_assertions` only.
+#[cfg(debug_assertions)]
+fn debug_check_against_dfs<'tcx>(
+    body: &Body<'tcx>,
+    liveness: &LivenessValues,
+    graph: &LocalizedConstraintGraph,
+    live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+    universal_regions: &UniversalRegions<'tcx>,
+    borrow_set: &BorrowSet<'tcx>,
+    live_loans: &LiveLoans,
+) {
+    struct DfsVisitor<'a> {
+        liveness: &'a LivenessValues,
+        live_loans: LiveLoans,
+    }
+
+    impl LocalizedConstraintGraphVisitor for DfsVisitor<'_> {
+        fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
+            if self.liveness.is_live_at_point(node.region, node.point) {
+                self.live_loans.insert(loan, node.point);
+            }
+        }
+    }
+
+    let mut visitor = DfsVisitor {
+        liveness,
+        live_loans: LiveLoans::new(borrow_set.len(), liveness.num_points()),
+    };
+    graph.traverse(
+        body,
+        liveness,
+        live_region_variances,
+        universal_regions,
+        borrow_set,
+        &mut visitor,
+    );
+
+    for (loan, _) in borrow_set.iter_enumerated() {
+        // Compare a word at a time, and only decode a point if the two disagree.
+        let ours = live_loans.row(loan);
+        let dfs = visitor.live_loans.row(loan);
+        let words = num_words(liveness.num_points());
+        for word in 0..words {
+            let (a, b) = (ours.map_or(0, |row| row[word]), dfs.map_or(0, |row| row[word]));
+            if a == b {
+                continue;
+            }
+            let bit = (a ^ b).trailing_zeros() as usize;
+            let point = PointIndex::from_usize(word * WORD_BITS + bit);
+            panic!(
+                "set-based and DFS loan liveness disagree for {loan:?} at {:?}: {} vs {}",
+                liveness.location_from_point(point),
+                a & (1 << bit) != 0,
+                b & (1 << bit) != 0,
+            );
         }
     }
 }
