@@ -52,7 +52,8 @@ use crate::dataflow::BorrowIndex;
 use crate::region_infer::values::LivenessValues;
 use crate::{BorrowSet, RegionInferenceContext};
 
-pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
+/// The points at which each loan is live, when using `-Zpolonius=next`.
+pub(crate) type LiveLoans = SparseBitMatrix<BorrowIndex, PointIndex>;
 
 /// This struct holds the necessary
 ///  - liveness data, created during MIR typeck, and which will be used to lazily compute the
@@ -115,7 +116,7 @@ impl PoloniusContext {
             // step in the chain (the NLL loan scope and active loans computations).
             let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
 
-            let mut live_loans = LiveLoans::new(borrow_set.len());
+            let mut live_loans = LiveLoans::new(liveness.num_points());
             let mut visitor = LoanLivenessVisitor { liveness, live_loans: &mut live_loans };
             graph.traverse(
                 body,
@@ -183,7 +184,7 @@ impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
         // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
         // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
         if self.liveness.is_live_at_point(node.region, node.point) {
-            self.live_loans.insert(node.point, loan);
+            self.live_loans.insert(loan, node.point);
         }
     }
 }
