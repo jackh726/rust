@@ -37,6 +37,15 @@ pub(super) fn generate<'tcx>(
     debug!("liveness::generate");
     let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness");
 
+    // The universal regions outlive the whole body, so they are live at every point in it. This is
+    // the one piece of liveness that does not come from tracing a local, and recording it here
+    // keeps this pass the single place that fills the liveness values -- which is what the deferred
+    // half below relies on, its safety argument being about what is in that store by the time the
+    // loan traversal reads it.
+    for region in typeck.universal_regions.universal_regions_iter() {
+        typeck.constraints.liveness_constraints.add_all_points(region);
+    }
+
     let free_regions = regions_that_outlive_free_regions(
         typeck.infcx.num_region_vars(),
         &typeck.universal_regions,

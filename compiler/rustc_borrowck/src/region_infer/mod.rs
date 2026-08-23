@@ -347,7 +347,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             outlives_constraints,
             scc_annotations,
             type_tests,
-            mut liveness_constraints,
+            liveness_constraints,
             universe_causes,
             placeholder_indices,
         } = lowered_constraints;
@@ -376,10 +376,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             match definition.origin {
                 // For each free, universally quantified region X:
                 NllRegionVariableOrigin::FreeRegion => {
-                    // Add all nodes in the CFG to liveness constraints
-                    liveness_constraints.add_all_points(region);
-
-                    // Add `end(X)` into the set for X.
+                    // Add `end(X)` into the set for X. Their liveness -- every point in the body,
+                    // since they outlive it -- was recorded by `liveness::generate`.
                     scc_values.add_free_region(scc, region);
                 }
 
