@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io;
 
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap, FxIndexSet};
@@ -10,7 +11,9 @@ use rustc_session::config::MirIncludeSpans;
 
 use crate::borrow_set::BorrowSet;
 use crate::constraints::OutlivesConstraint;
-use crate::polonius::{LocalizedConstraintGraphVisitor, LocalizedNode, PoloniusContext};
+use crate::polonius::{
+    ConstraintDirection, LocalizedConstraintGraphVisitor, LocalizedNode, PoloniusContext,
+};
 use crate::region_infer::values::LivenessValues;
 use crate::type_check::Locations;
 use crate::{BorrowckInferCtxt, ClosureRegionRequirements, RegionInferenceContext};
@@ -35,17 +38,16 @@ pub(crate) fn dump_polonius_mir<'tcx>(
         polonius_context.expect("missing polonius context with `-Zpolonius=next`");
 
     // If we have a polonius graph to dump along the rest of the MIR and NLL info, we extract its
-    // constraints here.
-    let mut collector = LocalizedOutlivesConstraintCollector { constraints: Vec::new() };
-    if let Some(graph) = &polonius_context.graph {
-        graph.traverse(
-            body,
-            regioncx.liveness_constraints(),
-            &polonius_context.live_region_variances,
-            regioncx.universal_regions(),
-            borrow_set,
-            &mut collector,
-        );
+    // constraints here. Nothing is re-materialized: the traversal that ran during borrow checking
+    // already put the liveness of every region it reached into the liveness values.
+    let PoloniusContext { graph, live_region_variances, .. } = polonius_context;
+    let mut collector = LocalizedOutlivesConstraintCollector {
+        liveness: regioncx.liveness_constraints(),
+        live_region_variances,
+        constraints: Vec::new(),
+    };
+    if let Some(graph) = graph {
+        graph.traverse(body, regioncx.universal_regions(), borrow_set, &mut collector);
     }
 
     let extra_data = &|pass_where, out: &mut dyn io::Write| {
@@ -85,11 +87,21 @@ struct LocalizedOutlivesConstraint {
 }
 
 /// Visitor to record constraints encountered when traversing the localized constraint graph.
-struct LocalizedOutlivesConstraintCollector {
+struct LocalizedOutlivesConstraintCollector<'a> {
+    liveness: &'a LivenessValues,
+    live_region_variances: &'a BTreeMap<RegionVid, ConstraintDirection>,
     constraints: Vec<LocalizedOutlivesConstraint>,
 }
 
-impl LocalizedConstraintGraphVisitor for LocalizedOutlivesConstraintCollector {
+impl LocalizedConstraintGraphVisitor for LocalizedOutlivesConstraintCollector<'_> {
+    fn liveness(&self) -> &LivenessValues {
+        self.liveness
+    }
+
+    fn live_region_variances(&self) -> &BTreeMap<RegionVid, ConstraintDirection> {
+        self.live_region_variances
+    }
+
     fn on_successor_discovered(&mut self, current_node: LocalizedNode, successor: LocalizedNode) {
         self.constraints.push(LocalizedOutlivesConstraint {
             source: current_node.region,

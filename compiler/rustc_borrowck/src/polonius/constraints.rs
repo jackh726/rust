@@ -53,8 +53,25 @@ pub(super) struct LocalizedConstraintGraph {
 
 /// The visitor interface when traversing a `LocalizedConstraintGraph`.
 pub(super) trait LocalizedConstraintGraphVisitor {
+    fn liveness(&self) -> &LivenessValues;
+
+    fn live_region_variances(&self) -> &BTreeMap<RegionVid, ConstraintDirection>;
+
+    /// Callback called when the traversal reaches `region`, before it reads any liveness for it.
+    ///
+    /// A visitor that computes liveness on demand records `region`'s here; the default is for the
+    /// visitors that only read liveness someone else has already computed.
+    // FIXME: for (minor) perf, we could have a two-step thing here, essentially a `FnOnce` that
+    // returns the above two values + an impl of the below. That better models the state transition
+    // between "mutable liveness" and "immutable liveness with callbacks". Asking the visitor for
+    // the liveness at every read, as this does, measured ~0.2% more instructions on `combine` than
+    // the shape that held it directly.
+    fn ensure_liveness(&mut self, _region: RegionVid) {}
+
     /// Callback called when traversing a given `loan` encounters a localized `node` it hasn't
     /// visited before.
+    ///
+    /// [`Self::ensure_liveness`] has been called for the node's region by this point.
     fn on_node_traversed(&mut self, _loan: BorrowIndex, _node: LocalizedNode) {}
 
     /// Callback called when discovering a new `successor` node for the `current_node`.
@@ -95,17 +112,13 @@ impl LocalizedConstraintGraph {
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
     /// nodes and successors.
-    pub(super) fn traverse<'tcx>(
+    pub(super) fn traverse<'tcx, V: LocalizedConstraintGraphVisitor>(
         &self,
         body: &Body<'tcx>,
-        liveness: &LivenessValues,
-        live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
         universal_regions: &UniversalRegions<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
-        visitor: &mut impl LocalizedConstraintGraphVisitor,
+        visitor: &mut V,
     ) {
-        let live_regions = liveness.points();
-
         let mut visited = FxHashSet::default();
         let mut stack = Vec::new();
 
@@ -117,7 +130,7 @@ impl LocalizedConstraintGraph {
 
             let start_node = LocalizedNode {
                 region: loan.region,
-                point: liveness.point_from_location(loan.reserve_location),
+                point: visitor.liveness().point_from_location(loan.reserve_location),
             };
             stack.push(start_node);
 
@@ -126,14 +139,15 @@ impl LocalizedConstraintGraph {
                     continue;
                 }
 
-                // We've reached a node we haven't visited before.
-                let location = liveness.location_from_point(node.point);
+                // Everything below reads this region's liveness, so this is where a visitor that
+                // computes it lazily is asked for it.
+                visitor.ensure_liveness(node.region);
                 visitor.on_node_traversed(loan_idx, node);
 
                 // When we find a _new_ successor, we'd like to
                 // - visit it eventually,
                 // - and let the generic visitor know about it.
-                let mut successor_found = |succ| {
+                let mut successor_found = |visitor: &mut V, succ| {
                     if !visited.contains(&succ) {
                         stack.push(succ);
                         visitor.on_successor_discovered(node, succ);
@@ -154,11 +168,12 @@ impl LocalizedConstraintGraph {
                 // 1. the typeck edges that flow from region to region *at this point*.
                 for &succ in self.edges.get(&node).into_flat_iter() {
                     let succ = LocalizedNode { region: succ, point: node.point };
-                    successor_found(succ);
+                    successor_found(visitor, succ);
                 }
 
                 // 2a. the liveness edges that flow *forward*, from this node's point to its
                 // successors in the CFG.
+                let location = visitor.liveness().location_from_point(node.point);
                 if body[location.block].statements.get(location.statement_index).is_some() {
                     // Intra-block edges, straight line constraints from each point to its successor
                     // within the same block.
@@ -166,26 +181,26 @@ impl LocalizedConstraintGraph {
                     if let Some(succ) = compute_forward_successor(
                         node.region,
                         next_point,
-                        live_regions,
-                        live_region_variances,
+                        visitor.liveness().points(),
+                        visitor.live_region_variances(),
                         is_universal_region,
                     ) {
-                        successor_found(succ);
+                        successor_found(visitor, succ);
                     }
                 } else {
                     // Inter-block edges, from the block's terminator to each successor block's
                     // entry point.
                     for successor_block in body[location.block].terminator().successors() {
                         let next_location = Location { block: successor_block, statement_index: 0 };
-                        let next_point = liveness.point_from_location(next_location);
+                        let next_point = visitor.liveness().point_from_location(next_location);
                         if let Some(succ) = compute_forward_successor(
                             node.region,
                             next_point,
-                            live_regions,
-                            live_region_variances,
+                            visitor.liveness().points(),
+                            visitor.live_region_variances(),
                             is_universal_region,
                         ) {
-                            successor_found(succ);
+                            successor_found(visitor, succ);
                         }
                     }
                 }
@@ -200,10 +215,10 @@ impl LocalizedConstraintGraph {
                             node.region,
                             node.point,
                             previous_point,
-                            live_regions,
-                            live_region_variances,
+                            visitor.liveness().points(),
+                            visitor.live_region_variances(),
                         ) {
-                            successor_found(succ);
+                            successor_found(visitor, succ);
                         }
                     } else {
                         // Backward edges from the block entry point to the terminator of the
@@ -214,15 +229,16 @@ impl LocalizedConstraintGraph {
                                 block: pred_block,
                                 statement_index: body[pred_block].statements.len(),
                             };
-                            let previous_point = liveness.point_from_location(previous_location);
+                            let previous_point =
+                                visitor.liveness().point_from_location(previous_location);
                             if let Some(succ) = compute_backward_successor(
                                 node.region,
                                 node.point,
                                 previous_point,
-                                live_regions,
-                                live_region_variances,
+                                visitor.liveness().points(),
+                                visitor.live_region_variances(),
                             ) {
-                                successor_found(succ);
+                                successor_found(visitor, succ);
                             }
                         }
                     }
@@ -231,7 +247,7 @@ impl LocalizedConstraintGraph {
                 // And finally, we have the logical edges, materialized at this point.
                 for &logical_succ in self.logical_edges.get(&node.region).into_flat_iter() {
                     let succ = LocalizedNode { region: logical_succ, point: node.point };
-                    successor_found(succ);
+                    successor_found(visitor, succ);
                 }
             }
         }

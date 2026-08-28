@@ -130,35 +130,29 @@ impl PoloniusContext {
                 regioncx.outlives_constraints(),
             );
 
-            // The liveness NLLs skip, which the traversal below reads alongside NLLs' own. It
-            // goes into the liveness values: region inference has already copied those into
-            // `scc_values` and run to completion, so nothing added here can reach it. They and
-            // the universal regions are borrowed disjointly out of `regioncx`: the traversal
-            // reads the latter once the former have been written.
+            // The liveness values are written to as the traversal asks for a boring local, so
+            // they and the universal regions have to be borrowed disjointly out of `regioncx`.
             let (liveness, universal_regions) =
                 regioncx.liveness_constraints_and_universal_regions();
+
+            // The inputs to the liveness the visitor computes as the traversal asks for it. They
+            // have to be owned out here: `LivePoints` borrows them, so a visitor holding all of
+            // them would be self-referential.
             let local_use_map = self
                 .deferred_local_uses
                 .as_ref()
                 .expect("deferred local uses should have been computed by `trace`");
             let mut inits = InitializedPlaces::new(body, move_data);
-            let mut points = LivePoints::new(infcx.tcx, location_map, local_use_map, &mut inits);
-            self.deferred_locals_for_liveness.compute_all(
-                &mut points,
-                liveness,
-                &mut self.live_region_variances,
-            );
 
             let mut live_loans = LiveLoans::new(borrow_set.len());
-            let mut visitor = LoanLivenessVisitor { liveness, live_loans: &mut live_loans };
-            graph.traverse(
-                body,
+            let mut visitor = LoanLivenessVisitor {
                 liveness,
-                &self.live_region_variances,
-                universal_regions,
-                borrow_set,
-                &mut visitor,
-            );
+                live_region_variances: &mut self.live_region_variances,
+                live_loans: &mut live_loans,
+                deferred: &mut self.deferred_locals_for_liveness,
+                points: LivePoints::new(infcx.tcx, location_map, local_use_map, &mut inits),
+            };
+            graph.traverse(body, universal_regions, borrow_set, &mut visitor);
             regioncx.record_live_loans(live_loans);
 
             // The graph can be traversed again during MIR dumping, so we store it here.
@@ -167,14 +161,65 @@ impl PoloniusContext {
     }
 }
 
-/// Visitor to record loan liveness when traversing the localized constraint graph.
-struct LoanLivenessVisitor<'a> {
-    liveness: &'a LivenessValues,
+/// Visitor to record loan liveness when traversing the localized constraint graph, computing the
+/// liveness `liveness::generate` deferred as the traversal asks for it.
+struct LoanLivenessVisitor<'a, 'tcx> {
+    liveness: &'a mut LivenessValues,
+    live_region_variances: &'a mut BTreeMap<RegionVid, ConstraintDirection>,
     live_loans: &'a mut LiveLoans,
+
+    /// The locals whose liveness was deferred -- with the regions and variances `defer` saved for
+    /// each -- and the reverse DFS that computes one's points.
+    deferred: &'a mut DeferredLocals,
+    points: LivePoints<'a, 'a, 'tcx>,
 }
 
-impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
+impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_, '_> {
+    fn liveness(&self) -> &LivenessValues {
+        self.liveness
+    }
+    fn live_region_variances(&self) -> &BTreeMap<RegionVid, ConstraintDirection> {
+        self.live_region_variances
+    }
+
+    /// Computes the liveness of the deferred local `region` belongs to, if there is one, the first
+    /// time the traversal reaches it.
+    ///
+    /// This is the whole of the liveness `-Zpolonius=next` has and NLLs do not, and the loans being
+    /// traced here are judged against it: if a local's points go missing, a loan held in one of its
+    /// regions looks dead at the point it conflicts with, and the borrow error never appears.
+    ///
+    /// The two halves are covered very differently, measured by suppressing each and running
+    /// `tests/ui`. Without the use-live half about two hundred tests start passing that should not,
+    /// `nll/polonius/boring-local-liveness.rs` among them. Without the drop-live half exactly one
+    /// test notices: `nll/polonius/boring-local-drop-liveness.rs`, whose two bodies are both unsound
+    /// if accepted. That one test is all that stands between this half and a silent regression.
+    fn ensure_liveness(&mut self, region: RegionVid) {
+        let Some((local, liveness)) = self.deferred.claim(region) else { return };
+
+        // The only parts of the local's liveness left to compute: the reverse DFS for its use-live
+        // and drop-live points, and the recording of those points and their variances -- from the
+        // regions `defer` saved, so no type is walked and no query is asked here. Everything that
+        // needed a `TypeChecker` -- pushing the constraints its `dropck_outlives` answer holds
+        // under, reporting that answer's overflows, emitting its legacy facts -- was done eagerly
+        // by `dropck_boring_locals`, which is what makes running this late safe.
+        self.points.compute(local);
+
+        liveness.on_use.make_live(
+            self.liveness,
+            self.live_region_variances,
+            self.points.use_live_at(),
+        );
+        liveness.on_drop.make_live(
+            self.liveness,
+            self.live_region_variances,
+            self.points.drop_live_at(),
+        );
+    }
+
     fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
+        let is_live = self.liveness.points().contains(node.region, node.point);
+
         // Record the loan as being live on entry to this point if it reaches a live region
         // there.
         //
@@ -216,7 +261,7 @@ impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
         //
         // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
         // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
-        if self.liveness.is_live_at_point(node.region, node.point) {
+        if is_live {
             self.live_loans.insert(node.point, loan);
         }
     }
