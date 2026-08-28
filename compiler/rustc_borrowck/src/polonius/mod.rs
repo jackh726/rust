@@ -41,6 +41,7 @@ mod liveness_constraints;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use rustc_data_structures::frozen::Frozen;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::SparseBitMatrix;
 use rustc_middle::mir::{Body, Local};
@@ -49,9 +50,11 @@ use rustc_mir_dataflow::points::PointIndex;
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
+use crate::BorrowSet;
+use crate::constraints::OutlivesConstraintSet;
 use crate::dataflow::BorrowIndex;
 use crate::region_infer::values::LivenessValues;
-use crate::{BorrowSet, RegionInferenceContext};
+use crate::universal_regions::UniversalRegions;
 
 pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
 
@@ -102,12 +105,12 @@ impl PoloniusContext {
     /// The constraint data will be used to compute errors and diagnostics.
     pub(crate) fn compute_loan_liveness<'tcx>(
         &mut self,
-        regioncx: &mut RegionInferenceContext<'tcx>,
+        liveness: &mut LivenessValues,
+        outlives_constraints: &Frozen<OutlivesConstraintSet<'tcx>>,
+        universal_regions: &UniversalRegions<'tcx>,
         body: &Body<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
     ) {
-        let liveness = regioncx.liveness_constraints();
-
         // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
         // trace throughout localized constraints.
         if borrow_set.len() > 0 {
@@ -116,7 +119,7 @@ impl PoloniusContext {
             // step in the chain (the NLL loan scope and active loans computations).
             let graph = LocalizedConstraintGraph::new(
                 Rc::clone(liveness.location_map()),
-                regioncx.outlives_constraints(),
+                outlives_constraints.outlives().iter().copied(),
             );
 
             let mut live_loans = LiveLoans::new(borrow_set.len());
@@ -125,8 +128,8 @@ impl PoloniusContext {
                 live_region_variances: &self.live_region_variances,
                 live_loans: &mut live_loans,
             };
-            graph.traverse(body, regioncx.universal_regions(), borrow_set, &mut traversal);
-            regioncx.record_live_loans(live_loans);
+            graph.traverse(body, universal_regions, borrow_set, &mut traversal);
+            liveness.record_live_loans(live_loans);
 
             // The graph can be traversed again during MIR dumping, so we store it here.
             self.graph = Some(graph);
