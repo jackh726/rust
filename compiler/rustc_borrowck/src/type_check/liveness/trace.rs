@@ -1,12 +1,14 @@
+use std::collections::BTreeMap;
+
 use rustc_data_structures::fx::{FxIndexMap, FxIndexSet};
 use rustc_index::bit_set::DenseBitSet;
 use rustc_index::interval::IntervalSet;
 use rustc_infer::infer::canonical::QueryRegionConstraints;
 use rustc_infer::traits::TraitErrors;
-use rustc_middle::mir::{BasicBlock, Body, ConstraintCategory, HasLocalDecls, Local, Location};
+use rustc_middle::mir::{BasicBlock, Body, ConstraintCategory, Local, Location};
 use rustc_middle::traits::query::DropckOutlivesResult;
 use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{Ty, TyCtxt, TypeVisitable, TypeVisitableExt};
+use rustc_middle::ty::{RegionVid, Ty, TyCtxt, TypeVisitable, TypeVisitableExt};
 use rustc_mir_dataflow::impls::MaybeInitializedPlaces;
 use rustc_mir_dataflow::move_paths::{HasMoveData, MoveData, MovePathIndex};
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
@@ -19,9 +21,13 @@ use rustc_trait_selection::traits::query::dropck_outlives;
 use rustc_trait_selection::traits::query::type_op::{DropckOutlives, TypeOpOutput};
 use tracing::debug;
 
+use crate::polonius::liveness_constraints::record_variance;
+use crate::polonius::{ConstraintDirection, PoloniusContext};
 use crate::region_infer::values;
+use crate::region_infer::values::LivenessValues;
 use crate::type_check::liveness::local_use_map::LocalUseMap;
 use crate::type_check::{NormalizeLocation, TypeChecker};
+use crate::universal_regions::UniversalRegions;
 use crate::{BorrowckInferCtxt, polonius};
 
 /// This is the heart of the liveness computation. For each variable X
@@ -438,22 +444,82 @@ impl<'tcx> LivenessResults<'_, '_, '_, 'tcx> {
     /// Computes liveness for each of `relevant_live_locals`.
     fn compute_for_all_locals(&mut self, relevant_live_locals: Vec<Local>) {
         for local in relevant_live_locals {
-            let local_ty = self.cx.body().local_decls[local].ty;
-
+            let typeck = &mut *self.cx.typeck;
+            let local_ty = typeck.body.local_decls[local].ty;
             self.points.compute(local);
 
+            debug!(
+                "compute_for_all_locals(local={local:?}, ty={local_ty:?}, use_live_at={}, drop_live_at={})",
+                values::pretty_print_points(
+                    self.points.location_map,
+                    self.points.use_live_at.iter()
+                ),
+                values::pretty_print_points(
+                    self.points.location_map,
+                    self.points.drop_live_at.iter()
+                ),
+            );
+
             if !self.points.use_live_at.is_empty() {
-                self.cx.add_use_live_facts_for(local_ty, &self.points.use_live_at);
+                make_all_regions_live(
+                    typeck.infcx,
+                    typeck.universal_regions,
+                    &mut typeck.constraints.liveness_constraints,
+                    typeck
+                        .polonius_context
+                        .as_mut()
+                        .map(PoloniusContext::live_region_variances_mut),
+                    local_ty,
+                    &self.points.use_live_at,
+                );
             }
 
             if !self.points.drop_live_at.is_empty() {
-                self.cx.add_drop_live_facts_for(
-                    local,
-                    local_ty,
-                    &self.points.drop_locations,
-                    &self.points.drop_live_at,
-                );
+                self.dropck_relevant_local(local);
             }
+        }
+    }
+
+    fn dropck_relevant_local(&mut self, local: Local) {
+        let typeck = &mut *self.cx.typeck;
+        let local_ty = typeck.body.local_decls[local].ty;
+        let span = typeck.body.local_decls[local].source_info.span;
+        let drop_data = self
+            .cx
+            .drop_data
+            .entry(local_ty)
+            .or_insert_with(|| compute_drop_data(typeck.infcx, local_ty, span));
+
+        drop_data.dropck_result.report_overflows(
+            typeck.infcx.tcx,
+            typeck.body.source_info(*self.points.drop_locations.first().unwrap()).span,
+            local_ty,
+        );
+
+        if let Some(data) = drop_data.region_constraint_data {
+            let drop_locations = self.points.drop_locations.iter().copied();
+            push_drop_region_constraints(typeck, data, drop_locations);
+        }
+
+        for &kind in &drop_data.dropck_result.kinds {
+            polonius::legacy::emit_drop_facts(
+                typeck.tcx(),
+                local,
+                &kind,
+                typeck.universal_regions,
+                typeck.polonius_facts,
+            );
+
+            // Everything in the `outlives` array may be touched by the destructor, and so must be live
+            // wherever the local is drop-live.
+            make_all_regions_live(
+                typeck.infcx,
+                typeck.universal_regions,
+                &mut typeck.constraints.liveness_constraints,
+                typeck.polonius_context.as_mut().map(PoloniusContext::live_region_variances_mut),
+                kind,
+                &self.points.drop_live_at,
+            );
         }
     }
 
@@ -465,18 +531,16 @@ impl<'tcx> LivenessResults<'_, '_, '_, 'tcx> {
     /// and can therefore safely be dropped.
     fn dropck_boring_locals(&mut self, boring_locals: Vec<Local>) {
         for local in boring_locals {
-            let local_ty = self.cx.body().local_decls[local].ty;
-            let local_span = self.cx.body().local_decls[local].source_info.span;
-            let drop_data = self.cx.drop_data.entry(local_ty).or_insert_with({
-                let typeck = &self.cx.typeck;
-                move || compute_drop_data(typeck.infcx, local_ty, local_span)
-            });
+            let typeck = &mut *self.cx.typeck;
+            let local_ty = typeck.body().local_decls[local].ty;
+            let span = typeck.body().local_decls[local].source_info.span;
+            let drop_data = self
+                .cx
+                .drop_data
+                .entry(local_ty)
+                .or_insert_with(|| compute_drop_data(typeck.infcx, local_ty, span));
 
-            drop_data.dropck_result.report_overflows(
-                self.cx.typeck.infcx.tcx,
-                self.cx.typeck.body.local_decls[local].source_info.span,
-                local_ty,
-            );
+            drop_data.dropck_result.report_overflows(typeck.infcx.tcx, span, local_ty);
         }
     }
 
@@ -509,15 +573,76 @@ impl<'tcx> LivenessResults<'_, '_, '_, 'tcx> {
                     }
 
                     let location = self.cx.typeck.location_table.to_location(location_index);
-                    Some((local, local_ty, location))
+                    Some((local, location))
                 })
                 .collect()
         };
 
+        // These locals are not live anywhere -- the point of this pass is the facts, not the
+        // liveness -- so the only thing `make_all_regions_live` has left to do for them is record
+        // the variance of the dropck kinds.
         let live_at = IntervalSet::new(self.cx.location_map.num_points());
-        for (local, local_ty, location) in facts_to_add {
-            self.cx.add_drop_live_facts_for(local, local_ty, &[location], &live_at);
+        for (local, location) in facts_to_add {
+            // This is *nearly* the same as `dropck_relevant_local`, but has a different `live_at`
+            // and `drop_locations`. Deduplicating is possible but not worth it.
+
+            let typeck = &mut *self.cx.typeck;
+            let local_ty = typeck.body.local_decls[local].ty;
+            let span = typeck.body.local_decls[local].source_info.span;
+            let drop_data = self
+                .cx
+                .drop_data
+                .entry(local_ty)
+                .or_insert_with(|| compute_drop_data(typeck.infcx, local_ty, span));
+
+            if let Some(data) = drop_data.region_constraint_data {
+                let drop_locations = std::iter::once(location);
+                push_drop_region_constraints(typeck, data, drop_locations);
+            }
+            drop_data.dropck_result.report_overflows(
+                typeck.infcx.tcx,
+                typeck.body.source_info(location).span,
+                local_ty,
+            );
+
+            for &kind in &drop_data.dropck_result.kinds {
+                polonius::legacy::emit_drop_facts(
+                    typeck.tcx(),
+                    local,
+                    &kind,
+                    typeck.universal_regions,
+                    typeck.polonius_facts,
+                );
+
+                make_all_regions_live(
+                    typeck.infcx,
+                    typeck.universal_regions,
+                    &mut typeck.constraints.liveness_constraints,
+                    typeck
+                        .polonius_context
+                        .as_mut()
+                        .map(PoloniusContext::live_region_variances_mut),
+                    kind,
+                    &live_at,
+                );
+            }
         }
+    }
+}
+
+/// Pushes the region constraints a `dropck_outlives` answer holds under, at each location where the
+/// value is dropped.
+fn push_drop_region_constraints<'tcx>(
+    typeck: &mut TypeChecker<'_, 'tcx>,
+    data: &QueryRegionConstraints<'tcx>,
+    drop_locations: impl IntoIterator<Item = Location>,
+) {
+    for drop_location in drop_locations {
+        typeck.push_region_constraints(
+            drop_location.to_locations(),
+            ConstraintCategory::Boring,
+            data,
+        );
     }
 }
 
@@ -611,104 +736,31 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
     fn body(&self) -> &Body<'tcx> {
         self.typeck.body
     }
+}
 
-    /// Stores the result that all regions in `value` are live for the
-    /// points `live_at`.
-    fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
-        debug!("add_use_live_facts_for(value={:?})", value);
-        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at);
-    }
+/// Records that every free region of `value` is live at `live_at`: the points, and -- when using
+/// `-Zpolonius=next`, so when `variances` is `Some` -- the variance that decides which way that
+/// region's liveness edges point.
+///
+/// It takes the pieces rather than a `TypeChecker` so that recording liveness is not tied to
+/// type-checking; `record_variance` is reshaped the same way, for the same reason.
+fn make_all_regions_live<'tcx>(
+    infcx: &BorrowckInferCtxt<'tcx>,
+    universal_regions: &UniversalRegions<'tcx>,
+    liveness: &mut LivenessValues,
+    variances: Option<&mut BTreeMap<RegionVid, ConstraintDirection>>,
+    value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
+    live_at: &IntervalSet<PointIndex>,
+) {
+    debug!("make_all_regions_live(value={value:?})");
+    value.visit_with(&mut FreeRegionsVisitor {
+        tcx: infcx.tcx,
+        param_env: infcx.param_env,
+        op: |r| liveness.add_points(universal_regions.to_region_vid(r), live_at),
+    });
 
-    /// Some variable with type `live_ty` is "drop live" at `location`
-    /// -- i.e., it may be dropped later. This means that *some* of
-    /// the regions in its type must be live at `location`. The
-    /// precise set will depend on the dropck constraints, and in
-    /// particular this takes `#[may_dangle]` into account.
-    fn add_drop_live_facts_for(
-        &mut self,
-        dropped_local: Local,
-        dropped_ty: Ty<'tcx>,
-        drop_locations: &[Location],
-        live_at: &IntervalSet<PointIndex>,
-    ) {
-        debug!(
-            "add_drop_live_constraint(\
-             dropped_local={:?}, \
-             dropped_ty={:?}, \
-             drop_locations={:?}, \
-             live_at={:?})",
-            dropped_local,
-            dropped_ty,
-            drop_locations,
-            values::pretty_print_points(self.location_map, live_at.iter()),
-        );
-
-        let local_span = self.body().local_decls()[dropped_local].source_info.span;
-        let drop_data = self.drop_data.entry(dropped_ty).or_insert_with({
-            let typeck = &self.typeck;
-            move || compute_drop_data(typeck.infcx, dropped_ty, local_span)
-        });
-
-        if let Some(data) = &drop_data.region_constraint_data {
-            for &drop_location in drop_locations {
-                self.typeck.push_region_constraints(
-                    drop_location.to_locations(),
-                    ConstraintCategory::Boring,
-                    data,
-                );
-            }
-        }
-
-        drop_data.dropck_result.report_overflows(
-            self.typeck.infcx.tcx,
-            self.typeck.body.source_info(*drop_locations.first().unwrap()).span,
-            dropped_ty,
-        );
-
-        // All things in the `outlives` array may be touched by
-        // the destructor and must be live at this point.
-        for &kind in &drop_data.dropck_result.kinds {
-            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at);
-            polonius::legacy::emit_drop_facts(
-                self.typeck.tcx(),
-                dropped_local,
-                &kind,
-                self.typeck.universal_regions,
-                self.typeck.polonius_facts,
-            );
-        }
-    }
-
-    fn make_all_regions_live(
-        location_map: &DenseLocationMap,
-        typeck: &mut TypeChecker<'_, 'tcx>,
-        value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
-        live_at: &IntervalSet<PointIndex>,
-    ) {
-        debug!("make_all_regions_live(value={:?})", value);
-        debug!(
-            "make_all_regions_live: live_at={}",
-            values::pretty_print_points(location_map, live_at.iter()),
-        );
-
-        value.visit_with(&mut FreeRegionsVisitor {
-            tcx: typeck.tcx(),
-            param_env: typeck.infcx.param_env,
-            op: |r| {
-                let live_region_vid = typeck.universal_regions.to_region_vid(r);
-
-                typeck.constraints.liveness_constraints.add_points(live_region_vid, live_at);
-            },
-        });
-
-        // When using `-Zpolonius=next`, we record the variance of each live region.
-        if let Some(polonius_context) = typeck.polonius_context.as_mut() {
-            polonius_context.record_live_region_variance(
-                typeck.infcx.tcx,
-                typeck.universal_regions,
-                value,
-            );
-        }
+    if let Some(variances) = variances {
+        record_variance(infcx.tcx, variances, universal_regions, value);
     }
 }
 

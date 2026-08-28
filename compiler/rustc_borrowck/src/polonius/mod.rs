@@ -36,7 +36,7 @@
 mod constraints;
 mod dump;
 pub(crate) mod legacy;
-mod liveness_constraints;
+pub(crate) mod liveness_constraints;
 
 use std::collections::BTreeMap;
 
@@ -77,7 +77,7 @@ pub(crate) struct PoloniusContext {
 /// The direction a constraint can flow into. Used to create liveness constraints according to
 /// variance.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum ConstraintDirection {
+pub(crate) enum ConstraintDirection {
     /// For covariant cases, we add a forward edge `O at P1 -> O at P2`.
     Forward,
 
