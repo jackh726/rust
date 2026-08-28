@@ -49,9 +49,9 @@
 //! have liveness at all; the rest would be computed and never read.
 //!
 //! So none of that liveness is computed up front. [`generate`] records what would be needed --
-//! [`DeferredLocals`], the regions and variances each local's points will be recorded with -- and
-//! the traversal materializes a local the first time it asks about one of its regions: the reverse
-//! DFS that finds its use-live and drop-live points, replayed onto what was recorded.
+//! [`DeferredLocals`], the `dropck_outlives` kinds each local's drop-live points will be recorded
+//! for -- and the traversal materializes a local the first time it asks about one of its regions:
+//! the reverse DFS that finds its use-live and drop-live points, recorded as `trace` would.
 //!
 //! ## Why only this half is deferred
 //!
@@ -81,110 +81,44 @@
 //! its legacy facts -- happens eagerly, mirroring what the traced locals get:
 //! `dropck_relevant_local` does it for those, `dropck_boring_local` for these. That is what
 //! lets the deferred half run with no type checker in sight, rather than merely happening to need
-//! none. Nor is any type walked or query asked again late: [`DeferredLocals::defer`] keeps, per
-//! local, the region vids and variances its liveness will be recorded with -- derived from its
-//! type and from the `kinds` of the `dropck_outlives` answer `trace` already had. So what is left
-//! to do late is exactly the part worth deferring: the reverse DFS, and feeding the points it
-//! finds to those saved regions.
+//! none. Nor is the `dropck_outlives` query asked again late: [`DeferredLocals::defer`] keeps, per
+//! local, the `kinds` of the answer `trace` already had. So what is left to do late is exactly
+//! the part worth deferring: the reverse DFS, and one `make_all_regions_live` walk of the type
+//! and of each of those `kinds`, as `trace` does for the locals it records.
 //!
 //! [`generate`]: crate::type_check::liveness::generate
 
-use std::collections::BTreeMap;
-
-use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
-use rustc_index::interval::IntervalSet;
+use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::mir::Local;
-use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{GenericArg, RegionVid, Ty, TyCtxt, TypeVisitable};
-use rustc_mir_dataflow::points::PointIndex;
-use rustc_trait_selection::traits::outlives_for_liveness::FreeRegionsVisitor;
+use rustc_middle::ty::{GenericArg, RegionVid, Ty, TyCtxt};
 
-use super::ConstraintDirection;
-use crate::BorrowckInferCtxt;
-use crate::polonius::liveness_constraints::{merge_direction, record_variance};
-use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
 /// What [`generate`] leaves behind so that a local's liveness can be computed later: an index from
-/// a region to the deferred local that can contribute points to it, and, per local, what to record
-/// once its points are known.
+/// a region to the deferred local that can contribute points to it, and, per local, the
+/// `dropck_outlives` kinds its drop-live points are recorded for.
 ///
 /// [`generate`]: crate::type_check::liveness::generate
 #[derive(Default)]
-pub(crate) struct DeferredLocals {
+pub(crate) struct DeferredLocals<'tcx> {
     /// For each region, the deferred local whose liveness can put points in it, built from the
     /// local's own type. See [`DeferredLocals::defer`].
     ///
     /// One local per region: `renumber` replaces every region occurrence in the MIR with a fresh
     /// inference variable, so a region vid appears in exactly one local's type. `defer` asserts
     /// it. The reverse is not 1:1 -- a local's type can name several regions, and asking about any
-    /// of them computes the whole local -- which is why `claim` takes it out of `livenesses`.
+    /// of them computes the whole local -- which is why `claim` takes it out of `dropck_kinds`.
     by_region: FxHashMap<RegionVid, Local>,
 
-    /// For each deferred local, the regions its liveness will be recorded for, saved by [`defer`]
-    /// so the late half never walks a type or asks `dropck_outlives` again.
+    /// For each deferred local, the `kinds` of its `dropck_outlives` answer, saved by [`defer`] so
+    /// the late half never asks the query again; the constraints that answer holds under were
+    /// pushed by `dropck_boring_locals` at the same time.
     ///
     /// [`defer`]: DeferredLocals::defer
-    livenesses: FxHashMap<Local, DeferredLiveness>,
+    dropck_kinds: FxHashMap<Local, Vec<GenericArg<'tcx>>>,
 }
 
-/// The regions a deferred local's points will go to, split the way liveness is: the free regions
-/// of its type get its use-live points, the free regions of its `dropck_outlives` kinds get its
-/// drop-live points.
-#[derive(Default)]
-pub(crate) struct DeferredLiveness {
-    pub(crate) on_use: LiveRegions,
-    pub(crate) on_drop: LiveRegions,
-}
-
-/// One half of a [`DeferredLiveness`]: which regions to make live, and the variances to record
-/// when doing so -- the two things `make_all_regions_live` derives from a type, precomputed.
-#[derive(Default)]
-pub(crate) struct LiveRegions {
-    pub(crate) regions: FxIndexSet<RegionVid>,
-    pub(crate) variances: BTreeMap<RegionVid, ConstraintDirection>,
-}
-
-impl LiveRegions {
-    /// Collects what `make_all_regions_live` would derive from `value`: the region vids
-    /// `FreeRegionsVisitor` yields, and their variances.
-    fn collect<'tcx>(
-        &mut self,
-        infcx: &BorrowckInferCtxt<'tcx>,
-        universal_regions: &UniversalRegions<'tcx>,
-        value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
-    ) {
-        value.visit_with(&mut FreeRegionsVisitor {
-            tcx: infcx.tcx,
-            param_env: infcx.param_env,
-            op: |r| {
-                self.regions.insert(universal_regions.to_region_vid(r));
-            },
-        });
-        record_variance(infcx.tcx, &mut self.variances, universal_regions, value);
-    }
-
-    /// The deferred equivalent of `make_all_regions_live`: adds `live_at` to every collected
-    /// region, and records the collected variances.
-    pub(crate) fn make_live(
-        &self,
-        liveness: &mut LivenessValues,
-        directions: &mut BTreeMap<RegionVid, ConstraintDirection>,
-        live_at: &IntervalSet<PointIndex>,
-    ) {
-        if live_at.is_empty() {
-            return;
-        }
-        for &vid in &self.regions {
-            liveness.add_points(vid, live_at);
-        }
-        for (&vid, &direction) in &self.variances {
-            merge_direction(directions, vid, direction);
-        }
-    }
-}
-
-impl DeferredLocals {
+impl<'tcx> DeferredLocals<'tcx> {
     /// Records that `local`'s liveness is not being computed, and which regions can be asked about
     /// to get it.
     ///
@@ -210,26 +144,15 @@ impl DeferredLocals {
     /// before following any edge, so the local is already materialized and the fresh variable already
     /// has its points; or from a universal region, which is live at every point, so the loan was
     /// already as live as it can get and crossing gains it nothing.
-    pub(crate) fn defer<'tcx>(
+    pub(crate) fn defer(
         &mut self,
-        infcx: &BorrowckInferCtxt<'tcx>,
+        tcx: TyCtxt<'tcx>,
         universal_regions: &UniversalRegions<'tcx>,
         local: Local,
         local_ty: Ty<'tcx>,
         dropck_kinds: &[GenericArg<'tcx>],
     ) {
-        let tcx = infcx.tcx;
-
-        // Everything the late half will need is derived now, while the types are at hand: the
-        // regions and variances for its use-live points from the local's own type, and for its
-        // drop-live points from the `dropck_outlives` kinds `trace` already has. What is left to
-        // compute later is only the points themselves.
-        let mut liveness = DeferredLiveness::default();
-        liveness.on_use.collect(infcx, universal_regions, local_ty);
-        for &kind in dropck_kinds {
-            liveness.on_drop.collect(infcx, universal_regions, kind);
-        }
-        self.livenesses.insert(local, liveness);
+        self.dropck_kinds.insert(local, dropck_kinds.to_vec());
 
         let by_region = &mut self.by_region;
         tcx.for_each_free_region(&local_ty, |region| {
@@ -259,9 +182,9 @@ impl DeferredLocals {
     /// The memo is per local rather than per region on purpose: one local's reverse DFS answers for
     /// every region in its type at once, so the next of those regions to be asked about has nothing
     /// left to do.
-    pub(crate) fn claim(&mut self, region: RegionVid) -> Option<(Local, DeferredLiveness)> {
+    pub(crate) fn claim(&mut self, region: RegionVid) -> Option<(Local, Vec<GenericArg<'tcx>>)> {
         let local = *self.by_region.get(&region)?;
-        let liveness = self.livenesses.remove(&local)?;
-        Some((local, liveness))
+        let dropck_kinds = self.dropck_kinds.remove(&local)?;
+        Some((local, dropck_kinds))
     }
 }

@@ -53,7 +53,10 @@ pub(crate) use self::dump::dump_polonius_mir;
 pub(crate) use self::liveness::DeferredLocals;
 use crate::dataflow::BorrowIndex;
 use crate::region_infer::values::LivenessValues;
-use crate::type_check::liveness::{InitializedPlaces, LivePoints, LocalUseMap};
+use crate::type_check::liveness::{
+    InitializedPlaces, LivePoints, LocalUseMap, make_all_regions_live,
+};
+use crate::universal_regions::UniversalRegions;
 use crate::{BorrowSet, BorrowckInferCtxt, RegionInferenceContext};
 
 pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
@@ -63,7 +66,7 @@ pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
 ///    polonius localized constraints, during NLL region inference as well as MIR dumping,
 ///  - data needed by the borrowck error computation and diagnostics.
 #[derive(Default)]
-pub(crate) struct PoloniusContext {
+pub(crate) struct PoloniusContext<'tcx> {
     /// The graph from which we extract the localized outlives constraints.
     graph: Option<LocalizedConstraintGraph>,
 
@@ -77,7 +80,7 @@ pub(crate) struct PoloniusContext {
     /// diagnostics, to focus on the locals we consider relevant and match NLL diagnostics.
     pub(crate) boring_nll_locals: FxHashSet<Local>,
 
-    pub(crate) deferred_locals_for_liveness: DeferredLocals,
+    pub(crate) deferred_locals_for_liveness: DeferredLocals<'tcx>,
 
     /// Where those locals are used and dropped, as `liveness::generate` built it. Held apart from
     /// `deferred_locals_for_liveness` because computing one of those locals reads this while
@@ -99,7 +102,7 @@ pub(crate) enum ConstraintDirection {
     Bidirectional,
 }
 
-impl PoloniusContext {
+impl<'tcx> PoloniusContext<'tcx> {
     /// Computes live loans using the set of loans model for `-Zpolonius=next`.
     ///
     /// First, creates a constraint graph combining regions and CFG points, by:
@@ -110,7 +113,7 @@ impl PoloniusContext {
     /// loan scope and active loans computations.
     ///
     /// The constraint data will be used to compute errors and diagnostics.
-    pub(crate) fn compute_loan_liveness<'tcx>(
+    pub(crate) fn compute_loan_liveness(
         &mut self,
         infcx: &BorrowckInferCtxt<'tcx>,
         regioncx: &mut RegionInferenceContext<'tcx>,
@@ -149,6 +152,8 @@ impl PoloniusContext {
                 liveness,
                 live_region_variances: &mut self.live_region_variances,
                 live_loans: &mut live_loans,
+                infcx,
+                universal_regions,
                 deferred: &mut self.deferred_locals_for_liveness,
                 points: LivePoints::new(infcx.tcx, location_map, local_use_map, &mut inits),
             };
@@ -168,9 +173,14 @@ struct LoanLivenessVisitor<'a, 'tcx> {
     live_region_variances: &'a mut BTreeMap<RegionVid, ConstraintDirection>,
     live_loans: &'a mut LiveLoans,
 
-    /// The locals whose liveness was deferred -- with the regions and variances `defer` saved for
-    /// each -- and the reverse DFS that computes one's points.
-    deferred: &'a mut DeferredLocals,
+    /// What recording a materialized local's liveness needs beyond the liveness values: its type
+    /// and the `dropck_outlives` kinds `defer` saved are walked here, as `trace` walks them.
+    infcx: &'a BorrowckInferCtxt<'tcx>,
+    universal_regions: &'a UniversalRegions<'tcx>,
+
+    /// The locals whose liveness was deferred -- with the `dropck_outlives` kinds `defer` saved
+    /// for each -- and the reverse DFS that computes one's points.
+    deferred: &'a mut DeferredLocals<'tcx>,
     points: LivePoints<'a, 'a, 'tcx>,
 }
 
@@ -195,26 +205,40 @@ impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_, '_> {
     /// test notices: `nll/polonius/boring-local-drop-liveness.rs`, whose two bodies are both unsound
     /// if accepted. That one test is all that stands between this half and a silent regression.
     fn ensure_liveness(&mut self, region: RegionVid) {
-        let Some((local, liveness)) = self.deferred.claim(region) else { return };
+        let Some((local, dropck_kinds)) = self.deferred.claim(region) else { return };
 
-        // The only parts of the local's liveness left to compute: the reverse DFS for its use-live
-        // and drop-live points, and the recording of those points and their variances -- from the
-        // regions `defer` saved, so no type is walked and no query is asked here. Everything that
-        // needed a `TypeChecker` -- pushing the constraints its `dropck_outlives` answer holds
-        // under, reporting that answer's overflows, emitting its legacy facts -- was done eagerly
-        // by `dropck_boring_locals`, which is what makes running this late safe.
+        // The parts of the local's liveness left to compute: the reverse DFS for its use-live and
+        // drop-live points, and the recording of those points and their variances -- with the
+        // `make_all_regions_live` `trace` uses, on the local's type and on the `kinds` of the
+        // `dropck_outlives` answer `trace` already had, so the query is not asked again. Everything
+        // that needed a `TypeChecker` -- pushing the constraints that answer holds under,
+        // reporting its overflows, emitting its legacy facts -- was done eagerly by
+        // `dropck_boring_locals`, which is what makes running this late safe.
         self.points.compute(local);
 
-        liveness.on_use.make_live(
-            self.liveness,
-            self.live_region_variances,
-            self.points.use_live_at(),
-        );
-        liveness.on_drop.make_live(
-            self.liveness,
-            self.live_region_variances,
-            self.points.drop_live_at(),
-        );
+        let local_ty = self.points.body().local_decls[local].ty;
+        if !self.points.use_live_at().is_empty() {
+            make_all_regions_live(
+                self.infcx,
+                self.universal_regions,
+                self.liveness,
+                Some(&mut *self.live_region_variances),
+                local_ty,
+                self.points.use_live_at(),
+            );
+        }
+        if !self.points.drop_live_at().is_empty() {
+            for &kind in &dropck_kinds {
+                make_all_regions_live(
+                    self.infcx,
+                    self.universal_regions,
+                    self.liveness,
+                    Some(&mut *self.live_region_variances),
+                    kind,
+                    self.points.drop_live_at(),
+                );
+            }
+        }
     }
 
     fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {

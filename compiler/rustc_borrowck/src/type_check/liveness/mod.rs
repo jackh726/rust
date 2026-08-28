@@ -19,7 +19,7 @@ mod local_use_map;
 mod trace;
 
 pub(crate) use self::local_use_map::LocalUseMap;
-pub(crate) use self::trace::{InitializedPlaces, LivePoints};
+pub(crate) use self::trace::{InitializedPlaces, LivePoints, make_all_regions_live};
 
 /// Combines liveness analysis with initialization analysis to
 /// determine which variables are live at which points, both due to
@@ -176,7 +176,7 @@ fn record_regular_live_regions<'tcx>(
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &mut LivenessValues,
     universal_regions: &UniversalRegions<'tcx>,
-    polonius_context: &mut Option<PoloniusContext>,
+    polonius_context: &mut Option<PoloniusContext<'tcx>>,
     body: &Body<'tcx>,
 ) {
     let mut visitor =
@@ -191,7 +191,7 @@ struct LiveVariablesVisitor<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &'a mut LivenessValues,
     universal_regions: &'a UniversalRegions<'tcx>,
-    polonius_context: &'a mut Option<PoloniusContext>,
+    polonius_context: &'a mut Option<PoloniusContext<'tcx>>,
 }
 
 impl<'a, 'tcx> Visitor<'tcx> for LiveVariablesVisitor<'a, 'tcx> {

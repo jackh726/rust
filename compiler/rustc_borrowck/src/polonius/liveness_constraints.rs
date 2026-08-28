@@ -9,9 +9,9 @@ use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeVisitable};
 use super::{ConstraintDirection, PoloniusContext};
 use crate::universal_regions::UniversalRegions;
 
-impl PoloniusContext {
+impl<'tcx> PoloniusContext<'tcx> {
     /// Record the variance of each region contained within the given value.
-    pub(crate) fn record_live_region_variance<'tcx>(
+    pub(crate) fn record_live_region_variance(
         &mut self,
         tcx: TyCtxt<'tcx>,
         universal_regions: &UniversalRegions<'tcx>,
@@ -95,26 +95,18 @@ impl<'tcx> VarianceExtractor<'_, 'tcx> {
         };
 
         let region = self.universal_regions.to_region_vid(region);
-        merge_direction(self.directions, region, direction);
+        self.directions
+            .entry(region)
+            .and_modify(|entry| {
+                // If there's already a recorded direction for this region, we combine the two:
+                // - combining the same direction is idempotent
+                // - combining different directions is trivially bidirectional
+                if entry != &direction {
+                    *entry = ConstraintDirection::Bidirectional;
+                }
+            })
+            .or_insert(direction);
     }
-}
-
-/// Records `direction` for `region`, combining it with a direction already recorded:
-/// - combining the same direction is idempotent
-/// - combining different directions is trivially bidirectional
-pub(crate) fn merge_direction(
-    directions: &mut BTreeMap<RegionVid, ConstraintDirection>,
-    region: RegionVid,
-    direction: ConstraintDirection,
-) {
-    directions
-        .entry(region)
-        .and_modify(|entry| {
-            if entry != &direction {
-                *entry = ConstraintDirection::Bidirectional;
-            }
-        })
-        .or_insert(direction);
 }
 
 impl<'tcx> TypeRelation<TyCtxt<'tcx>> for VarianceExtractor<'_, 'tcx> {

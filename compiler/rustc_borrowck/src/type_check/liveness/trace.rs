@@ -51,7 +51,7 @@ pub(super) fn trace<'tcx>(
     relevant_live_locals: Vec<Local>,
     boring_locals: &[Local],
     deferred: &[Local],
-) -> (DeferredLocals, LocalUseMap) {
+) -> (DeferredLocals<'tcx>, LocalUseMap) {
     let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness_trace");
 
     let (tcx, body) = (typeck.tcx(), typeck.body);
@@ -179,7 +179,7 @@ impl<'a, 'b, 'tcx> LivePoints<'a, 'b, 'tcx> {
         }
     }
 
-    fn body(&self) -> &'b Body<'tcx> {
+    pub(crate) fn body(&self) -> &'b Body<'tcx> {
         self.inits.body
     }
 
@@ -552,7 +552,7 @@ impl<'tcx> LivenessResults<'_, '_, '_, 'tcx> {
         &mut self,
         boring_locals: &[Local],
         deferred: &FxIndexSet<Local>,
-        deferred_locals: &mut DeferredLocals,
+        deferred_locals: &mut DeferredLocals<'tcx>,
     ) {
         for &local in boring_locals {
             self.dropck_boring_local(local, deferred, deferred_locals);
@@ -563,7 +563,7 @@ impl<'tcx> LivenessResults<'_, '_, '_, 'tcx> {
         &mut self,
         local: Local,
         deferred: &FxIndexSet<Local>,
-        deferred_locals: &mut DeferredLocals,
+        deferred_locals: &mut DeferredLocals<'tcx>,
     ) {
         let typeck = &mut *self.cx.typeck;
         let local_ty = typeck.body().local_decls[local].ty;
@@ -612,7 +612,7 @@ impl<'tcx> LivenessResults<'_, '_, '_, 'tcx> {
         }
 
         deferred_locals.defer(
-            typeck.infcx,
+            typeck.infcx.tcx,
             typeck.universal_regions,
             local,
             local_ty,
@@ -832,9 +832,10 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
 /// `-Zpolonius=next`, so when `variances` is `Some` -- the variance that decides which way that
 /// region's liveness edges point.
 ///
-/// Only `trace` calls this now: the late half must not walk a type, so `LiveRegions::collect`
-/// saves what this would derive from one, and `make_live` replays it once the points exist.
-fn make_all_regions_live<'tcx>(
+/// This is the one thing both halves of the liveness computation do: `trace`, for the locals NLL
+/// region inference needs, and `polonius::liveness`, for the ones only the loan traversal does. It
+/// takes the pieces rather than a `TypeChecker` because the latter half runs after type-checking.
+pub(crate) fn make_all_regions_live<'tcx>(
     infcx: &BorrowckInferCtxt<'tcx>,
     universal_regions: &UniversalRegions<'tcx>,
     liveness: &mut LivenessValues,
