@@ -148,14 +148,21 @@ pub(crate) fn compute_regions<'tcx>(
         infcx,
         lowered_constraints,
         universal_region_relations,
-        location_map,
+        Rc::clone(&location_map),
     );
 
     // If requested for `-Zpolonius=next`, convert NLL constraints to localized outlives constraints
     // and use them to compute loan liveness.
     if let Some(polonius_context) = polonius_context.as_mut() {
         let _timer = infcx.tcx.prof.generic_activity("borrowck_polonius_loan_liveness");
-        polonius_context.compute_loan_liveness(&mut regioncx, body, borrow_set)
+        polonius_context.compute_loan_liveness(
+            infcx,
+            &mut regioncx,
+            body,
+            move_data,
+            &location_map,
+            borrow_set,
+        )
     }
 
     // If requested: dump NLL facts, and run legacy polonius analysis.

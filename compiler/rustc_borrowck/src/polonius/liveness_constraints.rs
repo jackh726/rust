@@ -95,18 +95,26 @@ impl<'tcx> VarianceExtractor<'_, 'tcx> {
         };
 
         let region = self.universal_regions.to_region_vid(region);
-        self.directions
-            .entry(region)
-            .and_modify(|entry| {
-                // If there's already a recorded direction for this region, we combine the two:
-                // - combining the same direction is idempotent
-                // - combining different directions is trivially bidirectional
-                if entry != &direction {
-                    *entry = ConstraintDirection::Bidirectional;
-                }
-            })
-            .or_insert(direction);
+        merge_direction(self.directions, region, direction);
     }
+}
+
+/// Records `direction` for `region`, combining it with a direction already recorded:
+/// - combining the same direction is idempotent
+/// - combining different directions is trivially bidirectional
+pub(crate) fn merge_direction(
+    directions: &mut BTreeMap<RegionVid, ConstraintDirection>,
+    region: RegionVid,
+    direction: ConstraintDirection,
+) {
+    directions
+        .entry(region)
+        .and_modify(|entry| {
+            if entry != &direction {
+                *entry = ConstraintDirection::Bidirectional;
+            }
+        })
+        .or_insert(direction);
 }
 
 impl<'tcx> TypeRelation<TyCtxt<'tcx>> for VarianceExtractor<'_, 'tcx> {

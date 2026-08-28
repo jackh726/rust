@@ -1878,6 +1878,15 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         &self.liveness_constraints
     }
 
+    /// The liveness values, to add to, and the universal regions, borrowed disjointly: the
+    /// polonius traversal writes the liveness of boring locals into the former as it asks for it,
+    /// while reading the latter.
+    pub(crate) fn liveness_constraints_and_universal_regions(
+        &mut self,
+    ) -> (&mut LivenessValues, &UniversalRegions<'tcx>) {
+        (&mut self.liveness_constraints, &self.universal_region_relations.universal_regions)
+    }
+
     /// When using `-Zpolonius=next`, records the given live loans for the loan scopes and active
     /// loans dataflow computations.
     pub(crate) fn record_live_loans(&mut self, live_loans: LiveLoans) {

@@ -36,6 +36,7 @@
 mod constraints;
 mod dump;
 pub(crate) mod legacy;
+mod liveness;
 pub(crate) mod liveness_constraints;
 
 use std::collections::BTreeMap;
@@ -44,13 +45,16 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_index::bit_set::SparseBitMatrix;
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::RegionVid;
-use rustc_mir_dataflow::points::PointIndex;
+use rustc_mir_dataflow::move_paths::MoveData;
+use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
+pub(crate) use self::liveness::DeferredLocals;
 use crate::dataflow::BorrowIndex;
 use crate::region_infer::values::LivenessValues;
-use crate::{BorrowSet, RegionInferenceContext};
+use crate::type_check::liveness::{InitializedPlaces, LivePoints, LocalUseMap};
+use crate::{BorrowSet, BorrowckInferCtxt, RegionInferenceContext};
 
 pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
 
@@ -72,6 +76,13 @@ pub(crate) struct PoloniusContext {
     /// currently has more boring locals than NLLs so we record the latter to use in errors and
     /// diagnostics, to focus on the locals we consider relevant and match NLL diagnostics.
     pub(crate) boring_nll_locals: FxHashSet<Local>,
+
+    pub(crate) deferred_locals_for_liveness: DeferredLocals,
+
+    /// Where those locals are used and dropped, as `liveness::generate` built it. Held apart from
+    /// `deferred_locals_for_liveness` because computing one of those locals reads this while
+    /// mutating that.
+    pub(crate) deferred_local_uses: Option<LocalUseMap>,
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
@@ -101,19 +112,42 @@ impl PoloniusContext {
     /// The constraint data will be used to compute errors and diagnostics.
     pub(crate) fn compute_loan_liveness<'tcx>(
         &mut self,
+        infcx: &BorrowckInferCtxt<'tcx>,
         regioncx: &mut RegionInferenceContext<'tcx>,
         body: &Body<'tcx>,
+        move_data: &MoveData<'tcx>,
+        location_map: &DenseLocationMap,
         borrow_set: &BorrowSet<'tcx>,
     ) {
-        let liveness = regioncx.liveness_constraints();
-
         // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
         // trace throughout localized constraints.
         if borrow_set.len() > 0 {
             // From the outlives constraints, liveness, and variances, we can compute reachability
             // on the lazy localized constraint graph to trace the liveness of loans, for the next
             // step in the chain (the NLL loan scope and active loans computations).
-            let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
+            let graph = LocalizedConstraintGraph::new(
+                regioncx.liveness_constraints(),
+                regioncx.outlives_constraints(),
+            );
+
+            // The liveness NLLs skip, which the traversal below reads alongside NLLs' own. It
+            // goes into the liveness values: region inference has already copied those into
+            // `scc_values` and run to completion, so nothing added here can reach it. They and
+            // the universal regions are borrowed disjointly out of `regioncx`: the traversal
+            // reads the latter once the former have been written.
+            let (liveness, universal_regions) =
+                regioncx.liveness_constraints_and_universal_regions();
+            let local_use_map = self
+                .deferred_local_uses
+                .as_ref()
+                .expect("deferred local uses should have been computed by `trace`");
+            let mut inits = InitializedPlaces::new(body, move_data);
+            let mut points = LivePoints::new(infcx.tcx, location_map, local_use_map, &mut inits);
+            self.deferred_locals_for_liveness.compute_all(
+                &mut points,
+                liveness,
+                &mut self.live_region_variances,
+            );
 
             let mut live_loans = LiveLoans::new(borrow_set.len());
             let mut visitor = LoanLivenessVisitor { liveness, live_loans: &mut live_loans };
@@ -121,7 +155,7 @@ impl PoloniusContext {
                 body,
                 liveness,
                 &self.live_region_variances,
-                regioncx.universal_regions(),
+                universal_regions,
                 borrow_set,
                 &mut visitor,
             );
