@@ -253,6 +253,27 @@ impl<T: Idx> DenseBitSet<T> {
         }
     }
 
+    /// Finds the first bit in `range` that is not set, if there is one.
+    #[inline]
+    pub fn first_unset_in(&self, range: impl RangeBounds<T>) -> Option<T> {
+        let (start, end) = inclusive_start_end(range, self.domain_size)?;
+        let (mut word_index, start_mask) = word_index_and_mask(T::new(start));
+        let (end_word_index, _) = word_index_and_mask(T::new(end));
+        // Mask out all bits below `start`.
+        let mut unset = !self.words[word_index] & !(start_mask - 1);
+        loop {
+            if unset != 0 {
+                let pos = WORD_BITS * word_index + unset.trailing_zeros() as usize;
+                return (pos <= end).then(|| T::new(pos));
+            }
+            word_index += 1;
+            if word_index > end_word_index {
+                return None;
+            }
+            unset = !self.words[word_index];
+        }
+    }
+
     pub fn last_set_in(&self, range: impl RangeBounds<T>) -> Option<T> {
         let (start, end) = inclusive_start_end(range, self.domain_size)?;
         let (start_word_index, _) = word_index_and_mask(start);
