@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
+use rustc_index::IndexVec;
 use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Location};
 use rustc_middle::ty::RegionVid;
@@ -48,7 +49,9 @@ pub(super) struct LocalizedConstraintGraph {
     /// The logical edges representing the outlives constraints that hold at all points in the CFG,
     /// which we don't localize to avoid creating a lot of unnecessary edges in the graph. Some CFGs
     /// can be big, and we don't need to create such a physical edge for every point in the CFG.
-    logical_edges: FxHashMap<RegionVid, FxIndexSet<RegionVid>>,
+    ///
+    /// Indexed rather than hashed: this is read once per node visited during traversal.
+    logical_edges: IndexVec<RegionVid, FxIndexSet<RegionVid>>,
 }
 
 pub(super) trait LocalizedConstraintGraphTraversal {
@@ -79,15 +82,14 @@ impl LocalizedConstraintGraph {
         location_map: &DenseLocationMap,
         outlives_constraints: impl Iterator<Item = OutlivesConstraint<'tcx>>,
     ) -> Self {
-        let mut edges: FxHashMap<_, FxIndexSet<_>> = FxHashMap::default();
-        let mut logical_edges: FxHashMap<_, FxIndexSet<_>> = FxHashMap::default();
+        let mut edges: FxHashMap<LocalizedNode, FxIndexSet<_>> = FxHashMap::default();
+        let mut logical_edges: IndexVec<RegionVid, FxIndexSet<RegionVid>> = IndexVec::new();
 
         for outlives_constraint in outlives_constraints {
             match outlives_constraint.locations {
                 Locations::All(_) => {
                     logical_edges
-                        .entry(outlives_constraint.sup)
-                        .or_default()
+                        .ensure_contains_elem(outlives_constraint.sup, FxIndexSet::default)
                         .insert(outlives_constraint.sub);
                 }
 
@@ -102,6 +104,12 @@ impl LocalizedConstraintGraph {
         }
 
         LocalizedConstraintGraph { edges, logical_edges }
+    }
+
+    /// The regions `region` flows into at all points, from the outlives constraints that are not
+    /// tied to a location.
+    pub(super) fn logical_successors(&self, region: RegionVid) -> impl Iterator<Item = RegionVid> {
+        self.logical_edges.get(region).into_iter().flatten().copied()
     }
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
@@ -241,7 +249,7 @@ impl LocalizedConstraintGraph {
                 }
 
                 // And finally, we have the logical edges, materialized at this point.
-                for &logical_succ in self.logical_edges.get(&node.region).into_flat_iter() {
+                for logical_succ in self.logical_successors(node.region) {
                     let succ = LocalizedNode { region: logical_succ, point: node.point };
                     successor_found(succ);
                 }
