@@ -78,9 +78,21 @@ impl LiveLoans {
         let bit_index = row.index() + self.num_points * col.index();
         self.flat_matrix.insert(bit_index);
     }
-    pub(crate) fn contains(&self, row: PointIndex, col: BorrowIndex) -> bool {
-        let bit_index = row.index() + self.num_points * col.index();
-        self.flat_matrix.contains(bit_index)
+    /// Returns the first point in `start..=end` at which the `loan` is not live, if any.
+    ///
+    /// The loan scopes computation asks this once per basic block a loan is live in, and a loan
+    /// live across a large part of a body would otherwise be asked about at every one of its
+    /// points.
+    pub(crate) fn first_dead_in(
+        &self,
+        loan: BorrowIndex,
+        start: PointIndex,
+        end: PointIndex,
+    ) -> Option<PointIndex> {
+        let base = loan.index() * self.num_points;
+        self.flat_matrix
+            .first_unset_in(base + start.index()..=base + end.index())
+            .map(|bit| PointIndex::from_usize(bit - base))
     }
 }
 
