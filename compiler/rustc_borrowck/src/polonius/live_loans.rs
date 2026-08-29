@@ -5,6 +5,9 @@ use rustc_mir_dataflow::points::PointIndex;
 
 use crate::dataflow::BorrowIndex;
 
+#[cfg(test)]
+mod tests;
+
 /// The points at which each loan is live.
 ///
 /// This is recorded per loan rather than per point: the traversal that computes it and the loan
@@ -28,8 +31,20 @@ impl LiveLoans {
         self.bits.insert(loan.index() * self.num_points + point.index());
     }
 
-    /// Returns whether the `loan` is live at the given `point`.
-    pub(crate) fn contains(&self, point: PointIndex, loan: BorrowIndex) -> bool {
-        self.bits.contains(loan.index() * self.num_points + point.index())
+    /// Returns the first point in `start..=end` at which the `loan` is not live, if any.
+    ///
+    /// The loan scopes computation asks this once per basic block a loan is live in, and a loan
+    /// live across a large part of a body would otherwise be asked about at every one of its
+    /// points.
+    pub(crate) fn first_dead_in(
+        &self,
+        loan: BorrowIndex,
+        start: PointIndex,
+        end: PointIndex,
+    ) -> Option<PointIndex> {
+        let base = loan.index() * self.num_points;
+        self.bits
+            .first_unset_in(base + start.index()..=base + end.index())
+            .map(|bit| PointIndex::from_usize(bit - base))
     }
 }

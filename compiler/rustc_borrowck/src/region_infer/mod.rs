@@ -27,7 +27,6 @@ use tracing::{Level, debug, enabled, instrument, trace};
 
 use crate::constraints::graph::NormalConstraintGraph;
 use crate::constraints::{ConstraintSccIndex, OutlivesConstraint, OutlivesConstraintSet};
-use crate::dataflow::BorrowIndex;
 use crate::diagnostics::{RegionErrorKind, RegionErrors, UniverseInfo};
 use crate::handle_placeholders::{LoweredConstraints, RegionTracker};
 use crate::polonius::legacy::PoloniusOutput;
@@ -1871,14 +1870,6 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
     pub(crate) fn liveness_constraints(&self) -> &LivenessValues {
         &self.liveness_constraints
-    }
-
-    /// Returns whether the `loan_idx` is live at the given `location`: whether its issuing
-    /// region is contained within the type of a variable that is live at this point.
-    /// Note: for now, the sets of live loans is only available when using `-Zpolonius=next`.
-    pub(crate) fn is_loan_live_at(&self, loan_idx: BorrowIndex, location: Location) -> bool {
-        let point = self.liveness_constraints.location_map().point_from_location(location);
-        self.liveness_constraints.is_loan_live_at(loan_idx, point)
     }
 }
 

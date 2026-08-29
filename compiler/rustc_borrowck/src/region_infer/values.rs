@@ -200,12 +200,18 @@ impl LivenessValues {
         self.live_loans = Some(live_loans);
     }
 
-    /// When using `-Zpolonius=next`, returns whether the `loan_idx` is live at the given `point`.
-    pub(crate) fn is_loan_live_at(&self, loan_idx: BorrowIndex, point: PointIndex) -> bool {
+    /// When using `-Zpolonius=next`, returns the first point in `start..=end` at which the
+    /// `loan_idx` is not live, if any.
+    pub(crate) fn first_dead_loan_point_in(
+        &self,
+        loan_idx: BorrowIndex,
+        start: PointIndex,
+        end: PointIndex,
+    ) -> Option<PointIndex> {
         self.live_loans
             .as_ref()
             .expect("Accessing live loans requires `-Zpolonius=next`")
-            .contains(point, loan_idx)
+            .first_dead_in(loan_idx, start, end)
     }
 }
 
