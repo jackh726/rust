@@ -346,25 +346,25 @@ impl<'tcx> PoloniusOutOfScopePrecomputer<'_, 'tcx> {
         start: usize,
         end: usize,
     ) -> Option<Location> {
-        for statement_index in start..=end {
-            let location = Location { block, statement_index };
+        let liveness = self.regioncx.liveness_constraints();
+        let location_map = liveness.location_map();
+        let end = location_map.point_from_location(Location { block, statement_index: end });
 
-            // Check whether the issuing region can reach local regions that are live at this point:
-            // - a loan is always live at its issuing location because it can reach the issuing
+        let mut start = start;
+        while start <= end.as_usize() {
+            // The loan goes out of scope at the first location where it's not contained within any
+            // region live at that point. The live loans are recorded per point, so this is a scan of
+            // the loan's points over the block, rather than a query per statement.
+            let start_point =
+                location_map.point_from_location(Location { block, statement_index: start });
+            let location = liveness
+                .first_dead_loan_point_in(loan_idx, start_point, end)
+                .map(|point| location_map.to_location(point))?;
+
+            // A loan is always live at its issuing location because it can reach the issuing
             // region, which is always live at this location.
             if location == loan_issued_at {
-                continue;
-            }
-
-            // - the loan goes out of scope at `location` if it's not contained within any regions
-            // live at this point.
-            //
-            // FIXME: if the issuing region `i` can reach a live region `r` at point `p`, and `r` is
-            // live at point `q`, then it's guaranteed that `i` would reach `r` at point `q`.
-            // Reachability is location-insensitive, and we could take advantage of that, by jumping
-            // to a further point than just the next statement: we can jump to the furthest point
-            // within the block where `r` is live.
-            if self.regioncx.is_loan_live_at(loan_idx, location) {
+                start = location.statement_index + 1;
                 continue;
             }
 
