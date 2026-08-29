@@ -141,13 +141,13 @@ impl<'tcx> PoloniusContext<'tcx> {
             let mut live_loans = LiveLoans::new(borrow_set.len(), location_map.num_points());
             let calc =
                 LivenessCalculation::new(tcx, body, &location_map, move_data, &local_use_map);
+            let deferred =
+                DeferredLiveness { universal_regions, deferred_locals_for_liveness, calc };
             let mut traversal = LoanLivenessTraversal {
                 liveness,
                 live_region_variances: &mut self.live_region_variances,
                 live_loans: &mut live_loans,
-                universal_regions,
-                deferred_locals_for_liveness,
-                calc,
+                deferred,
             };
             graph.traverse(body, universal_regions, borrow_set, &location_map, &mut traversal);
             liveness.record_live_loans(live_loans);
@@ -158,13 +158,64 @@ impl<'tcx> PoloniusContext<'tcx> {
     }
 }
 
+/// The liveness `liveness::generate` deferred, computed as the loan traversal asks for it: the
+/// traversal calls [`DeferredLiveness::materialize`] the first time a loan reaches a region, before
+/// it reads any liveness or variance for that region.
+pub(super) struct DeferredLiveness<'a, 'tcx> {
+    universal_regions: &'a UniversalRegions<'tcx>,
+    deferred_locals_for_liveness: DeferredLocals<'tcx>,
+    calc: LivenessCalculation<'a, 'tcx>,
+}
+
+impl<'tcx> DeferredLiveness<'_, 'tcx> {
+    /// Computes the liveness of the deferred local `region` belongs to, if there is one, the first
+    /// time the traversal reaches it.
+    pub(super) fn materialize(
+        &mut self,
+        region: RegionVid,
+        liveness: &mut LivenessValues,
+        live_region_variances: &mut BTreeMap<RegionVid, ConstraintDirection>,
+    ) {
+        let Some((local, drop_args)) = self.deferred_locals_for_liveness.use_deferred_local(region)
+        else {
+            return;
+        };
+
+        self.calc.compute(local);
+
+        if !self.calc.use_live_at.is_empty() || !self.calc.drop_live_at.is_empty() {
+            record_live_region_variance(
+                self.calc.tcx,
+                live_region_variances,
+                self.universal_regions,
+                self.calc.body.local_decls[local].ty,
+            );
+        }
+        if !self.calc.use_live_at.is_empty() {
+            let local_ty = self.calc.body.local_decls[local].ty;
+            self.calc.tcx.for_each_free_region(&local_ty, |live_region| {
+                let region = self.universal_regions.to_region_vid(live_region);
+                liveness.add_points(region, &self.calc.use_live_at);
+            });
+        }
+        if !self.calc.drop_live_at.is_empty() {
+            for drop_arg in drop_args {
+                self.calc.tcx.for_each_free_region(&drop_arg, |live_region| {
+                    let region = self.universal_regions.to_region_vid(live_region);
+                    liveness.add_points(region, &self.calc.drop_live_at);
+                });
+            }
+        }
+    }
+}
+
+/// Traverses the localized constraint graph to record loan liveness, computing the deferred
+/// liveness as the traversal asks for it.
 struct LoanLivenessTraversal<'a, 'tcx> {
     liveness: &'a mut LivenessValues,
     live_region_variances: &'a mut BTreeMap<RegionVid, ConstraintDirection>,
     live_loans: &'a mut LiveLoans,
-    universal_regions: &'a UniversalRegions<'tcx>,
-    deferred_locals_for_liveness: DeferredLocals<'tcx>,
-    calc: LivenessCalculation<'a, 'tcx>,
+    deferred: DeferredLiveness<'a, 'tcx>,
 }
 
 impl LocalizedConstraintGraphTraversal for LoanLivenessTraversal<'_, '_> {
@@ -177,36 +228,7 @@ impl LocalizedConstraintGraphTraversal for LoanLivenessTraversal<'_, '_> {
         &mut self,
         region: RegionVid,
     ) -> (&LivenessValues, &BTreeMap<RegionVid, ConstraintDirection>, Self::Visitor<'_>) {
-        if let Some((local, drop_args)) =
-            self.deferred_locals_for_liveness.use_deferred_local(region)
-        {
-            self.calc.compute(local);
-
-            if !self.calc.use_live_at.is_empty() || !self.calc.drop_live_at.is_empty() {
-                record_live_region_variance(
-                    self.calc.tcx,
-                    &mut self.live_region_variances,
-                    self.universal_regions,
-                    self.calc.body.local_decls[local].ty,
-                );
-            }
-            if !self.calc.use_live_at.is_empty() {
-                let local_ty = self.calc.body.local_decls[local].ty;
-                self.calc.tcx.for_each_free_region(&local_ty, |live_region| {
-                    let region = self.universal_regions.to_region_vid(live_region);
-                    self.liveness.add_points(region, &self.calc.use_live_at);
-                });
-            }
-            if !self.calc.drop_live_at.is_empty() {
-                for drop_arg in drop_args {
-                    self.calc.tcx.for_each_free_region(&drop_arg, |live_region| {
-                        let region = self.universal_regions.to_region_vid(live_region);
-                        self.liveness.add_points(region, &self.calc.drop_live_at);
-                    });
-                }
-            }
-        }
-
+        self.deferred.materialize(region, self.liveness, self.live_region_variances);
         (
             self.liveness,
             self.live_region_variances,
