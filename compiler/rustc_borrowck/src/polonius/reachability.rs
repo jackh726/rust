@@ -158,6 +158,9 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// its regions -- before any of that region's liveness or variance is read.
     deferred: DeferredLiveness<'a, 'tcx>,
 
+    /// The direction of each reached region's liveness edges, computed on the first touch.
+    directions: IndexVec<RegionVid, Option<ConstraintDirection>>,
+
     /// What the current batch has reached, per `(region, block)` pair.
     ///
     /// FIXME: this allocates two vectors per pair per batch; a single arena reused across batches
@@ -216,6 +219,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             live_region_variances,
             universal_regions,
             deferred,
+            directions: IndexVec::new(),
             region_blocks: IndexVec::new(),
             region_block_indices: FxHashMap::default(),
             rpo_index,
@@ -438,16 +442,15 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         // The first time any loan reaches `region`: computes the liveness that was deferred for it,
         // since everything below reads this region's liveness and variance, and the direction of its
-        // liveness edges. This is a no-op after the first (region, block) of the region.
-        //
-        // FIXME: both are recomputed every time a region's state is created; they could be cached
-        // per region.
-        self.deferred.materialize(region, self.liveness, self.live_region_variances);
-        let direction = if universal {
-            Forward
-        } else {
-            liveness_edge_direction(self.live_region_variances, region)
-        };
+        // liveness edges.
+        let direction = *self.directions.get_or_insert_with(region, || {
+            self.deferred.materialize(region, self.liveness, self.live_region_variances);
+            if universal {
+                Forward
+            } else {
+                liveness_edge_direction(self.live_region_variances, region)
+            }
+        });
 
         let len = self.body[block].statements.len() + 1;
         let region_block = self.region_blocks.push(RegionInBlock {
