@@ -47,4 +47,27 @@ impl LiveLoans {
             .first_unset_in(base + start.index()..=base + end.index())
             .map(|bit| PointIndex::from_usize(bit - base))
     }
+
+    pub(super) fn num_points(&self) -> usize {
+        self.num_points
+    }
+
+    /// Returns whether the `loan` is live at the given `point`.
+    #[cfg(debug_assertions)]
+    pub(super) fn contains(&self, point: PointIndex, loan: BorrowIndex) -> bool {
+        self.bits.contains(loan.index() * self.num_points + point.index())
+    }
+
+    /// Returns the first point at which `self` and `other` disagree on whether `loan` is live,
+    /// if any.
+    #[cfg(debug_assertions)]
+    pub(super) fn first_difference(
+        &self,
+        other: &LiveLoans,
+        loan: BorrowIndex,
+    ) -> Option<PointIndex> {
+        (0..self.num_points)
+            .map(PointIndex::from_usize)
+            .find(|&point| self.contains(point, loan) != other.contains(point, loan))
+    }
 }

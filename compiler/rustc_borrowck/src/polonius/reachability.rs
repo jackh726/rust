@@ -59,6 +59,10 @@ use crate::polonius::ConstraintDirection::{self, Backward, Bidirectional, Forwar
 use crate::polonius::constraints::liveness_edge_direction;
 use crate::polonius::live_loans::LiveLoans;
 use crate::polonius::{DeferredLiveness, LocalizedConstraintGraph};
+#[cfg(debug_assertions)]
+use crate::polonius::{
+    LocalizedConstraintGraphTraversal, LocalizedConstraintGraphVisitor, LocalizedNode,
+};
 use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
@@ -256,6 +260,17 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             self.forward_queue.clear();
             self.backward_queue.clear();
         }
+
+        #[cfg(debug_assertions)]
+        debug_check_against_dfs(
+            self.body,
+            self.liveness,
+            self.graph,
+            self.live_region_variances,
+            self.universal_regions,
+            borrow_set,
+            &live_loans,
+        );
 
         live_loans
     }
@@ -495,5 +510,81 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         state.loans[block_index].insert(new);
         state.pending[block_index].insert(new);
         true
+    }
+}
+
+/// Recomputes loan liveness with the node-by-node DFS and checks that it agrees with the batched
+/// traversal.
+///
+/// The two are meant to be the same least fixpoint of the same edge relation, and the DFS is still
+/// around for the polonius MIR dumps, so a debug-assertions build can afford to check that claim on
+/// every body it compiles rather than leaving the two implementations to drift. It is not cheap --
+/// it is the per-loan traversal this module exists to replace -- so it is `debug_assertions` only.
+#[cfg(debug_assertions)]
+fn debug_check_against_dfs<'tcx>(
+    body: &Body<'tcx>,
+    liveness: &LivenessValues,
+    graph: &LocalizedConstraintGraph,
+    live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+    universal_regions: &UniversalRegions<'tcx>,
+    borrow_set: &BorrowSet<'tcx>,
+    live_loans: &LiveLoans,
+) {
+    struct DfsTraversal<'a> {
+        liveness: &'a LivenessValues,
+        live_region_variances: &'a BTreeMap<RegionVid, ConstraintDirection>,
+        live_loans: LiveLoans,
+    }
+
+    struct DfsVisitor<'a> {
+        liveness: &'a LivenessValues,
+        live_loans: &'a mut LiveLoans,
+    }
+
+    impl LocalizedConstraintGraphTraversal for DfsTraversal<'_> {
+        type Visitor<'a>
+            = DfsVisitor<'a>
+        where
+            Self: 'a;
+
+        // The batched traversal has already materialized the liveness of every region a loan
+        // reaches, so there is nothing left to compute here.
+        fn mk_visitor(
+            &mut self,
+            _region: RegionVid,
+        ) -> (&LivenessValues, &BTreeMap<RegionVid, ConstraintDirection>, Self::Visitor<'_>)
+        {
+            (
+                self.liveness,
+                self.live_region_variances,
+                DfsVisitor { liveness: self.liveness, live_loans: &mut self.live_loans },
+            )
+        }
+    }
+
+    impl LocalizedConstraintGraphVisitor for DfsVisitor<'_> {
+        fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
+            if self.liveness.is_live_at_point(node.region, node.point) {
+                self.live_loans.insert(node.point, loan);
+            }
+        }
+    }
+
+    let mut traversal = DfsTraversal {
+        liveness,
+        live_region_variances,
+        live_loans: LiveLoans::new(borrow_set.len(), live_loans.num_points()),
+    };
+    graph.traverse(body, universal_regions, borrow_set, liveness.location_map(), &mut traversal);
+
+    for (loan, _) in borrow_set.iter_enumerated() {
+        if let Some(point) = live_loans.first_difference(&traversal.live_loans, loan) {
+            panic!(
+                "batched and DFS loan liveness disagree for {loan:?} at {:?}: {} vs {}",
+                liveness.location_map().to_location(point),
+                live_loans.contains(point, loan),
+                traversal.live_loans.contains(point, loan),
+            );
+        }
     }
 }

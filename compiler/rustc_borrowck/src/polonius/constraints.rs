@@ -115,6 +115,7 @@ impl LocalizedConstraintGraph {
         self.edges.get(&LocalizedNode { region, point }).into_iter().flatten().copied()
     }
 
+    #[cfg(debug_assertions)]
     /// The regions `region` flows into at all points, from the outlives constraints that are not
     /// tied to a location.
     pub(super) fn logical_successors(&self, region: RegionVid) -> impl Iterator<Item = RegionVid> {
