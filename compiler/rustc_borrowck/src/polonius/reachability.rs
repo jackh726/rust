@@ -160,6 +160,9 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     deferred_locals_for_liveness: DeferredLocals<'tcx>,
     calc: LivenessCalculation<'a, 'tcx>,
 
+    /// The direction of each reached region's liveness edges, computed on the first touch.
+    directions: IndexVec<RegionVid, Option<ConstraintDirection>>,
+
     /// What the current batch has reached, per `(region, block)` pair.
     ///
     /// FIXME: this allocates two vectors per pair per batch; a single arena reused across batches
@@ -220,6 +223,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             universal_regions,
             deferred_locals_for_liveness,
             calc,
+            directions: IndexVec::new(),
             region_blocks: IndexVec::new(),
             region_block_indices: FxHashMap::default(),
             rpo_index,
@@ -431,40 +435,45 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
     }
 
-    fn materialize_liveness(&mut self, region: RegionVid) {
-        if let Some((local, drop_args)) =
-            self.deferred_locals_for_liveness.use_deferred_local(region)
-        {
-            self.calc.compute(local);
+    fn materialize_liveness(
+        deferred_locals_for_liveness: &mut DeferredLocals<'tcx>,
+        liveness: &mut LivenessValues,
+        live_region_variances: &mut LiveRegionVariances,
+        universal_regions: &'a UniversalRegions<'tcx>,
+        calc: &mut LivenessCalculation<'a, 'tcx>,
+        region: RegionVid,
+    ) {
+        if let Some((local, drop_args)) = deferred_locals_for_liveness.use_deferred_local(region) {
+            calc.compute(local);
 
-            if !self.calc.use_live_at.is_empty() || !self.calc.drop_live_at.is_empty() {
+            if !calc.use_live_at.is_empty() || !calc.drop_live_at.is_empty() {
                 record_live_region_variance(
-                    self.calc.infcx.tcx,
-                    &mut self.live_region_variances,
-                    self.universal_regions,
-                    self.calc.body.local_decls[local].ty,
+                    calc.infcx.tcx,
+                    live_region_variances,
+                    universal_regions,
+                    calc.body.local_decls[local].ty,
                 );
             }
-            if !self.calc.use_live_at.is_empty() {
-                let local_ty = self.calc.body.local_decls[local].ty;
+            if !calc.use_live_at.is_empty() {
+                let local_ty = calc.body.local_decls[local].ty;
 
                 local_ty.visit_with(&mut FreeRegionsVisitor {
-                    tcx: self.calc.infcx.tcx,
-                    param_env: self.calc.infcx.param_env,
+                    tcx: calc.infcx.tcx,
+                    param_env: calc.infcx.param_env,
                     op: |live_region| {
-                        let region = self.universal_regions.to_region_vid(live_region);
-                        self.liveness.add_points(region, &self.calc.use_live_at);
+                        let region = universal_regions.to_region_vid(live_region);
+                        liveness.add_points(region, &calc.use_live_at);
                     },
                 });
             }
-            if !self.calc.drop_live_at.is_empty() {
+            if !calc.drop_live_at.is_empty() {
                 for drop_arg in drop_args {
                     drop_arg.visit_with(&mut FreeRegionsVisitor {
-                        tcx: self.calc.infcx.tcx,
-                        param_env: self.calc.infcx.param_env,
+                        tcx: calc.infcx.tcx,
+                        param_env: calc.infcx.param_env,
                         op: |live_region| {
-                            let region = self.universal_regions.to_region_vid(live_region);
-                            self.liveness.add_points(region, &self.calc.drop_live_at());
+                            let region = universal_regions.to_region_vid(live_region);
+                            liveness.add_points(region, &calc.drop_live_at());
                         },
                     });
                 }
@@ -483,20 +492,26 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         // The first time any loan reaches `region`: computes the liveness that was deferred for it,
         // since everything below reads this region's liveness and variance, and the direction of its
-        // liveness edges. This is a no-op after the first (region, block) of the region.
-        //
-        // FIXME: both are recomputed every time a region's state is created; they could be cached
-        // per region.
-        self.materialize_liveness(region);
-        let direction = if universal {
-            Forward
-        } else {
-            self.live_region_variances
-                .get(region)
-                .copied()
-                .flatten()
-                .unwrap_or(ConstraintDirection::Bidirectional)
-        };
+        // liveness edges.
+        let direction = *self.directions.get_or_insert_with(region, || {
+            Self::materialize_liveness(
+                &mut self.deferred_locals_for_liveness,
+                self.liveness,
+                self.live_region_variances,
+                self.universal_regions,
+                &mut self.calc,
+                region,
+            );
+            if universal {
+                Forward
+            } else {
+                self.live_region_variances
+                    .get(region)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(ConstraintDirection::Bidirectional)
+            }
+        });
 
         let len = self.body[block].statements.len() + 1;
         let region_block = self.region_blocks.push(RegionInBlock {
