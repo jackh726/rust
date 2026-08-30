@@ -46,7 +46,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 
 use rustc_data_structures::fx::FxHashMap;
-use rustc_index::bit_set::{DenseBitSet, GrowableBitSet};
+use rustc_index::bit_set::GrowableBitSet;
 use rustc_index::{IndexSlice, IndexVec};
 use rustc_middle::mir::{BasicBlock, Body};
 use rustc_middle::ty::RegionVid;
@@ -186,6 +186,11 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// FIXME: a bucket queue over the reverse postorder index would make this O(1) per operation.
     forward_queue: Queue,
     backward_queue: Queue,
+
+    /// Buffers reused across `process` calls, one entry per point of the block being processed.
+    pending_buf: IndexVec<BlockIndex, LoanSet>,
+    closure_buf: IndexVec<BlockIndex, LoanSet>,
+    live_buf: GrowableBitSet<BlockIndex>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -225,6 +230,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             rpo_index,
             forward_queue: Queue::new(),
             backward_queue: Queue::new(),
+            pending_buf: IndexVec::new(),
+            closure_buf: IndexVec::new(),
+            live_buf: GrowableBitSet::new_empty(),
         }
     }
 
@@ -296,14 +304,19 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let entry = self.location_map.entry_point(block);
         let len = state.loans.len();
 
-        if state.pending.iter().all(|loans| loans.is_empty()) {
+        // Take the pending loans, leaving the pair with none.
+        let mut pending = std::mem::take(&mut self.pending_buf);
+        pending.raw.clear();
+        pending.resize(len, LoanSet::EMPTY);
+        std::mem::swap(&mut state.pending, &mut pending);
+        if pending.iter().all(|loans| loans.is_empty()) {
+            self.pending_buf = pending;
             return;
         }
-        // Take the pending loans, leaving the pair with none.
-        let pending =
-            std::mem::replace(&mut state.pending, IndexVec::from_elem_n(LoanSet::EMPTY, len));
 
-        let mut live: DenseBitSet<BlockIndex> = DenseBitSet::new_empty(len);
+        let mut live = std::mem::take(&mut self.live_buf);
+        live.clear();
+        live.ensure(len);
         let terminator = PointIndex::from_usize(entry.as_usize() + len - 1);
         if universal {
             live.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(len));
@@ -324,7 +337,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
-        let mut closure = pending.clone();
+        let mut closure = std::mem::take(&mut self.closure_buf);
+        closure.raw.clear();
+        closure.raw.extend_from_slice(&pending.raw);
         if matches!(direction, Forward | Bidirectional) {
             let mut previous = LoanSet::EMPTY;
             for (i, loans) in closure.iter_enumerated_mut() {
@@ -357,6 +372,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         self.propagate_liveness_edges(region_block, &closure, &live);
         self.propagate_subset_edges(region_block, entry, terminator, &closure);
+
+        self.pending_buf = pending;
+        self.live_buf = live;
+        self.closure_buf = closure;
     }
 
     /// The liveness edges leaving the block: to the entry point of the successor blocks, and to
@@ -365,7 +384,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         &mut self,
         region_block: RegionInBlockIndex,
         closure: &IndexSlice<BlockIndex, LoanSet>,
-        live: &DenseBitSet<BlockIndex>,
+        live: &GrowableBitSet<BlockIndex>,
     ) {
         let state = &self.region_blocks[region_block];
         let (region, block) = (state.region, state.block);
