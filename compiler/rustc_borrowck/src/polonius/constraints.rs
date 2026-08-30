@@ -46,6 +46,11 @@ pub(super) struct LocalizedConstraintGraph {
     /// when traversing from the node to the successor region.
     edges: FxHashMap<LocalizedNode, FxIndexSet<RegionVid>>,
 
+    /// The points at which a region has physical edges, sorted. Physical edges are sparse -- most
+    /// regions have none -- and the loan traversal walks these points rather than probing the
+    /// whole set of points it has reached for the region.
+    physical_points: IndexVec<RegionVid, Vec<PointIndex>>,
+
     /// The logical edges representing the outlives constraints that hold at all points in the CFG,
     /// which we don't localize to avoid creating a lot of unnecessary edges in the graph. Some CFGs
     /// can be big, and we don't need to create such a physical edge for every point in the CFG.
@@ -84,6 +89,7 @@ impl LocalizedConstraintGraph {
     ) -> Self {
         let mut edges: FxHashMap<LocalizedNode, FxIndexSet<_>> = FxHashMap::default();
         let mut logical_edges: IndexVec<RegionVid, FxIndexSet<RegionVid>> = IndexVec::new();
+        let mut physical_points: IndexVec<RegionVid, Vec<PointIndex>> = IndexVec::new();
 
         for outlives_constraint in outlives_constraints {
             match outlives_constraint.locations {
@@ -98,12 +104,29 @@ impl LocalizedConstraintGraph {
                         region: outlives_constraint.sup,
                         point: location_map.point_from_location(location),
                     };
-                    edges.entry(node).or_default().insert(outlives_constraint.sub);
+                    if edges.entry(node).or_default().insert(outlives_constraint.sub) {
+                        physical_points
+                            .ensure_contains_elem(outlives_constraint.sup, Vec::new)
+                            .push(node.point);
+                    }
                 }
             }
         }
 
-        LocalizedConstraintGraph { edges, logical_edges }
+        // A region can have several edges at the same point, to different regions: deduplicate the
+        // points, as the loan traversal only needs to visit each of them once.
+        for points in physical_points.iter_mut() {
+            points.sort_unstable();
+            points.dedup();
+        }
+
+        LocalizedConstraintGraph { edges, physical_points, logical_edges }
+    }
+
+    /// The points at which `region` has physical edges, in order, so that a caller interested in
+    /// one basic block can binary-search for the block's range.
+    pub(super) fn physical_points(&self, region: RegionVid) -> &[PointIndex] {
+        self.physical_points.get(region).map_or(&[], |points| points)
     }
 
     /// The regions `region` flows into at `point`.

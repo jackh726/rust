@@ -356,7 +356,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
 
         self.propagate_liveness_edges(region_block, &closure, &live);
-        self.propagate_subset_edges(region_block, entry, &closure);
+        self.propagate_subset_edges(region_block, entry, terminator, &closure);
     }
 
     /// The liveness edges leaving the block: to the entry point of the successor blocks, and to
@@ -407,6 +407,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         &mut self,
         region_block: RegionInBlockIndex,
         entry: PointIndex,
+        terminator: PointIndex,
         closure: &IndexSlice<BlockIndex, LoanSet>,
     ) {
         let (region, block) = {
@@ -418,12 +419,15 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             let region_block = self.region_block(successor, block);
             self.add_at_points(region_block, closure);
         }
-        // FIXME: this probes the edge map at every point reached, and most regions have no
-        // physical edges at all. Indexing the physical edges by region would let a pair look at
-        // its block's range of them only.
-        for (i, &loans) in closure.iter_enumerated() {
+        // The points with physical edges are sorted, so we can jump to this block's range.
+        let physical_points = graph.physical_points(region);
+        let start = physical_points.partition_point(|&point| point < entry);
+        for &point in &physical_points[start..] {
+            if point > terminator {
+                break;
+            }
+            let loans = closure[BlockIndex::from_usize(point.as_usize() - entry.as_usize())];
             if !loans.is_empty() {
-                let point = entry + i.index();
                 for successor in graph.physical_successors(region, point) {
                     self.add_at_point(successor, block, point, loans);
                 }
