@@ -196,11 +196,6 @@ impl LivenessValues {
     }
 
     #[inline]
-    pub(crate) fn point_from_location(&self, location: Location) -> PointIndex {
-        self.location_map.point_from_location(location)
-    }
-
-    #[inline]
     pub(crate) fn location_from_point(&self, point: PointIndex) -> Location {
         self.location_map.to_location(point)
     }

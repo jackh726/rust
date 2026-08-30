@@ -38,6 +38,7 @@ mod dump;
 pub(crate) mod legacy;
 mod liveness;
 mod liveness_constraints;
+mod reachability;
 
 use std::rc::Rc;
 
@@ -55,7 +56,7 @@ pub(crate) use self::liveness_constraints::record_live_region_variance;
 use crate::constraints::OutlivesConstraint;
 use crate::dataflow::BorrowIndex;
 pub(crate) use crate::polonius::liveness::DeferredLocals;
-use crate::polonius::liveness::{LivenessSource, RegionLiveness};
+use crate::polonius::reachability::LoanReachability;
 use crate::region_infer::values::LivenessValues;
 use crate::type_check::liveness::{LivenessComputation, LocalUseMap};
 use crate::universal_regions::UniversalRegions;
@@ -95,6 +96,30 @@ impl LiveLoans {
         self.flat_matrix
             .first_unset_in(base + start.index()..=base + end.index())
             .map(|bit| PointIndex::from_usize(bit - base))
+    }
+
+    #[cfg(debug_assertions)]
+    fn num_points(&self) -> usize {
+        self.num_points
+    }
+
+    /// Returns whether the `loan` is live at the given `point`.
+    #[cfg(debug_assertions)]
+    pub(super) fn contains(&self, point: PointIndex, loan: BorrowIndex) -> bool {
+        self.flat_matrix.contains(loan.index() * self.num_points + point.index())
+    }
+
+    /// Returns the first point at which `self` and `other` disagree on whether `loan` is live,
+    /// if any.
+    #[cfg(debug_assertions)]
+    pub(super) fn first_difference(
+        &self,
+        other: &LiveLoans,
+        loan: BorrowIndex,
+    ) -> Option<PointIndex> {
+        (0..self.num_points)
+            .map(PointIndex::from_usize)
+            .find(|&point| self.contains(point, loan) != other.contains(point, loan))
     }
 }
 
@@ -173,107 +198,63 @@ impl<'tcx> PoloniusContext<'tcx> {
                 .expect("local use map should be computed before loan liveness");
             let deferred_locals_for_liveness =
                 std::mem::take(&mut self.deferred_locals_for_liveness);
-            let mut live_loans = LiveLoans::new(location_map.num_points(), borrow_set.len());
             let comp =
                 LivenessComputation::new(infcx, body, &location_map, move_data, &local_use_map);
-            let mut liveness_source = DeferredLivenessSource {
+            // The loans are live at the points where they reach a live region.
+            //
+            // This is an approximation of liveness (which is the thing we want), in that we're
+            // using a single notion of reachability to represent what used to be _two_ different
+            // transitive closures. It didn't seem impactful when coming up with the single-graph
+            // and reachability through space (regions) + time (CFG) concepts, but in practice the
+            // combination of time-traveling with kills is more impactful than initially
+            // anticipated.
+            //
+            // Kills should prevent a loan from reaching its successor points in the CFG, but not
+            // while time-traveling: we're not actually at that CFG point, but looking for
+            // predecessor regions that contain the loan. One of the two TCs we had pushed the
+            // transitive subset edges to each point instead of having backward edges, and the
+            // problem didn't exist before. In the abstract, naive reachability is not enough to
+            // model this, we'd need a slightly different solution. For example, maybe with a
+            // two-step traversal:
+            // - at each point we first traverse the subgraph (and possibly time-travel) looking for
+            //   exit nodes while ignoring kills,
+            // - and then when we're back at the current point, we continue normally.
+            //
+            // Another (less annoying) subtlety is that kills and the loan use-map are
+            // flow-insensitive. Kills can actually appear in places before a loan is introduced, or
+            // at a location that is actually unreachable in the CFG from the introduction point,
+            // and these can also be encountered during time-traveling.
+            //
+            // The simplest change that made sense to "fix" the issues above is taking into account
+            // kills that are:
+            // - reachable from the introduction point
+            // - encountered during forward traversal. Note that this is not transitive like the
+            //   two-step traversal described above: only kills encountered on exit via a backward
+            //   edge are ignored.
+            //
+            // This version of the analysis, however, is enough in practice to pass the tests that
+            // we care about and NLLs reject, without regressions on crater, and is an actionable
+            // subset of the full analysis. It also naturally points to areas of improvement that we
+            // wish to explore later, namely handling kills appropriately during traversal, instead
+            // of continuing traversal to all the reachable nodes.
+            //
+            // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
+            // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
+            let mut live_loans = LoanReachability::new(
+                body,
+                &location_map,
                 liveness,
-                live_region_variances: &mut self.live_region_variances,
+                &graph,
+                &mut self.live_region_variances,
                 universal_regions,
                 deferred_locals_for_liveness,
                 comp,
-            };
-            let mut visitor = LoanLivenessVisitor { live_loans: &mut live_loans };
-            graph.traverse(body, borrow_set, &mut liveness_source, &mut visitor);
+            );
+            let live_loans = live_loans.compute_live_loans(borrow_set);
             liveness.record_live_loans(live_loans);
 
             // The graph can be traversed again during MIR dumping, so we store it here.
             self.graph = Some(graph);
-        }
-    }
-}
-
-/// A `LivenessSource` that will dynamically compute liveness on-demand when traversing
-/// the outlives graph. This allows avoiding computing liveness eagerly on many more locals
-/// than NLLs, which can be expensive.
-struct DeferredLivenessSource<'a, 'tcx> {
-    liveness: &'a mut LivenessValues,
-    live_region_variances: &'a mut LiveRegionVariances,
-    universal_regions: &'a UniversalRegions<'tcx>,
-    deferred_locals_for_liveness: DeferredLocals<'tcx>,
-    comp: LivenessComputation<'a, 'tcx>,
-}
-
-impl<'a> LivenessSource for DeferredLivenessSource<'a, '_> {
-    #[inline]
-    fn liveness_for_region(&mut self, region: RegionVid) -> RegionLiveness<'_> {
-        self.deferred_locals_for_liveness.compute_deferred_local(
-            region,
-            self.universal_regions,
-            &mut self.liveness,
-            &mut self.live_region_variances,
-            &mut self.comp,
-        );
-
-        RegionLiveness::new(
-            region,
-            self.live_region_variances,
-            self.universal_regions,
-            self.liveness.points(),
-        )
-    }
-}
-
-/// Visitor to record loan liveness when traversing the localized constraint graph.
-struct LoanLivenessVisitor<'a> {
-    live_loans: &'a mut LiveLoans,
-}
-
-impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
-    fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode, is_live: bool) {
-        // Record the loan as being live on entry to this point if it reaches a live region
-        // there.
-        //
-        // This is an approximation of liveness (which is the thing we want), in that we're
-        // using a single notion of reachability to represent what used to be _two_ different
-        // transitive closures. It didn't seem impactful when coming up with the single-graph
-        // and reachability through space (regions) + time (CFG) concepts, but in practice the
-        // combination of time-traveling with kills is more impactful than initially
-        // anticipated.
-        //
-        // Kills should prevent a loan from reaching its successor points in the CFG, but not
-        // while time-traveling: we're not actually at that CFG point, but looking for
-        // predecessor regions that contain the loan. One of the two TCs we had pushed the
-        // transitive subset edges to each point instead of having backward edges, and the
-        // problem didn't exist before. In the abstract, naive reachability is not enough to
-        // model this, we'd need a slightly different solution. For example, maybe with a
-        // two-step traversal:
-        // - at each point we first traverse the subgraph (and possibly time-travel) looking for
-        //   exit nodes while ignoring kills,
-        // - and then when we're back at the current point, we continue normally.
-        //
-        // Another (less annoying) subtlety is that kills and the loan use-map are
-        // flow-insensitive. Kills can actually appear in places before a loan is introduced, or
-        // at a location that is actually unreachable in the CFG from the introduction point,
-        // and these can also be encountered during time-traveling.
-        //
-        // The simplest change that made sense to "fix" the issues above is taking into account
-        // kills that are:
-        // - reachable from the introduction point
-        // - encountered during forward traversal. Note that this is not transitive like the
-        //   two-step traversal described above: only kills encountered on exit via a backward
-        //   edge are ignored.
-        //
-        // This version of the analysis, however, is enough in practice to pass the tests that
-        // we care about and NLLs reject, without regressions on crater, and is an actionable
-        // subset of the full analysis. It also naturally points to areas of improvement that we
-        // wish to explore later, namely handling kills appropriately during traversal, instead
-        // of continuing traversal to all the reachable nodes.
-        //
-        // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
-        // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
-        if is_live {
-            self.live_loans.insert(node.point, loan);
         }
     }
 }

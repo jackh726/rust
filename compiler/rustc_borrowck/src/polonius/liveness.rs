@@ -126,3 +126,21 @@ impl<'tcx> DeferredLocals<'tcx> {
         });
     }
 }
+
+/// A `LivenessSource` for already-existing liveness and variance data.
+pub(crate) struct CachedLivenessSource<'a, 'tcx> {
+    pub(crate) live_region_variances: &'a LiveRegionVariances,
+    pub(crate) universal_regions: &'a UniversalRegions<'tcx>,
+    pub(crate) liveness: &'a LivenessValues,
+}
+
+impl<'a, 'tcx> LivenessSource for CachedLivenessSource<'a, 'tcx> {
+    fn liveness_for_region(&mut self, region: RegionVid) -> RegionLiveness<'_> {
+        RegionLiveness::new(
+            region,
+            self.live_region_variances,
+            self.universal_regions,
+            self.liveness.points(),
+        )
+    }
+}
