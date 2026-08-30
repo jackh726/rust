@@ -258,6 +258,22 @@ impl LocalizedConstraintGraph {
     }
 }
 
+/// The direction(s) `region`'s liveness edges flow in, according to its variance.
+///
+/// Note: there currently are cases related to promoted and const generics, where we don't yet
+/// have variance information (possibly about temporary regions created when typeck sanitizes the
+/// promoteds). Until that is done, we conservatively fallback to maximizing reachability by
+/// taking both directions here. This will not limit traversal whatsoever, and thus propagate
+/// liveness when needed.
+///
+/// FIXME: add the missing variance information and remove this fallback.
+pub(super) fn liveness_edge_direction(
+    live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
+    region: RegionVid,
+) -> ConstraintDirection {
+    live_region_variances.get(&region).copied().unwrap_or(ConstraintDirection::Bidirectional)
+}
+
 /// Returns the successor for the current region/point node when propagating a loan through forward
 /// edges, if applicable, according to liveness and variance.
 fn compute_forward_successor(
@@ -280,16 +296,7 @@ fn compute_forward_successor(
 
     // Here, `region` could be live at the current point, and is live at the next point: add a
     // constraint between them, according to variance.
-
-    // Note: there currently are cases related to promoted and const generics, where we don't yet
-    // have variance information (possibly about temporary regions created when typeck sanitizes the
-    // promoteds). Until that is done, we conservatively fallback to maximizing reachability by
-    // adding a bidirectional edge here. This will not limit traversal whatsoever, and thus
-    // propagate liveness when needed.
-    //
-    // FIXME: add the missing variance information and remove this fallback bidirectional edge.
-    let direction =
-        live_region_variances.get(&region).unwrap_or(&ConstraintDirection::Bidirectional);
+    let direction = liveness_edge_direction(live_region_variances, region);
 
     match direction {
         ConstraintDirection::Backward => {
@@ -322,10 +329,7 @@ fn compute_backward_successor(
         return None;
     }
 
-    // FIXME: add the missing variance information and remove this fallback bidirectional edge. See
-    // the same comment in `compute_forward_successor`.
-    let direction =
-        live_region_variances.get(&region).unwrap_or(&ConstraintDirection::Bidirectional);
+    let direction = liveness_edge_direction(live_region_variances, region);
 
     match direction {
         ConstraintDirection::Forward => {
