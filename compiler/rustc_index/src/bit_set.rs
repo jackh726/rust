@@ -1260,7 +1260,7 @@ impl<T: Idx> Default for GrowableBitSet<T> {
 
 impl<T: Idx> GrowableBitSet<T> {
     /// Ensure that the set has allocated and initialized at least `min_num_bits` bits.
-    fn ensure(&mut self, min_num_bits: usize) {
+    pub fn ensure(&mut self, min_num_bits: usize) {
         let min_num_words = num_words(min_num_bits);
         self.ensure_words(min_num_words);
     }
@@ -1285,6 +1285,54 @@ impl<T: Idx> GrowableBitSet<T> {
     pub fn insert(&mut self, value: T) -> bool {
         self.ensure(value.index() + 1);
         insert(&mut self.words, value)
+    }
+
+    #[inline]
+    pub fn insert_range(&mut self, elems: Range<T>) {
+        self.ensure(elems.end.index());
+        if elems.start.index() >= elems.end.index() {
+            return;
+        }
+        let start = elems.start;
+        let end = T::new(elems.end.index() - 1);
+
+        let (start_word_index, start_mask) = word_index_and_mask(start);
+        let (end_word_index, end_mask) = word_index_and_mask(end);
+
+        // Set all words in between start and end (exclusively of both).
+        for word_index in (start_word_index + 1)..end_word_index {
+            self.words[word_index] = !0;
+        }
+
+        if start_word_index != end_word_index {
+            // Start and end are in different words, so we handle each in turn.
+            //
+            // We set all leading bits. This includes the start_mask bit.
+            self.words[start_word_index] |= !(start_mask - 1);
+            // And all trailing bits (i.e. from 0..=end) in the end word,
+            // including the end.
+            self.words[end_word_index] |= end_mask | (end_mask - 1);
+        } else {
+            self.words[start_word_index] |= end_mask | (end_mask - start_mask);
+        }
+    }
+
+    /// Returns `true` if the set has changed.
+    #[inline]
+    pub fn remove(&mut self, elem: T) -> bool {
+        self.ensure(elem.index() + 1);
+        let (word_index, mask) = word_index_and_mask(elem);
+        let word_ref = &mut self.words[word_index];
+        let word = *word_ref;
+        let new_word = word & !mask;
+        *word_ref = new_word;
+        new_word != word
+    }
+
+    /// Clear all elements.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.words.fill(0);
     }
 
     #[inline]
