@@ -61,6 +61,10 @@ use crate::polonius::{
     DeferredLocals, LiveLoans, LiveRegionVariances, LocalizedConstraintGraph,
     record_live_region_variance,
 };
+#[cfg(debug_assertions)]
+use crate::polonius::{
+    LivenessSource, LocalizedConstraintGraphVisitor, LocalizedNode, RegionLiveness,
+};
 use crate::region_infer::values::LivenessValues;
 use crate::type_check::liveness::LivenessCalculation;
 use crate::universal_regions::UniversalRegions;
@@ -260,6 +264,17 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             self.forward_queue.clear();
             self.backward_queue.clear();
         }
+
+        #[cfg(debug_assertions)]
+        debug_check_against_dfs(
+            self.body,
+            self.liveness,
+            self.graph,
+            self.live_region_variances,
+            self.universal_regions,
+            borrow_set,
+            &live_loans,
+        );
 
         live_loans
     }
@@ -544,5 +559,63 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         state.loans[block_index].insert(new);
         state.pending[block_index].insert(new);
         true
+    }
+}
+
+/// Recomputes loan liveness with the node-by-node DFS and checks that it agrees with the batched
+/// traversal.
+///
+/// The two are meant to be the same least fixpoint of the same edge relation, and the DFS is still
+/// around for the polonius MIR dumps, so a debug-assertions build can afford to check that claim on
+/// every body it compiles rather than leaving the two implementations to drift. It is not cheap --
+/// it is the per-loan traversal this module exists to replace -- so it is `debug_assertions` only.
+#[cfg(debug_assertions)]
+fn debug_check_against_dfs<'tcx>(
+    body: &Body<'tcx>,
+    liveness: &LivenessValues,
+    graph: &LocalizedConstraintGraph,
+    live_region_variances: &LiveRegionVariances,
+    universal_regions: &UniversalRegions<'tcx>,
+    borrow_set: &BorrowSet<'tcx>,
+    live_loans: &LiveLoans,
+) {
+    /// A `LivenessSource` for already-existing liveness and variance data.
+    struct CachedLivenessSource<'a> {
+        live_region_variances: &'a LiveRegionVariances,
+        liveness: &'a LivenessValues,
+    }
+
+    impl<'a> LivenessSource for CachedLivenessSource<'a> {
+        fn liveness_for_region(&mut self, region: RegionVid) -> RegionLiveness<'_> {
+            RegionLiveness::new(region, self.live_region_variances, self.liveness)
+        }
+        fn location_map(&self) -> &DenseLocationMap {
+            self.liveness.location_map()
+        }
+    }
+    struct DfsVisitor {
+        live_loans: LiveLoans,
+    }
+
+    impl LocalizedConstraintGraphVisitor for DfsVisitor {
+        fn on_live_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
+            self.live_loans.insert(node.point, loan)
+        }
+    }
+
+    let mut liveness_source = CachedLivenessSource { live_region_variances, liveness };
+    let mut visitor =
+        DfsVisitor { live_loans: LiveLoans::new(live_loans.num_points(), borrow_set.len()) };
+    graph.traverse(body, universal_regions, borrow_set, &mut liveness_source, &mut visitor);
+
+    for (loan, _) in borrow_set.iter_enumerated() {
+        if let Some(point) = live_loans.first_difference(&visitor.live_loans, loan) {
+            panic!(
+                "batched and DFS loan liveness disagree for {loan:?} at {:?}: {} vs {}",
+                liveness.location_map().to_location(point),
+                live_loans.contains(point, loan),
+                visitor.live_loans.contains(point, loan),
+            );
+        }
     }
 }
