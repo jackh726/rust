@@ -1287,6 +1287,24 @@ impl<T: Idx> GrowableBitSet<T> {
         insert(&mut self.words, value)
     }
 
+    /// Returns `true` if the set has changed.
+    #[inline]
+    pub fn remove(&mut self, elem: T) -> bool {
+        self.ensure(elem.index() + 1);
+        let (word_index, mask) = word_index_and_mask(elem);
+        let word_ref = &mut self.words[word_index];
+        let word = *word_ref;
+        let new_word = word & !mask;
+        *word_ref = new_word;
+        new_word != word
+    }
+
+    /// Clear all elements.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.words.fill(0);
+    }
+
     #[inline]
     pub fn count(&self) -> usize {
         count_ones(&self.words)

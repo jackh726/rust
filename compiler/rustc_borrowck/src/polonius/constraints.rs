@@ -52,7 +52,7 @@ pub(super) struct LocalizedConstraintGraph {
 pub(super) struct RegionLiveness<'a> {
     region: RegionVid,
     direction: ConstraintDirection,
-    liveness: &'a LivenessValues,
+    pub(super) liveness: &'a LivenessValues,
 }
 
 impl<'a> RegionLiveness<'a> {
@@ -127,6 +127,20 @@ impl LocalizedConstraintGraph {
         }
 
         LocalizedConstraintGraph { edges, logical_edges }
+    }
+
+    pub(super) fn physical_successors(
+        &self,
+        region: RegionVid,
+        point: PointIndex,
+    ) -> impl Iterator<Item = RegionVid> {
+        self.edges.get(&LocalizedNode { region, point }).into_iter().flatten().copied()
+    }
+
+    /// The regions `region` flows into at all points, from the outlives constraints that are not
+    /// tied to a location.
+    pub(super) fn logical_successors(&self, region: RegionVid) -> impl Iterator<Item = RegionVid> {
+        self.logical_edges.get(&region).into_iter().flatten().copied()
     }
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
