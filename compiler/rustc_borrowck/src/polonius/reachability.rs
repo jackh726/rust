@@ -42,7 +42,8 @@
 //! The reachable set is the same as the DFS's by construction: both are the least fixpoint of the
 //! same edge relation, starting from the same node.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BinaryHeap};
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_index::bit_set::{DenseBitSet, GrowableBitSet};
@@ -80,6 +81,35 @@ impl BlockIndex {
     fn from_point(point: PointIndex, block: BasicBlock, location_map: &DenseLocationMap) -> Self {
         let entry = location_map.entry_point(block);
         BlockIndex::from_usize(point.as_usize() - entry.as_usize())
+    }
+}
+
+/// A worklist of pairs: a priority queue that holds a pair at most once.
+struct Queue {
+    heap: BinaryHeap<Reverse<(u32, RegionInBlockIndex)>>,
+    queued: GrowableBitSet<RegionInBlockIndex>,
+}
+
+impl Queue {
+    fn new() -> Queue {
+        Queue { heap: BinaryHeap::new(), queued: GrowableBitSet::new_empty() }
+    }
+
+    fn push(&mut self, region_block: RegionInBlockIndex, priority: u32) {
+        if self.queued.insert(region_block) {
+            self.heap.push(Reverse((priority, region_block)));
+        }
+    }
+
+    fn pop(&mut self) -> Option<RegionInBlockIndex> {
+        let Reverse((_, region_block)) = self.heap.pop()?;
+        self.queued.remove(region_block);
+        Some(region_block)
+    }
+
+    fn clear(&mut self) {
+        self.heap.clear();
+        self.queued.clear();
     }
 }
 
@@ -127,9 +157,21 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     region_blocks: IndexVec<RegionInBlockIndex, RegionInBlock>,
     region_block_indices: FxHashMap<(RegionVid, BasicBlock), RegionInBlockIndex>,
 
-    /// The pairs that have loans pending propagation, in the order they were reached.
-    worklist: VecDeque<RegionInBlockIndex>,
-    queued: GrowableBitSet<RegionInBlockIndex>,
+    /// The position of each block in a reverse postorder of the CFG.
+    rpo_index: IndexVec<BasicBlock, u32>,
+
+    /// The pairs that have loans pending propagation, processed in reverse postorder of their
+    /// block.
+    ///
+    /// The order matters a lot: the loans of a batch enter the graph at different points, and if
+    /// pairs were processed in the order they are reached, a pair downstream of several of them
+    /// would be processed once per loan arriving -- which is the per-loan cost this batching is
+    /// meant to avoid. Processing the blocks in CFG order instead lets every loan that reaches a
+    /// pair from upstream arrive before the pair is processed; only back edges, and the edges
+    /// flowing backwards in time, cost a second pass.
+    ///
+    /// FIXME: a bucket queue over the reverse postorder index would make this O(1) per operation.
+    worklist: Queue,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -142,6 +184,19 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         universal_regions: &'a UniversalRegions<'tcx>,
         deferred: DeferredLiveness<'a, 'tcx>,
     ) -> Self {
+        let mut rpo_index = IndexVec::from_elem_n(u32::MAX, body.basic_blocks.len());
+        for (i, &block) in body.basic_blocks.reverse_postorder().iter().enumerate() {
+            rpo_index[block] = i as u32;
+        }
+        // Blocks unreachable from the start are not in the reverse postorder; order them last.
+        let mut next = body.basic_blocks.reverse_postorder().len() as u32;
+        for index in rpo_index.iter_mut() {
+            if *index == u32::MAX {
+                *index = next;
+                next += 1;
+            }
+        }
+
         LoanReachability {
             body,
             location_map,
@@ -152,8 +207,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             deferred,
             region_blocks: IndexVec::new(),
             region_block_indices: FxHashMap::default(),
-            worklist: VecDeque::new(),
-            queued: GrowableBitSet::new_empty(),
+            rpo_index,
+            worklist: Queue::new(),
         }
     }
 
@@ -173,14 +228,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 self.add_at_point(loan.region, start.block, point, LoanSet::single(bit));
             }
 
-            while let Some(region_block) = self.worklist.pop_front() {
-                self.queued.remove(region_block);
+            while let Some(region_block) = self.worklist.pop() {
                 self.process(region_block, &mut live_loans, batch_start);
             }
 
             self.region_blocks.raw.clear();
             self.region_block_indices.clear();
-            self.queued.clear();
+            self.worklist.clear();
         }
 
         live_loans
@@ -300,9 +354,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                     i,
                     closure[BlockIndex::ZERO],
                 ) {
-                    if self.queued.insert(region_block) {
-                        self.worklist.push_back(region_block);
-                    }
+                    let block = self.region_blocks[region_block].block;
+                    self.worklist.push(region_block, self.rpo_index[block]);
                 }
             }
         }
@@ -386,9 +439,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             any_new |= Self::add_at_point_inner(state, i, loans);
         }
         if any_new {
-            if self.queued.insert(region_block) {
-                self.worklist.push_back(region_block);
-            }
+            let block = self.region_blocks[region_block].block;
+            self.worklist.push(region_block, self.rpo_index[block]);
         }
     }
 
@@ -403,9 +455,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let region_block = self.region_block(region, block);
         let block_index = BlockIndex::from_point(point, block, self.location_map);
         if Self::add_at_point_inner(&mut self.region_blocks[region_block], block_index, loans) {
-            if self.queued.insert(region_block) {
-                self.worklist.push_back(region_block);
-            }
+            let block = self.region_blocks[region_block].block;
+            self.worklist.push(region_block, self.rpo_index[block]);
         }
     }
 
