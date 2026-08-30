@@ -107,6 +107,10 @@ impl Queue {
         Some(region_block)
     }
 
+    fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
     fn clear(&mut self) {
         self.heap.clear();
         self.queued.clear();
@@ -160,18 +164,21 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// The position of each block in a reverse postorder of the CFG.
     rpo_index: IndexVec<BasicBlock, u32>,
 
-    /// The pairs that have loans pending propagation, processed in reverse postorder of their
-    /// block.
+    /// The pairs that have loans pending propagation.
     ///
-    /// The order matters a lot: the loans of a batch enter the graph at different points, and if
-    /// pairs were processed in the order they are reached, a pair downstream of several of them
-    /// would be processed once per loan arriving -- which is the per-loan cost this batching is
-    /// meant to avoid. Processing the blocks in CFG order instead lets every loan that reaches a
-    /// pair from upstream arrive before the pair is processed; only back edges, and the edges
-    /// flowing backwards in time, cost a second pass.
+    /// The order they are processed in matters a lot: the loans of a batch enter the graph at
+    /// different points, and if pairs were processed in the order they are reached, a pair
+    /// downstream of several of them would be processed once per loan arriving -- which is the
+    /// per-loan cost this batching is meant to avoid. So the pairs reached through edges flowing
+    /// forwards in the CFG are processed in reverse postorder, which lets every loan that reaches
+    /// a pair from upstream arrive before the pair is processed, and the pairs reached through
+    /// edges flowing backwards in postorder, for the same reason in the other direction. The two
+    /// queues are drained alternately until both are empty; only back edges, and a loan crossing
+    /// from one direction to the other, cost another sweep.
     ///
     /// FIXME: a bucket queue over the reverse postorder index would make this O(1) per operation.
-    worklist: Queue,
+    forward_queue: Queue,
+    backward_queue: Queue,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -208,7 +215,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             region_blocks: IndexVec::new(),
             region_block_indices: FxHashMap::default(),
             rpo_index,
-            worklist: Queue::new(),
+            forward_queue: Queue::new(),
+            backward_queue: Queue::new(),
         }
     }
 
@@ -228,13 +236,25 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 self.add_at_point(loan.region, start.block, point, LoanSet::single(bit));
             }
 
-            while let Some(region_block) = self.worklist.pop() {
-                self.process(region_block, &mut live_loans, batch_start);
+            loop {
+                while let Some(region_block) = self.forward_queue.pop() {
+                    self.process(region_block, &mut live_loans, batch_start);
+                }
+                if self.backward_queue.is_empty() {
+                    break;
+                }
+                while let Some(region_block) = self.backward_queue.pop() {
+                    self.process(region_block, &mut live_loans, batch_start);
+                }
+                if self.forward_queue.is_empty() {
+                    break;
+                }
             }
 
             self.region_blocks.raw.clear();
             self.region_block_indices.clear();
-            self.worklist.clear();
+            self.forward_queue.clear();
+            self.backward_queue.clear();
         }
 
         live_loans
@@ -355,7 +375,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                     closure[BlockIndex::ZERO],
                 ) {
                     let block = self.region_blocks[region_block].block;
-                    self.worklist.push(region_block, self.rpo_index[block]);
+                    let last = self.rpo_index.len() as u32 - 1;
+                    self.backward_queue.push(region_block, last - self.rpo_index[block]);
                 }
             }
         }
@@ -440,7 +461,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
         if any_new {
             let block = self.region_blocks[region_block].block;
-            self.worklist.push(region_block, self.rpo_index[block]);
+            self.forward_queue.push(region_block, self.rpo_index[block]);
         }
     }
 
@@ -456,7 +477,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let block_index = BlockIndex::from_point(point, block, self.location_map);
         if Self::add_at_point_inner(&mut self.region_blocks[region_block], block_index, loans) {
             let block = self.region_blocks[region_block].block;
-            self.worklist.push(region_block, self.rpo_index[block]);
+            self.forward_queue.push(region_block, self.rpo_index[block]);
         }
     }
 
