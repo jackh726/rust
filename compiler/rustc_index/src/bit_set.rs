@@ -283,6 +283,28 @@ impl<T: Idx> DenseBitSet<T> {
         None
     }
 
+    pub fn first_unset_in(&self, range: impl RangeBounds<T>) -> Option<T> {
+        let (start, end) = inclusive_start_end(range, self.domain_size)?;
+        let (start_word_index, start_mask) = word_index_and_mask(start);
+        let (end_word_index, _) = word_index_and_mask(end);
+
+        // Start with the first word, masking out all bits below `start`
+        let mut word_index = start_word_index;
+        let mut unset = !self.words[start_word_index] & !(start_mask - 1);
+        loop {
+            // If any bits are unset, return the first one
+            if unset != 0 {
+                let pos = WORD_BITS * word_index + unset.trailing_zeros() as usize;
+                return (pos <= end).then(|| T::new(pos));
+            }
+            word_index += 1;
+            if word_index > end_word_index {
+                return None;
+            }
+            unset = !self.words[word_index];
+        }
+    }
+
     /// Sets `self = self | !other`.
     pub fn union_not(&mut self, other: &DenseBitSet<T>) {
         assert_eq!(self.domain_size, other.domain_size);

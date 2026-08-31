@@ -797,6 +797,57 @@ fn dense_last_set_before() {
 }
 
 #[test]
+fn dense_first_unset_in() {
+    fn easy(set: &DenseBitSet<usize>, needle: impl RangeBounds<usize>) -> Option<usize> {
+        (0..set.domain_size()).find(|&e| needle.contains(&e) && !set.contains(e))
+    }
+
+    #[track_caller]
+    fn cmp(set: &DenseBitSet<usize>, needle: impl RangeBounds<usize> + Clone + std::fmt::Debug) {
+        assert_eq!(
+            set.first_unset_in(needle.clone()),
+            easy(set, needle.clone()),
+            "{:?} in {:?}",
+            needle,
+            set
+        );
+    }
+    let mut set = DenseBitSet::new_empty(300);
+    cmp(&set, 50..=50);
+    cmp(&set, 0..300);
+    set.insert_range(10..=70);
+    set.insert_range(100..=250);
+    cmp(&set, 10..=20);
+    cmp(&set, 10..=70);
+    cmp(&set, 10..71);
+    cmp(&set, 60..=80);
+    cmp(&set, 10..300);
+    cmp(&set, 100..=250);
+    cmp(&set, 200..300);
+    cmp(&set, WORD_BITS - 1..=WORD_BITS);
+    cmp(&set, 2 * WORD_BITS..3 * WORD_BITS);
+    cmp(&set, 3 * WORD_BITS..4 * WORD_BITS);
+    // The last word is only partially in the domain.
+    cmp(&set, 296..300);
+    set.insert_range(296..300);
+    cmp(&set, 296..300);
+    cmp(&set, 296..=299);
+
+    for i in 0..=WORD_BITS * 2 {
+        for j in i..=WORD_BITS * 2 {
+            for k in 0..WORD_BITS * 2 {
+                let mut set = DenseBitSet::new_filled(300);
+                cmp(&set, i..j);
+                cmp(&set, i..=j);
+                set.remove(k);
+                cmp(&set, i..j);
+                cmp(&set, i..=j);
+            }
+        }
+    }
+}
+
+#[test]
 fn dense_contains_any() {
     let mut set: DenseBitSet<usize> = DenseBitSet::new_empty(300);
     assert!(!set.contains_any(0..300));
