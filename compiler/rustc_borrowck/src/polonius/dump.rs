@@ -45,7 +45,13 @@ pub(crate) fn dump_polonius_mir<'tcx>(
         constraints: Vec::new(),
     };
     if let Some(graph) = &polonius_context.graph {
-        graph.traverse(body, regioncx.universal_regions(), borrow_set, &mut collector);
+        graph.traverse(
+            body,
+            regioncx.universal_regions(),
+            borrow_set,
+            regioncx.liveness_constraints().location_map(),
+            &mut collector,
+        );
     }
 
     let extra_data = &|pass_where, out: &mut dyn io::Write| {

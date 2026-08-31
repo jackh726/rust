@@ -48,7 +48,7 @@ use rustc_index::bit_set::SparseBitMatrix;
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::{RegionVid, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
+use rustc_mir_dataflow::points::PointIndex;
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
@@ -120,9 +120,9 @@ impl<'tcx> PoloniusContext<'tcx> {
         universal_regions: &UniversalRegions<'tcx>,
         body: &Body<'tcx>,
         move_data: &MoveData<'tcx>,
-        location_map: &DenseLocationMap,
         borrow_set: &BorrowSet<'tcx>,
     ) {
+        let location_map = Rc::clone(liveness.location_map());
         // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
         // trace throughout localized constraints.
         if borrow_set.len() > 0 {
@@ -130,7 +130,7 @@ impl<'tcx> PoloniusContext<'tcx> {
             // on the lazy localized constraint graph to trace the liveness of loans, for the next
             // step in the chain (the NLL loan scope and active loans computations).
             let graph = LocalizedConstraintGraph::new(
-                Rc::clone(liveness.location_map()),
+                &location_map,
                 outlives_constraints.outlives().iter().copied(),
             );
 
@@ -141,7 +141,8 @@ impl<'tcx> PoloniusContext<'tcx> {
             let deferred_locals_for_liveness =
                 std::mem::take(&mut self.deferred_locals_for_liveness);
             let mut live_loans = LiveLoans::new(borrow_set.len());
-            let calc = LivenessCalculation::new(tcx, body, location_map, move_data, &local_use_map);
+            let calc =
+                LivenessCalculation::new(tcx, body, &location_map, move_data, &local_use_map);
             let mut traversal = LoanLivenessTraversal {
                 liveness,
                 live_region_variances: &mut self.live_region_variances,
@@ -150,7 +151,7 @@ impl<'tcx> PoloniusContext<'tcx> {
                 deferred_locals_for_liveness,
                 calc,
             };
-            graph.traverse(body, universal_regions, borrow_set, &mut traversal);
+            graph.traverse(body, universal_regions, borrow_set, &location_map, &mut traversal);
             liveness.record_live_loans(live_loans);
 
             // The graph can be traversed again during MIR dumping, so we store it here.

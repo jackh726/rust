@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::rc::Rc;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
 use rustc_index::interval::SparseIntervalMatrix;
@@ -46,8 +45,6 @@ pub(super) struct LocalizedConstraintGraph {
     /// when traversing from the node to the successor region.
     edges: FxHashMap<LocalizedNode, FxIndexSet<RegionVid>>,
 
-    location_map: Rc<DenseLocationMap>,
-
     /// The logical edges representing the outlives constraints that hold at all points in the CFG,
     /// which we don't localize to avoid creating a lot of unnecessary edges in the graph. Some CFGs
     /// can be big, and we don't need to create such a physical edge for every point in the CFG.
@@ -79,7 +76,7 @@ pub(super) trait LocalizedConstraintGraphVisitor {
 impl LocalizedConstraintGraph {
     /// Traverses the constraints and returns the indexed graph of edges per node.
     pub(super) fn new<'tcx>(
-        location_map: Rc<DenseLocationMap>,
+        location_map: &DenseLocationMap,
         outlives_constraints: impl Iterator<Item = OutlivesConstraint<'tcx>>,
     ) -> Self {
         let mut edges: FxHashMap<_, FxIndexSet<_>> = FxHashMap::default();
@@ -104,7 +101,7 @@ impl LocalizedConstraintGraph {
             }
         }
 
-        LocalizedConstraintGraph { edges, logical_edges, location_map }
+        LocalizedConstraintGraph { edges, logical_edges }
     }
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
@@ -114,9 +111,9 @@ impl LocalizedConstraintGraph {
         body: &Body<'tcx>,
         universal_regions: &UniversalRegions<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
+        location_map: &DenseLocationMap,
         traversal: &mut impl LocalizedConstraintGraphTraversal,
     ) {
-        let location_map = &self.location_map;
         let mut visited = FxHashSet::default();
         let mut stack = Vec::new();
 
