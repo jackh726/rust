@@ -346,17 +346,28 @@ impl<'tcx> PoloniusOutOfScopePrecomputer<'_, 'tcx> {
         start: usize,
         end: usize,
     ) -> Option<Location> {
-        for statement_index in start..=end {
-            let location = Location { block, statement_index };
+        let liveness_constraints = self.regioncx.liveness_constraints();
+        let location_map = &liveness_constraints.location_map();
+        let issued_point = location_map.point_from_location(loan_issued_at);
+        let end_point = location_map.point_from_location(Location { block, statement_index: end });
+        let mut start_point =
+            location_map.point_from_location(Location { block, statement_index: start });
+        loop {
+            if start_point > end_point {
+                return None;
+            }
+            let dead_point =
+                liveness_constraints.first_dead_point_in(loan_idx, start_point, end_point)?;
 
             // Check whether the issuing region can reach local regions that are live at this point:
             // - a loan is always live at its issuing location because it can reach the issuing
             // region, which is always live at this location.
-            if location == loan_issued_at {
+            if dead_point == issued_point {
+                start_point = dead_point + 1;
                 continue;
             }
 
-            // - the loan goes out of scope at `location` if it's not contained within any regions
+            // - the loan goes out of scope at `dead_point` if it's not contained within any regions
             // live at this point.
             //
             // FIXME: if the issuing region `i` can reach a live region `r` at point `p`, and `r` is
@@ -364,16 +375,8 @@ impl<'tcx> PoloniusOutOfScopePrecomputer<'_, 'tcx> {
             // Reachability is location-insensitive, and we could take advantage of that, by jumping
             // to a further point than just the next statement: we can jump to the furthest point
             // within the block where `r` is live.
-            if self.regioncx.is_loan_live_at(loan_idx, location) {
-                continue;
-            }
-
-            // No live region is reachable from the issuing region: the loan is killed at this
-            // point.
-            return Some(location);
+            return Some(location_map.to_location(dead_point));
         }
-
-        None
     }
 }
 
