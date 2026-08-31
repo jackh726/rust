@@ -36,6 +36,7 @@
 mod constraints;
 mod dump;
 pub(crate) mod legacy;
+mod live_loans;
 mod liveness;
 mod liveness_constraints;
 
@@ -44,14 +45,13 @@ use std::rc::Rc;
 
 use rustc_data_structures::frozen::Frozen;
 use rustc_data_structures::fx::FxHashSet;
-use rustc_index::bit_set::SparseBitMatrix;
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::{RegionVid, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::PointIndex;
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
+pub(crate) use self::live_loans::LiveLoans;
 pub(crate) use self::liveness_constraints::record_live_region_variance;
 use crate::BorrowSet;
 use crate::constraints::OutlivesConstraintSet;
@@ -60,8 +60,6 @@ pub(crate) use crate::polonius::liveness::DeferredLocals;
 use crate::region_infer::values::LivenessValues;
 use crate::type_check::liveness::{LivenessCalculation, LocalUseMap};
 use crate::universal_regions::UniversalRegions;
-
-pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
 
 /// This struct holds the necessary
 ///  - liveness data, created during MIR typeck, and which will be used to lazily compute the
@@ -140,7 +138,7 @@ impl<'tcx> PoloniusContext<'tcx> {
                 .expect("local use map should be computed before loan liveness");
             let deferred_locals_for_liveness =
                 std::mem::take(&mut self.deferred_locals_for_liveness);
-            let mut live_loans = LiveLoans::new(borrow_set.len());
+            let mut live_loans = LiveLoans::new(borrow_set.len(), location_map.num_points());
             let calc =
                 LivenessCalculation::new(tcx, body, &location_map, move_data, &local_use_map);
             let mut traversal = LoanLivenessTraversal {
