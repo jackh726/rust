@@ -36,6 +36,7 @@
 mod constraints;
 mod dump;
 pub(crate) mod legacy;
+mod live_loans;
 mod liveness;
 mod liveness_constraints;
 
@@ -43,11 +44,10 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use rustc_data_structures::fx::FxHashSet;
-use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::{RegionVid, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
+use rustc_mir_dataflow::points::DenseLocationMap;
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
@@ -55,33 +55,11 @@ pub(crate) use self::liveness_constraints::record_live_region_variance;
 use crate::BorrowSet;
 use crate::constraints::OutlivesConstraint;
 use crate::dataflow::BorrowIndex;
+pub(crate) use crate::polonius::live_loans::LiveLoans;
 pub(crate) use crate::polonius::liveness::DeferredLocals;
 use crate::region_infer::values::LivenessValues;
 use crate::type_check::liveness::{LivenessCalculation, LocalUseMap};
 use crate::universal_regions::UniversalRegions;
-
-#[derive(Clone)]
-pub(crate) struct LiveLoans {
-    num_points: usize,
-    // This matrix always has more rows (PointIndex) than columns (BorrowIndex),
-    // and the borrow dimension is usually very low (single digit in 90% of cases in our benchmark suite),
-    // so we store it packed in a single bitset. Rows are points, columns are borrows.
-    flat_matrix: DenseBitSet<usize>,
-}
-
-impl LiveLoans {
-    pub(crate) fn new(num_points: usize, num_borrows: usize) -> Self {
-        Self { num_points, flat_matrix: DenseBitSet::new_empty(num_points * num_borrows) }
-    }
-    pub(crate) fn insert(&mut self, row: PointIndex, col: BorrowIndex) {
-        let bit_index = row.index() + self.num_points * col.index();
-        self.flat_matrix.insert(bit_index);
-    }
-    pub(crate) fn contains(&self, row: PointIndex, col: BorrowIndex) -> bool {
-        let bit_index = row.index() + self.num_points * col.index();
-        self.flat_matrix.contains(bit_index)
-    }
-}
 
 /// This struct holds the necessary
 ///  - liveness data, created during MIR typeck, and which will be used to lazily compute the
@@ -142,7 +120,6 @@ impl<'tcx> PoloniusContext<'tcx> {
         move_data: &MoveData<'tcx>,
         location_map: &DenseLocationMap,
         borrow_set: &BorrowSet<'tcx>,
-        num_points: usize,
     ) {
         // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
         // trace throughout localized constraints.
@@ -161,7 +138,7 @@ impl<'tcx> PoloniusContext<'tcx> {
                 .expect("local use map should be computed before loan liveness");
             let deferred_locals_for_liveness =
                 std::mem::take(&mut self.deferred_locals_for_liveness);
-            let mut live_loans = LiveLoans::new(num_points, borrow_set.len());
+            let mut live_loans = LiveLoans::new(borrow_set.len(), location_map.num_points());
             let calc = LivenessCalculation::new(tcx, body, location_map, move_data, &local_use_map);
             let mut traversal = LoanLivenessTraversal {
                 liveness,

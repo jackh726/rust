@@ -144,8 +144,6 @@ pub(crate) fn compute_regions<'tcx>(
         &lowered_constraints,
     );
 
-    let num_points = location_map.num_points();
-
     // If requested for `-Zpolonius=next`, compute loan liveness information.
     // This is done prior to `RegionInferenceContext::new`, because we may add
     // additional liveness constraints.
@@ -160,7 +158,6 @@ pub(crate) fn compute_regions<'tcx>(
             move_data,
             &location_map,
             borrow_set,
-            num_points,
         );
     }
 
