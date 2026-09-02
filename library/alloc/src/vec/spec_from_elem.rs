@@ -29,9 +29,23 @@ impl<T: Clone + IsZero> SpecFromElem for T {
     }
 }
 
-impl SpecFromElem for i8 {
+impl<T: Clone + IsZero + SpecFromElemFill> SpecFromElem for T {
     #[inline]
-    fn from_elem<A: Allocator>(elem: i8, n: usize, alloc: A) -> Vec<i8, A> {
+    fn from_elem<A: Allocator>(elem: T, n: usize, alloc: A) -> Vec<T, A> {
+        T::from_elem_fill(elem, n, alloc)
+    }
+}
+
+/// Carries the concrete `from_elem` bodies, so that `SpecFromElem` can
+/// specialize on a trait bound rather than on concrete element types.
+#[rustc_specialization_trait]
+trait SpecFromElemFill: Sized {
+    fn from_elem_fill<A: Allocator>(elem: Self, n: usize, alloc: A) -> Vec<Self, A>;
+}
+
+impl SpecFromElemFill for i8 {
+    #[inline]
+    fn from_elem_fill<A: Allocator>(elem: i8, n: usize, alloc: A) -> Vec<i8, A> {
         if elem == 0 {
             return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
         }
@@ -45,9 +59,9 @@ impl SpecFromElem for i8 {
     }
 }
 
-impl SpecFromElem for u8 {
+impl SpecFromElemFill for u8 {
     #[inline]
-    fn from_elem<A: Allocator>(elem: u8, n: usize, alloc: A) -> Vec<u8, A> {
+    fn from_elem_fill<A: Allocator>(elem: u8, n: usize, alloc: A) -> Vec<u8, A> {
         if elem == 0 {
             return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
         }
@@ -63,9 +77,9 @@ impl SpecFromElem for u8 {
 
 // A better way would be to implement this for all ZSTs which are `Copy` and have trivial `Clone`
 // but the latter cannot be detected currently
-impl SpecFromElem for () {
+impl SpecFromElemFill for () {
     #[inline]
-    fn from_elem<A: Allocator>(_elem: (), n: usize, alloc: A) -> Vec<(), A> {
+    fn from_elem_fill<A: Allocator>(_elem: (), n: usize, alloc: A) -> Vec<(), A> {
         let mut v = Vec::with_capacity_in(n, alloc);
         // SAFETY: the capacity has just been set to `n`
         // and `()` is a ZST with trivial `Clone` implementation

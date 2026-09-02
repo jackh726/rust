@@ -720,6 +720,35 @@ trait ConstSizeIntoIterator: IntoIterator {
     fn size() -> Option<usize>;
 }
 
+/// Implemented for arrays and references to them, so that
+/// `ConstSizeIntoIterator` can specialize on a trait bound rather than on the
+/// concrete types.
+#[rustc_specialization_trait]
+trait FixedSizeIntoIterator: IntoIterator {
+    fn fixed_size() -> usize;
+}
+
+impl<T, const N: usize> FixedSizeIntoIterator for [T; N] {
+    #[inline]
+    fn fixed_size() -> usize {
+        N
+    }
+}
+
+impl<T, const N: usize> FixedSizeIntoIterator for &[T; N] {
+    #[inline]
+    fn fixed_size() -> usize {
+        N
+    }
+}
+
+impl<T, const N: usize> FixedSizeIntoIterator for &mut [T; N] {
+    #[inline]
+    fn fixed_size() -> usize {
+        N
+    }
+}
+
 impl<T> ConstSizeIntoIterator for T
 where
     T: IntoIterator,
@@ -730,24 +759,13 @@ where
     }
 }
 
-impl<T, const N: usize> ConstSizeIntoIterator for [T; N] {
+impl<T> ConstSizeIntoIterator for T
+where
+    T: IntoIterator + FixedSizeIntoIterator,
+{
     #[inline]
     fn size() -> Option<usize> {
-        Some(N)
-    }
-}
-
-impl<T, const N: usize> ConstSizeIntoIterator for &[T; N] {
-    #[inline]
-    fn size() -> Option<usize> {
-        Some(N)
-    }
-}
-
-impl<T, const N: usize> ConstSizeIntoIterator for &mut [T; N] {
-    #[inline]
-    fn size() -> Option<usize> {
-        Some(N)
+        Some(T::fixed_size())
     }
 }
 

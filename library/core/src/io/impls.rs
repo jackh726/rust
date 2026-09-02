@@ -1,4 +1,4 @@
-use crate::io::{self, IoSlice, Seek, SeekFrom, SizeHint, Write};
+use crate::io::{self, IoSlice, Seek, SeekFrom, SizeHint, SpecSizeHint, Write};
 use crate::{cmp, fmt, mem};
 
 // =============================================================================
@@ -6,7 +6,7 @@ use crate::{cmp, fmt, mem};
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl<T> SizeHint for &mut T {
+impl<T> SpecSizeHint for &mut T {
     #[inline]
     fn lower_bound(&self) -> usize {
         SizeHint::lower_bound(*self)
@@ -88,7 +88,7 @@ impl<S: Seek + ?Sized> Seek for &mut S {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl SizeHint for &[u8] {
+impl SpecSizeHint for &[u8] {
     #[inline]
     fn lower_bound(&self) -> usize {
         self.len()

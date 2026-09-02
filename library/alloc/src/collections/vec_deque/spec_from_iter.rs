@@ -18,17 +18,35 @@ where
     }
 }
 
-#[cfg(not(test))]
-impl<T> SpecFromIter<T, crate::vec::IntoIter<T>> for VecDeque<T> {
+impl<T, I> SpecFromIter<T, I> for VecDeque<T>
+where
+    I: Iterator<Item = T> + SpecIntoVecDeque,
+{
     #[inline]
-    fn spec_from_iter(iterator: crate::vec::IntoIter<T>) -> Self {
-        iterator.into_vecdeque()
+    fn spec_from_iter(iterator: I) -> Self {
+        iterator.spec_into_vecdeque()
     }
 }
 
-impl<T> SpecFromIter<T, IntoIter<T>> for VecDeque<T> {
+/// Implemented only for the two `IntoIter` types with an O(1) conversion, so
+/// that `SpecFromIter` can specialize on a trait bound rather than on the
+/// concrete iterator types.
+#[rustc_specialization_trait]
+trait SpecIntoVecDeque: Iterator {
+    fn spec_into_vecdeque(self) -> VecDeque<Self::Item>;
+}
+
+#[cfg(not(test))]
+impl<T> SpecIntoVecDeque for crate::vec::IntoIter<T> {
     #[inline]
-    fn spec_from_iter(iterator: IntoIter<T>) -> Self {
-        iterator.into_vecdeque()
+    fn spec_into_vecdeque(self) -> VecDeque<T> {
+        self.into_vecdeque()
+    }
+}
+
+impl<T> SpecIntoVecDeque for IntoIter<T> {
+    #[inline]
+    fn spec_into_vecdeque(self) -> VecDeque<T> {
+        self.into_vecdeque()
     }
 }

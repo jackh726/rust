@@ -1,7 +1,9 @@
+use core::iter::SourceIter;
 use core::mem::ManuallyDrop;
 use core::ptr;
 
-use super::{IntoIter, SpecExtend, SpecFromIterNested, Vec};
+use super::in_place_collect::InPlaceCollect;
+use super::{AsVecIntoIter, IntoIter, SpecExtend, SpecFromIterNested, Vec};
 
 /// Specialization trait used for Vec::from_iter
 ///
@@ -34,8 +36,26 @@ where
     }
 }
 
-impl<T> SpecFromIter<T, IntoIter<T>> for Vec<T> {
-    fn from_iter(iterator: IntoIter<T>) -> Self {
+impl<T, I> SpecFromIter<T, I> for Vec<T>
+where
+    I: Iterator<Item = T> + InPlaceCollect + SpecVecIntoIter,
+    <I as SourceIter>::Source: AsVecIntoIter,
+{
+    fn from_iter(iterator: I) -> Self {
+        iterator.collect_reusing_alloc()
+    }
+}
+
+/// Implemented only for `vec::IntoIter`, so that `SpecFromIter` can specialize
+/// on a trait bound rather than on the concrete iterator type.
+#[rustc_specialization_trait]
+trait SpecVecIntoIter: Iterator {
+    fn collect_reusing_alloc(self) -> Vec<Self::Item>;
+}
+
+impl<T> SpecVecIntoIter for IntoIter<T> {
+    fn collect_reusing_alloc(self) -> Vec<T> {
+        let iterator = self;
         // A common case is passing a vector into a function which immediately
         // re-collects into a vector. We can short circuit this if the IntoIter
         // has not been advanced at all.

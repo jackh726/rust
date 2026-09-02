@@ -71,7 +71,37 @@ where
     }
 }
 
-impl BufferedReaderSpec for &[u8] {
+impl<T> BufferedReaderSpec for T
+where
+    Self: Read,
+    T: ?Sized + SpecBufferedReader,
+{
+    #[inline]
+    fn buffer_priority(&self) -> BufferPriority {
+        SpecBufferedReader::buffer_priority(self)
+    }
+
+    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64> {
+        SpecBufferedReader::copy_to(self, to)
+    }
+}
+
+/// Carries the buffer-reusing copy bodies, so that `BufferedReaderSpec` can
+/// specialize on a trait bound rather than on concrete types.
+///
+/// The `Self: Read` bound sits on `copy_to` rather than on the implementing
+/// types' impls, because the always-applicable check for
+/// `rustc_specialization_trait` impls forbids it there.
+#[rustc_specialization_trait]
+trait SpecBufferedReader {
+    fn buffer_priority(&self) -> BufferPriority;
+
+    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64>
+    where
+        Self: Read;
+}
+
+impl SpecBufferedReader for &[u8] {
     fn buffer_priority(&self) -> BufferPriority {
         IN_MEMORY
     }
@@ -85,7 +115,7 @@ impl BufferedReaderSpec for &[u8] {
 }
 
 #[cfg(not(no_global_oom_handling))]
-impl<A: Allocator> BufferedReaderSpec for VecDeque<u8, A> {
+impl<A: Allocator> SpecBufferedReader for VecDeque<u8, A> {
     fn buffer_priority(&self) -> BufferPriority {
         IN_MEMORY
     }
@@ -100,16 +130,18 @@ impl<A: Allocator> BufferedReaderSpec for VecDeque<u8, A> {
     }
 }
 
-impl<I> BufferedReaderSpec for BufReader<I>
+impl<I> SpecBufferedReader for BufReader<I>
 where
-    Self: Read,
     I: ?Sized,
 {
     fn buffer_priority(&self) -> BufferPriority {
         self.capacity()
     }
 
-    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64> {
+    fn copy_to(&mut self, to: &mut (impl Write + ?Sized)) -> Result<u64>
+    where
+        Self: Read,
+    {
         let mut len = 0;
 
         loop {
@@ -160,7 +192,27 @@ impl<W: Write + ?Sized> BufferedWriterSpec for W {
     }
 }
 
-impl<I: Write + ?Sized> BufferedWriterSpec for BufWriter<I> {
+impl<W: Write + ?Sized + SpecBufferedWriter> BufferedWriterSpec for W {
+    #[inline]
+    fn buffer_priority(&self) -> BufferPriority {
+        SpecBufferedWriter::buffer_priority(self)
+    }
+
+    fn copy_from<R: Read + ?Sized>(&mut self, reader: &mut R) -> Result<u64> {
+        SpecBufferedWriter::copy_from(self, reader)
+    }
+}
+
+/// Carries the buffer-reusing copy bodies, so that `BufferedWriterSpec` can
+/// specialize on a trait bound rather than on concrete types.
+#[rustc_specialization_trait]
+trait SpecBufferedWriter: Write {
+    fn buffer_priority(&self) -> BufferPriority;
+
+    fn copy_from<R: Read + ?Sized>(&mut self, reader: &mut R) -> Result<u64>;
+}
+
+impl<I: Write + ?Sized> SpecBufferedWriter for BufWriter<I> {
     fn buffer_priority(&self) -> BufferPriority {
         self.capacity()
     }
@@ -216,7 +268,7 @@ impl<I: Write + ?Sized> BufferedWriterSpec for BufWriter<I> {
     }
 }
 
-impl BufferedWriterSpec for Vec<u8> {
+impl SpecBufferedWriter for Vec<u8> {
     fn buffer_priority(&self) -> BufferPriority {
         self.capacity() - self.len()
     }

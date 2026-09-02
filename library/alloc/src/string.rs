@@ -2594,8 +2594,23 @@ impl SpecExtendStr for [&str] {
 }
 
 #[cfg(not(no_global_oom_handling))]
-impl<const N: usize> SpecExtendStr for [&str; N] {
+impl<'a, T: IntoIterator<Item = &'a str> + SpecExtendStrArray> SpecExtendStr for T {
     fn spec_extend_into(self, target: &mut String) {
+        self.push_all_to(target)
+    }
+}
+
+/// Implemented only for `[&str; N]`, so that `SpecExtendStr` can specialize
+/// on a trait bound rather than on the concrete type.
+#[cfg(not(no_global_oom_handling))]
+#[rustc_specialization_trait]
+trait SpecExtendStrArray: Sized {
+    fn push_all_to(self, target: &mut String);
+}
+
+#[cfg(not(no_global_oom_handling))]
+impl<'a, const N: usize> SpecExtendStrArray for [&'a str; N] {
+    fn push_all_to(self, target: &mut String) {
         target.push_str_slice(&self[..]);
     }
 }
@@ -2979,25 +2994,41 @@ impl<T: fmt::Display + ?Sized> SpecToString for T {
 }
 
 #[cfg(not(no_global_oom_handling))]
-impl SpecToString for core::ascii::Char {
+impl<T: fmt::Display + ?Sized + SpecToStringFast> SpecToString for T {
     #[inline]
     fn spec_to_string(&self) -> String {
+        self.spec_to_string_fast()
+    }
+}
+
+/// Carries the type-specific fast `to_string` bodies, so that `SpecToString`
+/// can specialize on a trait bound rather than on concrete types.
+#[cfg(not(no_global_oom_handling))]
+#[rustc_specialization_trait]
+trait SpecToStringFast {
+    fn spec_to_string_fast(&self) -> String;
+}
+
+#[cfg(not(no_global_oom_handling))]
+impl SpecToStringFast for core::ascii::Char {
+    #[inline]
+    fn spec_to_string_fast(&self) -> String {
         self.as_str().to_owned()
     }
 }
 
 #[cfg(not(no_global_oom_handling))]
-impl SpecToString for char {
+impl SpecToStringFast for char {
     #[inline]
-    fn spec_to_string(&self) -> String {
+    fn spec_to_string_fast(&self) -> String {
         String::from(self.encode_utf8(&mut [0; char::MAX_LEN_UTF8]))
     }
 }
 
 #[cfg(not(no_global_oom_handling))]
-impl SpecToString for bool {
+impl SpecToStringFast for bool {
     #[inline]
-    fn spec_to_string(&self) -> String {
+    fn spec_to_string_fast(&self) -> String {
         String::from(if *self { "true" } else { "false" })
     }
 }
@@ -3007,9 +3038,9 @@ macro_rules! impl_to_string {
         $(
         #[cfg(not(no_global_oom_handling))]
         #[cfg(not(feature = "optimize_for_size"))]
-        impl SpecToString for $signed {
+        impl SpecToStringFast for $signed {
             #[inline]
-            fn spec_to_string(&self) -> String {
+            fn spec_to_string_fast(&self) -> String {
                 const SIZE: usize = $signed::MAX.ilog10() as usize + 1;
                 let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); SIZE];
                 // Only difference between signed and unsigned are these 8 lines.
@@ -3028,9 +3059,9 @@ macro_rules! impl_to_string {
         }
         #[cfg(not(no_global_oom_handling))]
         #[cfg(not(feature = "optimize_for_size"))]
-        impl SpecToString for $unsigned {
+        impl SpecToStringFast for $unsigned {
             #[inline]
-            fn spec_to_string(&self) -> String {
+            fn spec_to_string_fast(&self) -> String {
                 const SIZE: usize = $unsigned::MAX.ilog10() as usize + 1;
                 let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); SIZE];
 
@@ -3053,9 +3084,9 @@ impl_to_string! {
 
 #[cfg(not(no_global_oom_handling))]
 #[cfg(feature = "optimize_for_size")]
-impl SpecToString for u8 {
+impl SpecToStringFast for u8 {
     #[inline]
-    fn spec_to_string(&self) -> String {
+    fn spec_to_string_fast(&self) -> String {
         let mut buf = String::with_capacity(3);
         let mut n = *self;
         if n >= 10 {
@@ -3073,9 +3104,9 @@ impl SpecToString for u8 {
 
 #[cfg(not(no_global_oom_handling))]
 #[cfg(feature = "optimize_for_size")]
-impl SpecToString for i8 {
+impl SpecToStringFast for i8 {
     #[inline]
-    fn spec_to_string(&self) -> String {
+    fn spec_to_string_fast(&self) -> String {
         let mut buf = String::with_capacity(4);
         if self.is_negative() {
             buf.push('-');
@@ -3098,9 +3129,9 @@ impl SpecToString for i8 {
 macro_rules! to_string_str {
     {$($type:ty,)*} => {
         $(
-            impl SpecToString for $type {
+            impl SpecToStringFast for $type {
                 #[inline]
-                fn spec_to_string(&self) -> String {
+                fn spec_to_string_fast(&self) -> String {
                     let s: &str = self;
                     String::from(s)
                 }
@@ -3132,9 +3163,9 @@ to_string_str! {
 }
 
 #[cfg(not(no_global_oom_handling))]
-impl SpecToString for fmt::Arguments<'_> {
+impl SpecToStringFast for fmt::Arguments<'_> {
     #[inline]
-    fn spec_to_string(&self) -> String {
+    fn spec_to_string_fast(&self) -> String {
         crate::fmt::format(*self)
     }
 }

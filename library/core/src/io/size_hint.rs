@@ -58,3 +58,30 @@ impl<T: ?Sized> SizeHint for T {
         None
     }
 }
+
+/// Carries the type-specific `SizeHint` bounds, so that `SizeHint` can
+/// specialize on a trait bound rather than on concrete types.
+///
+/// Implement this instead of writing a specialized `SizeHint` impl; the
+/// blanket impl below forwards to it.
+#[doc(hidden)]
+#[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
+#[rustc_specialization_trait]
+pub trait SpecSizeHint {
+    fn lower_bound(&self) -> usize;
+    fn upper_bound(&self) -> Option<usize>;
+}
+
+#[doc(hidden)]
+#[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
+impl<T: ?Sized + SpecSizeHint> SizeHint for T {
+    #[inline]
+    fn lower_bound(&self) -> usize {
+        SpecSizeHint::lower_bound(self)
+    }
+
+    #[inline]
+    fn upper_bound(&self) -> Option<usize> {
+        SpecSizeHint::upper_bound(self)
+    }
+}

@@ -293,21 +293,35 @@ impl CString {
             }
         }
 
-        impl SpecNewImpl for &'_ [u8] {
-            fn spec_new_impl(self) -> Result<CString, NulError> {
-                spec_new_impl_bytes(self)
+        /// Implemented only for the borrowed byte-like types, so that
+        /// `SpecNewImpl` can specialize on a trait bound rather than on the
+        /// concrete types.
+        #[rustc_specialization_trait]
+        trait SpecNewImplBytes {
+            fn as_borrowed_bytes(&self) -> &[u8];
+        }
+
+        impl SpecNewImplBytes for &'_ [u8] {
+            fn as_borrowed_bytes(&self) -> &[u8] {
+                self
             }
         }
 
-        impl SpecNewImpl for &'_ str {
-            fn spec_new_impl(self) -> Result<CString, NulError> {
-                spec_new_impl_bytes(self.as_bytes())
+        impl SpecNewImplBytes for &'_ str {
+            fn as_borrowed_bytes(&self) -> &[u8] {
+                self.as_bytes()
             }
         }
 
-        impl SpecNewImpl for &'_ mut [u8] {
+        impl SpecNewImplBytes for &'_ mut [u8] {
+            fn as_borrowed_bytes(&self) -> &[u8] {
+                self
+            }
+        }
+
+        impl<T: Into<Vec<u8>> + SpecNewImplBytes> SpecNewImpl for T {
             fn spec_new_impl(self) -> Result<CString, NulError> {
-                spec_new_impl_bytes(self)
+                spec_new_impl_bytes(self.as_borrowed_bytes())
             }
         }
 

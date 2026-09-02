@@ -370,6 +370,32 @@ where
     }
 }
 
+impl<R> SpecReadByte for R
+where
+    Self: Read,
+    R: SpecReadByteFast,
+{
+    #[inline]
+    fn spec_read_byte(&mut self) -> Option<Result<u8>> {
+        self.spec_read_byte_fast()
+    }
+}
+
+/// Carries the type-specific single-byte-read bodies, so that `SpecReadByte`
+/// can specialize on a trait bound rather than on concrete types.
+///
+/// The `Self: Read` bound sits on the method rather than on the implementing
+/// types' impls, because the always-applicable check for
+/// `rustc_specialization_trait` impls forbids it there.
+#[doc(hidden)]
+#[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
+#[rustc_specialization_trait]
+pub trait SpecReadByteFast {
+    fn spec_read_byte_fast(&mut self) -> Option<Result<u8>>
+    where
+        Self: Read;
+}
+
 /// Reads a single byte in a slow, generic way. This is used by the default
 /// `spec_read_byte`.
 #[inline]

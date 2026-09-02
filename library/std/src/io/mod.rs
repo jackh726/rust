@@ -320,7 +320,8 @@ pub(crate) use alloc_crate::io::{
     default_write_vectored,
 };
 pub(crate) use alloc_crate::io::{
-    IoHandle, SpecReadByte, default_read_to_end, default_read_to_string, stream_len_default,
+    IoHandle, SpecReadByte, SpecReadByteFast, default_read_to_end, default_read_to_string,
+    stream_len_default,
 };
 #[stable(feature = "iovec", since = "1.36.0")]
 pub use alloc_crate::io::{IoSlice, IoSliceMut};

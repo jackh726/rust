@@ -392,10 +392,37 @@ where
     }
 }
 
-impl<T: BytewiseEq> SliceContains for T {
+impl<T: PartialEq + SpecSliceContainsFast> SliceContains for T {
+    #[inline]
+    default fn slice_contains(&self, x: &[Self]) -> bool {
+        self.slice_contains_fast(x)
+    }
+}
+
+impl<T: PartialEq + BytewiseEq + SpecSliceContainsSimd> SliceContains for T {
+    #[inline]
+    fn slice_contains(&self, x: &[Self]) -> bool {
+        simd_contains(self, x)
+    }
+}
+
+/// Carries the fast `slice_contains` bodies, so that `SliceContains` can
+/// specialize on a trait bound rather than on concrete types.
+///
+/// The blanket impl covers every `BytewiseEq` type (`memchr` for one-byte
+/// types); the concrete impls cover the float types, which are not bytewise
+/// but still profit from the SIMD-friendly search. The bytewise types where
+/// the SIMD-friendly search beats the blanket body instead carry the
+/// `SpecSliceContainsSimd` marker and are dispatched by the impl above.
+#[rustc_specialization_trait]
+trait SpecSliceContainsFast: PartialEq + Sized {
+    fn slice_contains_fast(&self, x: &[Self]) -> bool;
+}
+
+impl<T: BytewiseEq> SpecSliceContainsFast for T {
     #[inline]
     #[expect(clippy::manual_contains, reason = "implements slice_contains")]
-    default fn slice_contains(&self, x: &[Self]) -> bool {
+    fn slice_contains_fast(&self, x: &[Self]) -> bool {
         if size_of::<T>() == 1 {
             // SAFETY: `BytewiseEq` guarantees that values have no padding or provenance and
             // compare like their underlying bytes. Since `T` is one byte, both the value and
@@ -410,28 +437,46 @@ impl<T: BytewiseEq> SliceContains for T {
     }
 }
 
-macro_rules! impl_slice_contains {
+impl SpecSliceContainsFast for f32 {
+    #[inline]
+    fn slice_contains_fast(&self, x: &[Self]) -> bool {
+        simd_contains(self, x)
+    }
+}
+
+impl SpecSliceContainsFast for f64 {
+    #[inline]
+    fn slice_contains_fast(&self, x: &[Self]) -> bool {
+        simd_contains(self, x)
+    }
+}
+
+/// Marks the `BytewiseEq` types where the SIMD-friendly search in
+/// `simd_contains` beats the blanket `SpecSliceContainsFast` body.
+#[rustc_specialization_trait]
+trait SpecSliceContainsSimd: BytewiseEq {}
+
+macro_rules! impl_slice_contains_simd {
     ($($t:ty),*) => {
-        $(
-            impl SliceContains for $t {
-                #[inline]
-                fn slice_contains(&self, arr: &[$t]) -> bool {
-                    // Make our LANE_COUNT 4x the normal lane count (aiming for 128 bit vectors).
-                    // The compiler will nicely unroll it.
-                    const LANE_COUNT: usize = 4 * (128 / (size_of::<$t>() * 8));
-                    // SIMD
-                    let mut chunks = arr.chunks_exact(LANE_COUNT);
-                    for chunk in &mut chunks {
-                        if chunk.iter().fold(false, |acc, x| acc | (*x == *self)) {
-                            return true;
-                        }
-                    }
-                    // Scalar remainder
-                    return chunks.remainder().iter().any(|x| *x == *self);
-                }
-            }
-        )*
+        $(impl SpecSliceContainsSimd for $t {})*
     };
 }
 
-impl_slice_contains!(u16, u32, u64, i16, i32, i64, f32, f64, usize, isize, char);
+impl_slice_contains_simd!(u16, u32, u64, i16, i32, i64, usize, isize, char);
+
+#[inline]
+#[expect(clippy::manual_contains, reason = "implements slice_contains")]
+fn simd_contains<T: PartialEq>(elem: &T, arr: &[T]) -> bool {
+    // Make our lane count 4x the normal lane count (aiming for 128 bit vectors).
+    // The compiler will nicely unroll it.
+    let lane_count = const { 4 * (128 / (size_of::<T>() * 8)) };
+    // SIMD
+    let mut chunks = arr.chunks_exact(lane_count);
+    for chunk in &mut chunks {
+        if chunk.iter().fold(false, |acc, x| acc | (*x == *elem)) {
+            return true;
+        }
+    }
+    // Scalar remainder
+    return chunks.remainder().iter().any(|x| *x == *elem);
+}

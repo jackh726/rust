@@ -6,7 +6,8 @@ use crate::boxed::Box;
 use crate::collections::VecDeque;
 use crate::fmt;
 use crate::io::{
-    self, BorrowedCursor, BufRead, IoSlice, IoSliceMut, Read, Seek, SeekFrom, SizeHint, Write,
+    self, BorrowedCursor, BufRead, IoSlice, IoSliceMut, Read, Seek, SeekFrom, SizeHint,
+    SpecSizeHint, Write,
 };
 use crate::string::String;
 #[cfg(all(not(no_rc), not(no_sync), target_has_atomic = "ptr"))]
@@ -135,7 +136,7 @@ impl<R: Read + ?Sized> Read for Box<R> {
 }
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl<T> SizeHint for Box<T> {
+impl<T> SpecSizeHint for Box<T> {
     #[inline]
     fn lower_bound(&self) -> usize {
         SizeHint::lower_bound(&**self)

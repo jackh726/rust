@@ -5,7 +5,7 @@ use buffer::Buffer;
 use crate::fmt;
 use crate::io::{
     self, BorrowedCursor, BufRead, DEFAULT_BUF_SIZE, IoSliceMut, Read, Seek, SeekFrom, SizeHint,
-    SpecReadByte, uninlined_slow_read_byte,
+    SpecReadByteFast, SpecSizeHint, uninlined_slow_read_byte,
 };
 use crate::string::String;
 use crate::vec::Vec;
@@ -331,12 +331,12 @@ impl<R: ?Sized + Seek> BufReader<R> {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl<R> SpecReadByte for BufReader<R>
-where
-    Self: Read,
-{
+impl<R> SpecReadByteFast for BufReader<R> {
     #[inline]
-    fn spec_read_byte(&mut self) -> Option<io::Result<u8>> {
+    fn spec_read_byte_fast(&mut self) -> Option<io::Result<u8>>
+    where
+        Self: Read,
+    {
         let mut byte = 0;
         if self.buf.consume_with(1, |claimed| byte = claimed[0]) {
             return Some(Ok(byte));
@@ -614,7 +614,7 @@ impl<R: ?Sized + Seek> Seek for BufReader<R> {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl<T: ?Sized> SizeHint for BufReader<T> {
+impl<T: ?Sized> SpecSizeHint for BufReader<T> {
     #[inline]
     fn lower_bound(&self) -> usize {
         SizeHint::lower_bound(self.get_ref()) + self.buffer().len()

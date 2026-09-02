@@ -201,14 +201,19 @@ where
     }
 }
 
-impl<'a, const N: usize, T: 'a> SpecNextChunk<'a, N, T> for crate::slice::Iter<'a, T>
+impl<'a, const N: usize, I, T: 'a> SpecNextChunk<'a, N, T> for I
 where
+    I: Iterator<Item = &'a T> + SpecContiguousIter,
     T: Copy,
 {
     fn spec_next_chunk(&mut self) -> Result<[T; N], array::IntoIter<T, N>> {
         let mut raw_array = [const { MaybeUninit::uninit() }; N];
 
-        let len = self.len();
+        // SAFETY: `SpecContiguousIter` is implemented only by `slice::Iter`, and
+        // `Self::Item = &'a T` forces that to be `slice::Iter<'a, T>`, so `ptr`
+        // points to `len` consecutive values of type `T`.
+        let (ptr, len) = self.remaining_raw_parts();
+        let ptr = ptr as *const T;
 
         if T::IS_ZST {
             if len < N {
@@ -226,11 +231,7 @@ where
             // SAFETY: `len` indicates that this many elements are available and we just checked that
             // it fits into the array.
             unsafe {
-                ptr::copy_nonoverlapping(
-                    self.as_ref().as_ptr(),
-                    raw_array.as_mut_ptr() as *mut T,
-                    len,
-                );
+                ptr::copy_nonoverlapping(ptr, raw_array.as_mut_ptr() as *mut T, len);
                 let _ = self.advance_by(len);
                 return Err(array::IntoIter::new_unchecked(raw_array, 0..len));
             }
@@ -239,10 +240,33 @@ where
         // SAFETY: `len` is larger than the array size. Copy a fixed amount here to fully initialize
         // the array.
         unsafe {
-            ptr::copy_nonoverlapping(self.as_ref().as_ptr(), raw_array.as_mut_ptr() as *mut T, N);
+            ptr::copy_nonoverlapping(ptr, raw_array.as_mut_ptr() as *mut T, N);
             let _ = self.advance_by(N);
             Ok(MaybeUninit::array_assume_init(raw_array))
         }
+    }
+}
+
+/// Implemented only for `slice::Iter`, so that `SpecNextChunk` can specialize
+/// on a trait bound rather than on the concrete type.
+///
+/// The pointer is type-erased because naming the element type would require
+/// either repeating a trait parameter in the impl below (forbidden by the
+/// always-applicable check for `rustc_specialization_trait` impls) or an
+/// associated-type binding in the specializing impl above (which cannot be
+/// specialized on). The caller recovers the element type from its own
+/// `Item = &T` bound.
+#[rustc_specialization_trait]
+trait SpecContiguousIter: Iterator {
+    /// Returns a pointer to, and the count of, the remaining elements. The
+    /// pointer points to the values the remaining `Item`s reference.
+    fn remaining_raw_parts(&self) -> (*const (), usize);
+}
+
+impl<'a, T> SpecContiguousIter for crate::slice::Iter<'a, T> {
+    fn remaining_raw_parts(&self) -> (*const (), usize) {
+        let slice = self.as_slice();
+        (slice.as_ptr() as *const (), slice.len())
     }
 }
 

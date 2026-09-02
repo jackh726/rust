@@ -458,31 +458,155 @@ impl<T> AsLegacyRange<T> for RangeIter<T> {
     }
 }
 
+/// Carries the specialized bodies for `StepBy<Range<{integer}>>` iteration
+/// (and its new-range equivalent), so that `SpecRangeSetup` and `StepByImpl`
+/// can specialize on a trait bound rather than on the concrete range types.
+///
+/// # Safety
+///
+/// Technically this is safe to implement (look ma, no unsafe!), but in reality
+/// a lot of unsafe code relies on ranges over integers being correct.
+///
+/// The methods of this trait and of `SpecRangeStepByBack` reinterpret the
+/// struct fields that `setup` preprocesses, so an implementor must provide
+/// *all* of them together. Because `SpecRangeSetup` and `StepByImpl` dispatch
+/// on this single bound, either every public `StepBy` method sees the
+/// preprocessed fields or none does, and implementations cannot be mixed.
+#[rustc_specialization_trait]
+unsafe trait SpecRangeStepBy: Iterator + Sized {
+    fn setup(self, step: usize) -> Self;
+    fn spec_next(this: &mut StepBy<Self>) -> Option<Self::Item>;
+    fn spec_size_hint(this: &StepBy<Self>) -> (usize, Option<usize>);
+    fn spec_nth(this: &mut StepBy<Self>, n: usize) -> Option<Self::Item>;
+    fn spec_try_fold<Acc, F, R>(this: &mut StepBy<Self>, acc: Acc, f: F) -> R
+    where
+        F: FnMut(Acc, Self::Item) -> R,
+        R: Try<Output = Acc>;
+    fn spec_fold<Acc, F>(this: StepBy<Self>, acc: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc;
+}
+
+/// The double-ended counterpart of `SpecRangeStepBy`, carrying the bodies
+/// behind `StepByBackImpl`'s specialization.
+///
+/// # Safety
+///
+/// The specializations must be implemented together with `SpecRangeStepBy`
+/// where applicable, which the supertrait enforces. I.e. if `StepBy` does
+/// support backwards iteration for a given iterator and that is specialized
+/// for forward iteration then it must also be specialized for backwards
+/// iteration.
+#[rustc_specialization_trait]
+unsafe trait SpecRangeStepByBack:
+    SpecRangeStepBy + DoubleEndedIterator + ExactSizeIterator
+{
+    fn spec_next_back(this: &mut StepBy<Self>) -> Option<Self::Item>;
+    fn spec_nth_back(this: &mut StepBy<Self>, n: usize) -> Option<Self::Item>;
+    fn spec_try_rfold<Acc, F, R>(this: &mut StepBy<Self>, init: Acc, f: F) -> R
+    where
+        F: FnMut(Acc, Self::Item) -> R,
+        R: Try<Output = Acc>;
+    fn spec_rfold<Acc, F>(this: StepBy<Self>, init: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc;
+}
+
+impl<T: SpecRangeStepBy> SpecRangeSetup<T> for T {
+    #[inline]
+    fn setup(inner: T, step: usize) -> T {
+        SpecRangeStepBy::setup(inner, step)
+    }
+}
+
+unsafe impl<I: Iterator + SpecRangeStepBy> StepByImpl<I> for StepBy<I> {
+    #[inline]
+    fn spec_next(&mut self) -> Option<I::Item> {
+        I::spec_next(self)
+    }
+
+    #[inline]
+    fn spec_size_hint(&self) -> (usize, Option<usize>) {
+        I::spec_size_hint(self)
+    }
+
+    #[inline]
+    fn spec_nth(&mut self, n: usize) -> Option<I::Item> {
+        I::spec_nth(self, n)
+    }
+
+    #[inline]
+    fn spec_try_fold<Acc, F, R>(&mut self, acc: Acc, f: F) -> R
+    where
+        F: FnMut(Acc, I::Item) -> R,
+        R: Try<Output = Acc>,
+    {
+        I::spec_try_fold(self, acc, f)
+    }
+
+    #[inline]
+    fn spec_fold<Acc, F>(self, acc: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, I::Item) -> Acc,
+    {
+        I::spec_fold(self, acc, f)
+    }
+}
+
+unsafe impl<I: DoubleEndedIterator + ExactSizeIterator + SpecRangeStepByBack> StepByBackImpl<I>
+    for StepBy<I>
+{
+    #[inline]
+    fn spec_next_back(&mut self) -> Option<I::Item> {
+        I::spec_next_back(self)
+    }
+
+    #[inline]
+    fn spec_nth_back(&mut self, n: usize) -> Option<I::Item> {
+        I::spec_nth_back(self, n)
+    }
+
+    #[inline]
+    fn spec_try_rfold<Acc, F, R>(&mut self, init: Acc, f: F) -> R
+    where
+        F: FnMut(Acc, I::Item) -> R,
+        R: Try<Output = Acc>,
+    {
+        I::spec_try_rfold(self, init, f)
+    }
+
+    #[inline]
+    fn spec_rfold<Acc, F>(self, init: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, I::Item) -> Acc,
+    {
+        I::spec_rfold(self, init, f)
+    }
+}
+
 macro_rules! spec_int_ranges {
     ($ctor:ident; $($t:ty)*) => ($(
 
         const _: () = assert!(usize::BITS >= <$t>::BITS);
 
-        impl SpecRangeSetup<$ctor<$t>> for $ctor<$t> {
+        unsafe impl SpecRangeStepBy for $ctor<$t> {
             #[inline]
-            fn setup(mut r: $ctor<$t>, step: usize) -> $ctor<$t> {
-                let inner_len = r.size_hint().0;
+            fn setup(mut self, step: usize) -> $ctor<$t> {
+                let inner_len = self.size_hint().0;
                 // If step exceeds $t::MAX, then the count will be at most 1 and
                 // thus always fit into $t.
                 let yield_count = inner_len.div_ceil(step);
                 // Turn the range end into an iteration counter
-                r.as_legacy_range_mut().end = yield_count as $t;
-                r
+                self.as_legacy_range_mut().end = yield_count as $t;
+                self
             }
-        }
 
-        unsafe impl StepByImpl<$ctor<$t>> for StepBy<$ctor<$t>> {
             #[inline]
-            fn spec_next(&mut self) -> Option<$t> {
+            fn spec_next(this: &mut StepBy<$ctor<$t>>) -> Option<$t> {
                 // if a step size larger than the type has been specified fall back to
                 // t::MAX, in which case remaining will be at most 1.
-                let step = <$t>::try_from(self.original_step().get()).unwrap_or(<$t>::MAX);
-                let r = self.iter.as_legacy_range_mut();
+                let step = <$t>::try_from(this.original_step().get()).unwrap_or(<$t>::MAX);
+                let r = this.iter.as_legacy_range_mut();
                 let remaining = r.end;
                 if remaining > 0 {
                     let val = r.start;
@@ -497,8 +621,8 @@ macro_rules! spec_int_ranges {
             }
 
             #[inline]
-            fn spec_size_hint(&self) -> (usize, Option<usize>) {
-                let remaining = self.iter.as_legacy_range().end as usize;
+            fn spec_size_hint(this: &StepBy<$ctor<$t>>) -> (usize, Option<usize>) {
+                let remaining = this.iter.as_legacy_range().end as usize;
                 (remaining, Some(remaining))
             }
 
@@ -506,33 +630,33 @@ macro_rules! spec_int_ranges {
             // We have to repeat them here so that the specialization overrides the StepByImpl defaults
 
             #[inline]
-            fn spec_nth(&mut self, n: usize) -> Option<Self::Item> {
-                self.advance_by(n).ok()?;
-                self.next()
+            fn spec_nth(this: &mut StepBy<$ctor<$t>>, n: usize) -> Option<$t> {
+                this.advance_by(n).ok()?;
+                this.next()
             }
 
             #[inline]
-            fn spec_try_fold<Acc, F, R>(&mut self, init: Acc, mut f: F) -> R
+            fn spec_try_fold<Acc, F, R>(this: &mut StepBy<$ctor<$t>>, init: Acc, mut f: F) -> R
                 where
-                    F: FnMut(Acc, Self::Item) -> R,
+                    F: FnMut(Acc, $t) -> R,
                     R: Try<Output = Acc>
             {
                 let mut accum = init;
-                while let Some(x) = self.next() {
+                while let Some(x) = this.next() {
                     accum = f(accum, x)?;
                 }
                 try { accum }
             }
 
             #[inline]
-            fn spec_fold<Acc, F>(self, init: Acc, mut f: F) -> Acc
+            fn spec_fold<Acc, F>(this: StepBy<$ctor<$t>>, init: Acc, mut f: F) -> Acc
                 where
-                    F: FnMut(Acc, Self::Item) -> Acc
+                    F: FnMut(Acc, $t) -> Acc
             {
                 // if a step size larger than the type has been specified fall back to
                 // t::MAX, in which case remaining will be at most 1.
-                let step = <$t>::try_from(self.original_step().get()).unwrap_or(<$t>::MAX);
-                let r = self.iter.as_legacy_range();
+                let step = <$t>::try_from(this.original_step().get()).unwrap_or(<$t>::MAX);
+                let r = this.iter.as_legacy_range();
                 let remaining = r.end;
                 let mut acc = init;
                 let mut val = r.start;
@@ -552,12 +676,11 @@ macro_rules! spec_int_ranges_r {
     ($ctor:ident; $($t:ty)*) => ($(
         const _: () = assert!(usize::BITS >= <$t>::BITS);
 
-        unsafe impl StepByBackImpl<$ctor<$t>> for StepBy<$ctor<$t>> {
-
+        unsafe impl SpecRangeStepByBack for $ctor<$t> {
             #[inline]
-            fn spec_next_back(&mut self) -> Option<Self::Item> {
-                let step = self.original_step().get() as $t;
-                let r = self.iter.as_legacy_range_mut();
+            fn spec_next_back(this: &mut StepBy<$ctor<$t>>) -> Option<$t> {
+                let step = this.original_step().get() as $t;
+                let r = this.iter.as_legacy_range_mut();
                 let remaining = r.end;
                 if remaining > 0 {
                     let start = r.start;
@@ -572,33 +695,33 @@ macro_rules! spec_int_ranges_r {
             // We have to repeat them here so that the specialization overrides the StepByImplBack defaults
 
             #[inline]
-            fn spec_nth_back(&mut self, n: usize) -> Option<Self::Item> {
-                if self.advance_back_by(n).is_err() {
+            fn spec_nth_back(this: &mut StepBy<$ctor<$t>>, n: usize) -> Option<$t> {
+                if this.advance_back_by(n).is_err() {
                     return None;
                 }
-                self.next_back()
+                this.next_back()
             }
 
             #[inline]
-            fn spec_try_rfold<Acc, F, R>(&mut self, init: Acc, mut f: F) -> R
+            fn spec_try_rfold<Acc, F, R>(this: &mut StepBy<$ctor<$t>>, init: Acc, mut f: F) -> R
             where
-                F: FnMut(Acc, Self::Item) -> R,
+                F: FnMut(Acc, $t) -> R,
                 R: Try<Output = Acc>
             {
                 let mut accum = init;
-                while let Some(x) = self.next_back() {
+                while let Some(x) = this.next_back() {
                     accum = f(accum, x)?;
                 }
                 try { accum }
             }
 
             #[inline]
-            fn spec_rfold<Acc, F>(mut self, init: Acc, mut f: F) -> Acc
+            fn spec_rfold<Acc, F>(mut this: StepBy<$ctor<$t>>, init: Acc, mut f: F) -> Acc
             where
-                F: FnMut(Acc, Self::Item) -> Acc
+                F: FnMut(Acc, $t) -> Acc
             {
                 let mut accum = init;
-                while let Some(x) = self.next_back() {
+                while let Some(x) = this.next_back() {
                     accum = f(accum, x);
                 }
                 accum

@@ -1,4 +1,4 @@
-use crate::io::{self, ErrorKind, IoSlice, Result, Seek, SeekFrom, SizeHint, Write};
+use crate::io::{self, ErrorKind, IoSlice, Result, Seek, SeekFrom, SizeHint, SpecSizeHint, Write};
 use crate::{cmp, fmt};
 
 /// `Empty` ignores any data written via [`Write`], and will always be empty
@@ -16,7 +16,12 @@ pub struct Empty;
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl SizeHint for Empty {
+impl SpecSizeHint for Empty {
+    #[inline]
+    fn lower_bound(&self) -> usize {
+        0
+    }
+
     #[inline]
     fn upper_bound(&self) -> Option<usize> {
         Some(0)
@@ -171,7 +176,7 @@ pub struct Repeat {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl SizeHint for Repeat {
+impl SpecSizeHint for Repeat {
     #[inline]
     fn lower_bound(&self) -> usize {
         usize::MAX
@@ -345,7 +350,7 @@ pub struct Chain<T, U> {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl<T, U> SizeHint for Chain<T, U> {
+impl<T, U> SpecSizeHint for Chain<T, U> {
     #[inline]
     fn lower_bound(&self) -> usize {
         SizeHint::lower_bound(&self.first) + SizeHint::lower_bound(&self.second)
@@ -470,7 +475,7 @@ pub struct Take<T> {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl<T> SizeHint for Take<T> {
+impl<T> SpecSizeHint for Take<T> {
     #[inline]
     fn lower_bound(&self) -> usize {
         cmp::min(SizeHint::lower_bound(&self.inner) as u64, self.limit) as usize

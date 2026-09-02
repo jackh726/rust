@@ -38,7 +38,7 @@ pub use self::{
     },
     error::{Custom, CustomOwner, OsFunctions},
     seek::stream_len_default,
-    size_hint::SizeHint,
+    size_hint::{SizeHint, SpecSizeHint},
     util::{chain, take},
     write::default_write_vectored,
 };

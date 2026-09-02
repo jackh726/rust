@@ -9,6 +9,7 @@ use crate::fs::File;
 use crate::io::prelude::*;
 use crate::io::{
     self, BorrowedCursor, BufReader, IoSlice, IoSliceMut, LineWriter, Lines, SpecReadByte,
+    SpecReadByteFast,
 };
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::sync::atomic::{Atomic, AtomicBool, Ordering};
@@ -546,10 +547,10 @@ impl Read for StdinLock<'_> {
 
 #[doc(hidden)]
 #[unstable(feature = "core_io_internals", reason = "exposed only for libstd", issue = "none")]
-impl SpecReadByte for StdinLock<'_> {
+impl SpecReadByteFast for StdinLock<'_> {
     #[inline]
-    fn spec_read_byte(&mut self) -> Option<io::Result<u8>> {
-        BufReader::spec_read_byte(&mut *self.inner)
+    fn spec_read_byte_fast(&mut self) -> Option<io::Result<u8>> {
+        SpecReadByte::spec_read_byte(&mut *self.inner)
     }
 }
 

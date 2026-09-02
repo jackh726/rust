@@ -261,17 +261,32 @@ impl OsString {
             }
         }
 
-        // Use a more efficient implementation when the string is UTF-8.
+        /// Implemented only for the known-UTF-8 string types, so that
+        /// `SpecPushTo` can specialize on a trait bound rather than on the
+        /// concrete types.
+        #[rustc_specialization_trait]
+        trait SpecUtf8Str {
+            fn as_utf8_str(&self) -> &str;
+        }
+
         macro spec_str($T:ty) {
-            impl SpecPushTo for $T {
+            impl SpecUtf8Str for $T {
                 #[inline]
-                fn spec_push_to(&self, buf: &mut OsString) {
-                    buf.inner.push_str(self);
+                fn as_utf8_str(&self) -> &str {
+                    self
                 }
             }
         }
         spec_str!(str);
         spec_str!(String);
+
+        // Use a more efficient implementation when the string is UTF-8.
+        impl<T: AsRef<OsStr> + SpecUtf8Str> SpecPushTo for T {
+            #[inline]
+            fn spec_push_to(&self, buf: &mut OsString) {
+                buf.inner.push_str(self.as_utf8_str());
+            }
+        }
 
         s.spec_push_to(self)
     }
@@ -630,17 +645,32 @@ impl<T: ?Sized + AsRef<OsStr>> From<&T> for OsString {
             }
         }
 
-        // Preserve the known-UTF-8 property for strings.
+        /// Implemented only for the known-UTF-8 string types, so that
+        /// `SpecToOsString` can specialize on a trait bound rather than on the
+        /// concrete types.
+        #[rustc_specialization_trait]
+        trait SpecUtf8Str {
+            fn as_utf8_str(&self) -> &str;
+        }
+
         macro spec_str($T:ty) {
-            impl SpecToOsString for $T {
+            impl SpecUtf8Str for $T {
                 #[inline]
-                fn spec_to_os_string(&self) -> OsString {
-                    OsString::from(String::from(self))
+                fn as_utf8_str(&self) -> &str {
+                    self
                 }
             }
         }
         spec_str!(str);
         spec_str!(String);
+
+        // Preserve the known-UTF-8 property for strings.
+        impl<T: AsRef<OsStr> + SpecUtf8Str> SpecToOsString for T {
+            #[inline]
+            fn spec_to_os_string(&self) -> OsString {
+                OsString::from(String::from(self.as_utf8_str()))
+            }
+        }
 
         s.spec_to_os_string()
     }

@@ -2153,9 +2153,26 @@ impl<I: IntoIterator, A: Allocator> SpecExtend<I> for LinkedList<I::Item, A> {
     }
 }
 
-impl<T> SpecExtend<LinkedList<T>> for LinkedList<T> {
-    fn spec_extend(&mut self, ref mut other: LinkedList<T>) {
-        self.append(other);
+impl<I: IntoIterator + SpecExtendList<A>, A: Allocator> SpecExtend<I> for LinkedList<I::Item, A> {
+    fn spec_extend(&mut self, iter: I) {
+        iter.append_to(self);
+    }
+}
+
+/// Implemented only for `LinkedList` itself, so that `SpecExtend` can
+/// specialize on a trait bound rather than on the concrete type.
+///
+/// The parameter `A` is the allocator of the extended list; `append` requires
+/// it to match the appended list's own allocator, so the impl pairs
+/// `LinkedList<T, Global>` with `A = Global`.
+#[rustc_specialization_trait]
+trait SpecExtendList<A: Allocator>: IntoIterator {
+    fn append_to(self, list: &mut LinkedList<Self::Item, A>);
+}
+
+impl<T> SpecExtendList<Global> for LinkedList<T> {
+    fn append_to(mut self, list: &mut LinkedList<T>) {
+        list.append(&mut self);
     }
 }
 
