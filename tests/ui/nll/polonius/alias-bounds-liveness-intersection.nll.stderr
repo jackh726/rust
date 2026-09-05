@@ -1,0 +1,70 @@
+error[E0477]: the type `&'a u8` does not fulfill the required lifetime
+  --> $DIR/alias-bounds-liveness-intersection.rs:64:18
+   |
+LL |         type A = &'a u8;
+   |                  ^^^^^^
+   |
+note: type must outlive the lifetime `'b` as defined here as required by this binding
+  --> $DIR/alias-bounds-liveness-intersection.rs:63:14
+   |
+LL |     impl<'a, 'b> Tr<'a, 'b> for S {
+   |              ^^
+
+error[E0477]: the type `&'a u8` does not fulfill the required lifetime
+  --> $DIR/alias-bounds-liveness-intersection.rs:132:26
+   |
+LL |         type A<'a, 'b> = &'a u8;
+   |                          ^^^^^^
+   |
+note: type must outlive the lifetime `'b` as defined here as required by this binding
+  --> $DIR/alias-bounds-liveness-intersection.rs:132:20
+   |
+LL |         type A<'a, 'b> = &'a u8;
+   |                    ^^
+
+error[E0477]: the type `&'a u8` does not fulfill the required lifetime
+  --> $DIR/alias-bounds-liveness-intersection.rs:119:9
+   |
+LL |         x
+   |         ^
+   |
+note: type must outlive the lifetime `'b` as defined here as required by this binding
+  --> $DIR/alias-bounds-liveness-intersection.rs:115:22
+   |
+LL |     pub type Foo<'a, 'b> = impl Copy + 'a + 'b;
+   |                      ^^
+
+error[E0597]: `local` does not live long enough
+  --> $DIR/alias-bounds-liveness-intersection.rs:82:24
+   |
+LL |     pub fn drive<'x, 'y, T: Tr<'x, 'y>>() {
+   |                  -- lifetime `'x` defined here
+LL |         let local = 42u8;
+   |             ----- binding `local` declared here
+LL |         let _a = T::mk(&local);
+   |                  ------^^^^^^-
+   |                  |     |
+   |                  |     borrowed value does not live long enough
+   |                  argument requires that `local` is borrowed for `'x`
+LL |
+LL |     }
+   |     - `local` dropped here while still borrowed
+
+error[E0597]: `x` does not live long enough
+  --> $DIR/alias-bounds-liveness-intersection.rs:102:39
+   |
+LL |         let mut y = <T as Tr<'static, 'static>>::mk(&0);
+   |                     ----------------------------------- assignment requires that `x` is borrowed for `'static`
+LL |         {
+LL |             let x = 42u8;
+   |                 - binding `x` declared here
+LL |             y = <T as Tr<'_, '_>>::mk(&x);
+   |                                       ^^ borrowed value does not live long enough
+...
+LL |         }
+   |         - `x` dropped here while still borrowed
+
+error: aborting due to 5 previous errors
+
+Some errors have detailed explanations: E0477, E0597.
+For more information about an error, try `rustc --explain E0477`.
