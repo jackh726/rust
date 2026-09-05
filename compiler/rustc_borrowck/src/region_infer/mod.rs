@@ -119,6 +119,12 @@ pub struct RegionInferenceContext<'tcx> {
     /// Type constraints that we check after solving.
     type_tests: Vec<TypeTest<'tcx>>,
 
+    /// Relations entailed by the type tests we discharged, recorded so the localized constraint
+    /// graph can see them. Deliberately *not* merged into `constraints`: those are obligations
+    /// region inference enforces, while each of these already holds in the region values it
+    /// computed, and means something only at its `Locations`. See `check_type_tests`.
+    type_test_constraints: Vec<OutlivesConstraint<'tcx>>,
+
     /// Information about how the universally quantified regions in
     /// scope on this function relate to one another.
     universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
@@ -197,9 +203,8 @@ pub(crate) struct TypeTest<'tcx> {
     /// The span to blame.
     pub span: Span,
 
-    /// Where in the CFG this obligation arose. Unlike `span`, which is only for diagnostics,
-    /// this is the position the obligation holds at, and so where anything entailed by proving
-    /// it can be required to hold.
+    /// Where in the CFG this obligation arose. Unlike `span`, which is only for diagnostics, this
+    /// is used to localize the outlives constraint we register once the test is discharged.
     pub locations: Locations,
 
     /// A test which, if met by the region `'x`, proves that this type
@@ -415,6 +420,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             universe_causes,
             scc_values,
             type_tests,
+            type_test_constraints: Vec::new(),
             universal_region_relations,
         }
     }
@@ -501,7 +507,12 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         let mut propagated_outlives_requirements =
             infcx.tcx.is_typeck_child(mir_def_id).then(Vec::new);
 
-        self.check_type_tests(infcx, propagated_outlives_requirements.as_mut(), &mut errors_buffer);
+        let type_test_constraints = self.check_type_tests(
+            infcx,
+            propagated_outlives_requirements.as_mut(),
+            &mut errors_buffer,
+        );
+        self.type_test_constraints = type_test_constraints;
 
         debug!(?errors_buffer);
         debug!(?propagated_outlives_requirements);
@@ -591,14 +602,16 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         infcx: &InferCtxt<'tcx>,
         mut propagated_outlives_requirements: Option<&mut Vec<ClosureOutlivesRequirement<'tcx>>>,
         errors_buffer: &mut RegionErrors<'tcx>,
-    ) {
+    ) -> Vec<OutlivesConstraint<'tcx>> {
+        let mut discharged = vec![];
         let tcx = infcx.tcx;
 
         // Sometimes we register equivalent type-tests that would
         // result in basically the exact same error being reported to
         // the user. Avoid that.
         let mut deduplicate_errors = FxIndexSet::default();
-        // Reused across type tests, so a body's type tests cost one allocation between them.
+        // Reused across type tests: `eval_verify_bound` pushes into it, and it is cleared per
+        // test, so a body's type tests cost one allocation between them.
         let mut relied_on = Vec::new();
 
         for type_test in &self.type_tests {
@@ -613,6 +626,35 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 &type_test.verify_bound,
                 &mut relied_on,
             ) {
+                // The test holds. Unlike an ordinary outlives obligation, proving it recorded no
+                // outlives constraint: `alias_ty_must_outlive` pushes a disjunctive verify bound
+                // rather than committing to one of the alias' declared bounds. Nothing downstream
+                // can see the obligation then -- in particular the loan liveness computed for
+                // `-Zpolonius=next`, which only walks the constraint graph, so a loan held by the
+                // alias never learns it has to outlive `'lower_bound`.
+                //
+                // `relied_on` holds the regions the proof relied on outliving `lower_bound`. Each
+                // is already implied by the constraints region inference had -- that is what
+                // `eval_outlives` checked against the computed values -- so requiring it changes
+                // no region value. What it adds is a *localized* edge: the relation is vacuous in
+                // the location-insensitive value model and non-trivial in the flow-sensitive one,
+                // and that gap is the bug.
+                //
+                // So: having proved the test, require what the proof relied on to hold *here*.
+                for &r in &relied_on {
+                    if r == type_test.lower_bound {
+                        continue;
+                    }
+                    discharged.push(OutlivesConstraint {
+                        sup: r,
+                        sub: type_test.lower_bound,
+                        locations: type_test.locations,
+                        span: type_test.span,
+                        category: ConstraintCategory::Predicate(type_test.span),
+                        variance_info: ty::VarianceDiagInfo::default(),
+                        from_closure: false,
+                    });
+                }
                 continue;
             }
 
@@ -641,6 +683,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 errors_buffer.push(RegionErrorKind::TypeTestError { type_test: type_test.clone() });
             }
         }
+
+        discharged
     }
 
     /// Computes loan liveness for `-Zpolonius=next`.
@@ -664,7 +708,11 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         polonius_context.compute_loan_liveness(
             infcx.tcx,
             &mut self.liveness_constraints,
-            self.constraints.outlives().iter().copied(),
+            self.constraints
+                .outlives()
+                .iter()
+                .copied()
+                .chain(self.type_test_constraints.iter().copied()),
             &self.universal_region_relations.universal_regions,
             body,
             move_data,

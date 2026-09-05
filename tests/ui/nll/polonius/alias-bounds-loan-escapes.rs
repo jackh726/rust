@@ -6,23 +6,17 @@
 //
 // Nothing else can see that obligation. In particular the loan liveness computed for
 // `-Zpolonius=next` only walks the constraint graph, so a loan inside the alias never learns that
-// it has to outlive `'r`.
+// it has to outlive `'r`, and all of these compiled.
 //
 // What makes them unsound is that the bound is *proven*, not that they differ from NLL: the same
 // programs with the bound removed still differ from NLL, but nothing false is claimed about them
 // and polonius is right to accept those -- see `alias-bounds-reassignment.rs`.
-//
-// FIXME: `-Zpolonius=next` accepts every one of these today, including the one that Miri reports
-// a use-after-free for, which is why the `polonius` revision is `check-pass` below. NLLs reject
-// them all. A later commit makes the type test's proof visible to the traversal and the two
-// revisions agree again.
 
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ edition: 2024
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Z polonius=off
 //@ [polonius] compile-flags: -Z polonius=next
-//@ [polonius] check-pass
 #![forbid(unsafe_code)]
 
 fn require_static<T: 'static>(_: T) {}
@@ -43,7 +37,7 @@ mod observable_ub {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             escaped = Box::new(y);
         }
         println!("{escaped:?}");
@@ -65,7 +59,7 @@ mod ordered_bounds {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require_static(y);
         }
     }
@@ -94,7 +88,7 @@ mod unrelated_bounds {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require_static(y);
         }
     }
@@ -114,7 +108,7 @@ mod universal_param {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require::<'p, _>(y);
         }
     }

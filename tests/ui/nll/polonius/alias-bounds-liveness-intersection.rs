@@ -13,10 +13,6 @@
 //
 // Each module here is a fact about the compiler, not a preference: the errors are what make the
 // argument, so they are annotated rather than avoided.
-//
-// FIXME: `-Zpolonius=next` misses one of them, in `declared_on_the_trait` below: the bound there
-// is proven through a type test, which the loan liveness traversal cannot see. A later commit
-// makes that proof visible to it, and the two revisions agree again.
 
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ revisions: nll polonius
@@ -100,7 +96,7 @@ mod declared_on_the_trait {
         {
             let x = 42u8;
             y = <T as Tr<'_, '_>>::mk(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require_static(y);
         }
     }
