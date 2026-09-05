@@ -195,6 +195,11 @@ pub(crate) struct TypeTest<'tcx> {
     /// The span to blame.
     pub span: Span,
 
+    /// Where in the CFG this obligation arose. Unlike `span`, which is only for diagnostics,
+    /// this is the position the obligation holds at, and so where anything entailed by proving
+    /// it can be required to hold.
+    pub locations: Locations,
+
     /// A test which, if met by the region `'x`, proves that this type
     /// constraint is satisfied.
     pub verify_bound: VerifyBound<'tcx>,
@@ -664,7 +669,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         propagated_outlives_requirements: &mut Vec<ClosureOutlivesRequirement<'tcx>>,
     ) -> bool {
         let tcx = infcx.tcx;
-        let TypeTest { generic_kind, lower_bound, span: blame_span, verify_bound: _ } = *type_test;
+        let TypeTest { generic_kind, lower_bound, span: blame_span, locations: _, verify_bound: _ } =
+            *type_test;
 
         let generic_ty = generic_kind.to_ty(tcx);
         let Some(subject) = self.try_promote_type_test_subject(infcx, generic_ty) else {
