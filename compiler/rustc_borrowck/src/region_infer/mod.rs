@@ -596,16 +596,20 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // result in basically the exact same error being reported to
         // the user. Avoid that.
         let mut deduplicate_errors = FxIndexSet::default();
+        // Reused across type tests, so a body's type tests cost one allocation between them.
+        let mut relied_on = Vec::new();
 
         for type_test in &self.type_tests {
             debug!("check_type_test: {:?}", type_test);
 
             let generic_ty = type_test.generic_kind.to_ty(tcx);
+            relied_on.clear();
             if self.eval_verify_bound(
                 infcx,
                 generic_ty,
                 type_test.lower_bound,
                 &type_test.verify_bound,
+                &mut relied_on,
             ) {
                 continue;
             }
@@ -836,20 +840,33 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         lub
     }
 
-    /// Tests if `test` is true when applied to `lower_bound` at
-    /// `point`.
+    /// Tests if `test` is true when applied to `lower_bound` at `point`, pushing onto
+    /// `relied_on` the regions the proof relies on outliving `lower_bound`.
+    ///
+    /// Those are the relations we can then require to hold *at the obligation's location*: each
+    /// was established by `eval_outlives` against the computed region values, so it is already
+    /// implied by the constraints region inference had, and recording it changes no region value.
+    /// See `check_type_tests`.
+    ///
+    /// A successful proof may rely on nothing at all -- `IsEmpty` holds precisely because
+    /// `lower_bound` has an empty value, and then nothing is required to outlive it.
+    ///
+    /// Invariant: on returning `false`, `relied_on` is left exactly as it was found. Nested
+    /// bounds depend on this -- it is what lets a failing conjunct discard a partial result
+    /// without disturbing an enclosing disjunction.
     fn eval_verify_bound(
         &self,
         infcx: &InferCtxt<'tcx>,
         generic_ty: Ty<'tcx>,
         lower_bound: RegionVid,
         verify_bound: &VerifyBound<'tcx>,
+        relied_on: &mut Vec<RegionVid>,
     ) -> bool {
         debug!("eval_verify_bound(lower_bound={:?}, verify_bound={:?})", lower_bound, verify_bound);
 
         match verify_bound {
             VerifyBound::IfEq(verify_if_eq_b) => {
-                self.eval_if_eq(infcx, generic_ty, lower_bound, *verify_if_eq_b)
+                self.eval_if_eq(infcx, generic_ty, lower_bound, *verify_if_eq_b, relied_on)
             }
 
             VerifyBound::IsEmpty => {
@@ -859,16 +876,45 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
             VerifyBound::OutlivedBy(r) => {
                 let r_vid = self.to_region_vid(*r);
-                self.eval_outlives(r_vid, lower_bound)
+                let holds = self.eval_outlives(r_vid, lower_bound);
+                if holds {
+                    relied_on.push(r_vid);
+                }
+                holds
             }
 
-            VerifyBound::AnyBound(verify_bounds) => verify_bounds.iter().any(|verify_bound| {
-                self.eval_verify_bound(infcx, generic_ty, lower_bound, verify_bound)
-            }),
+            // The bound holds if *any* disjunct does, so proving it needs only one. But every
+            // disjunct that succeeded was verified the same way -- `eval_outlives` against the
+            // computed values -- so each is equally implied, and we can require all of them.
+            //
+            // Taking only the first would be arbitrary in a way that matters: which disjunct
+            // comes first is a property of how the bounds were declared, not of the program, and
+            // the region it names need not be the one a loan actually flows into.
+            // `ordered_bounds` in `tests/ui/nll/polonius/alias-bounds-loan-escapes.rs` is exactly
+            // that case, and is only caught because we keep them all.
+            //
+            // No mark is needed here: by the invariant, a disjunct that failed pushed nothing.
+            VerifyBound::AnyBound(verify_bounds) => {
+                let mut any = false;
+                for vb in verify_bounds {
+                    any |= self.eval_verify_bound(infcx, generic_ty, lower_bound, vb, relied_on);
+                }
+                any
+            }
 
-            VerifyBound::AllBounds(verify_bounds) => verify_bounds.iter().all(|verify_bound| {
-                self.eval_verify_bound(infcx, generic_ty, lower_bound, verify_bound)
-            }),
+            // Every conjunct has to hold, so every conjunct's regions are relied upon -- but a
+            // later failure invalidates what earlier ones pushed, so roll back to preserve the
+            // invariant.
+            VerifyBound::AllBounds(verify_bounds) => {
+                let mark = relied_on.len();
+                for vb in verify_bounds {
+                    if !self.eval_verify_bound(infcx, generic_ty, lower_bound, vb, relied_on) {
+                        relied_on.truncate(mark);
+                        return false;
+                    }
+                }
+                true
+            }
         }
     }
 
@@ -878,13 +924,18 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         generic_ty: Ty<'tcx>,
         lower_bound: RegionVid,
         verify_if_eq_b: ty::Binder<'tcx, VerifyIfEq<'tcx>>,
+        relied_on: &mut Vec<RegionVid>,
     ) -> bool {
         let generic_ty = self.normalize_to_scc_representatives(infcx.tcx, generic_ty);
         let verify_if_eq_b = self.normalize_to_scc_representatives(infcx.tcx, verify_if_eq_b);
         match test_type_match::extract_verify_if_eq(infcx.tcx, &verify_if_eq_b, generic_ty) {
             Some(r) => {
                 let r_vid = self.to_region_vid(r);
-                self.eval_outlives(r_vid, lower_bound)
+                let holds = self.eval_outlives(r_vid, lower_bound);
+                if holds {
+                    relied_on.push(r_vid);
+                }
+                holds
             }
             None => false,
         }
