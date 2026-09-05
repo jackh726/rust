@@ -20,6 +20,7 @@ use rustc_middle::traits::{ObligationCause, ObligationCauseCode};
 use rustc_middle::ty::{
     self, RegionExt, RegionVid, Ty, TyCtxt, TypeFoldable, UniverseIndex, fold_regions,
 };
+use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::{DUMMY_SP, Span};
@@ -30,13 +31,14 @@ use crate::constraints::{ConstraintSccIndex, OutlivesConstraint, OutlivesConstra
 use crate::dataflow::BorrowIndex;
 use crate::diagnostics::{RegionErrorKind, RegionErrors, UniverseInfo};
 use crate::handle_placeholders::{LoweredConstraints, RegionTracker};
+use crate::polonius::PoloniusContext;
 use crate::polonius::legacy::PoloniusOutput;
 use crate::region_infer::values::{LivenessValues, RegionElement, RegionValues};
 use crate::type_check::Locations;
 use crate::type_check::free_region_relations::UniversalRegionRelations;
 use crate::universal_regions::UniversalRegions;
 use crate::{
-    BorrowckInferCtxt, ClosureOutlivesRequirement, ClosureOutlivesSubject,
+    BorrowSet, BorrowckInferCtxt, ClosureOutlivesRequirement, ClosureOutlivesSubject,
     ClosureOutlivesSubjectTy, ClosureRegionRequirements,
 };
 
@@ -639,6 +641,36 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 errors_buffer.push(RegionErrorKind::TypeTestError { type_test: type_test.clone() });
             }
         }
+    }
+
+    /// Computes loan liveness for `-Zpolonius=next`.
+    ///
+    /// This deliberately runs *after* `solve`, so that it sees the constraint set as it stands
+    /// once type tests have been discharged: proving `Alias: 'r` registers the outlives
+    /// constraints it entails, and a loan has to satisfy those too. Running it earlier -- against
+    /// `LoweredConstraints`, before this context is even built -- means those edges do not exist
+    /// yet, and the traversal cannot see the obligation at all.
+    pub(crate) fn compute_loan_liveness(
+        &mut self,
+        infcx: &BorrowckInferCtxt<'tcx>,
+        polonius_context: &mut PoloniusContext<'tcx>,
+        body: &Body<'tcx>,
+        move_data: &MoveData<'tcx>,
+        location_map: &DenseLocationMap,
+        borrow_set: &BorrowSet<'tcx>,
+    ) {
+        // Borrowing the fields separately is what lets this happen after `solve`: the constraint
+        // set and the universal regions are read while the liveness values are written.
+        polonius_context.compute_loan_liveness(
+            infcx.tcx,
+            &mut self.liveness_constraints,
+            self.constraints.outlives().iter().copied(),
+            &self.universal_region_relations.universal_regions,
+            body,
+            move_data,
+            location_map,
+            borrow_set,
+        )
     }
 
     /// Invoked when we have some type-test (e.g., `T: 'X`) that we cannot
