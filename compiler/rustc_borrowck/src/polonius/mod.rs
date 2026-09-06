@@ -84,6 +84,42 @@ pub(crate) struct PoloniusContext<'tcx> {
     pub(crate) deferred_locals_for_liveness: DeferredLocals<'tcx>,
 
     pub(crate) local_use_map: Option<LocalUseMap>,
+
+    /// The liveness of the locals NLLs leave boring, materialized by the traversal as it asks for
+    /// it. See [`LoanLiveness`].
+    pub(crate) loan_liveness: Option<LivenessValues>,
+}
+
+/// The liveness the loan liveness analysis asks about: the liveness NLLs compute, plus the extra
+/// liveness polonius needs for the locals NLLs leave boring.
+///
+/// These are two values rather than one on purpose. NLLs skip computing liveness for locals whose
+/// regions all outlive a free region, because the outlives constraints make those regions' values
+/// cover the whole body anyway. That argument is location-insensitive, so polonius cannot use it:
+/// it has to know *where* such a region is live, to place the CFG edges of the localized
+/// constraint graph. But that is all it is for -- `liveness::generate` says as much, and gates
+/// computing it on there being a loan at all, which region inference cannot depend on.
+///
+/// So only the first of the two is an input to region inference, and it is the only one
+/// `RegionInferenceContext` is given. Keeping them apart is what stops the second from reaching
+/// `merge_liveness` and making region values depend on `-Zpolonius` -- which matters all the more
+/// here, where the second is materialized *during* the traversal.
+#[derive(Clone, Copy)]
+pub(crate) struct LoanLiveness<'a> {
+    nll: &'a LivenessValues,
+    polonius: &'a LivenessValues,
+}
+
+impl<'a> LoanLiveness<'a> {
+    pub(crate) fn new(nll: &'a LivenessValues, polonius: &'a LivenessValues) -> Self {
+        LoanLiveness { nll, polonius }
+    }
+
+    /// Returns whether `region` is live at `point` for the purposes of loan liveness.
+    pub(crate) fn is_live_at_point(&self, region: RegionVid, point: PointIndex) -> bool {
+        self.nll.is_live_at_point(region, point)
+            || self.polonius.is_live_at_point(region, point)
+    }
 }
 
 /// The direction a constraint can flow into. Used to create liveness constraints according to
@@ -141,8 +177,11 @@ impl<'tcx> PoloniusContext<'tcx> {
                 std::mem::take(&mut self.deferred_locals_for_liveness);
             let mut live_loans = LiveLoans::new(borrow_set.len());
             let calc = LivenessCalculation::new(tcx, body, location_map, move_data, &local_use_map);
+            let mut loan_liveness =
+                LivenessValues::with_specific_points(Rc::clone(liveness.location_map()));
             let mut traversal = LoanLivenessTraversal {
                 liveness,
+                loan_liveness: &mut loan_liveness,
                 live_region_variances: &mut self.live_region_variances,
                 live_loans: &mut live_loans,
                 universal_regions,
@@ -152,14 +191,19 @@ impl<'tcx> PoloniusContext<'tcx> {
             graph.traverse(body, universal_regions, borrow_set, &mut traversal);
             liveness.record_live_loans(live_loans);
 
-            // The graph can be traversed again during MIR dumping, so we store it here.
+            // The graph can be traversed again during MIR dumping, so we store these here.
+            self.loan_liveness = Some(loan_liveness);
             self.graph = Some(graph);
         }
     }
 }
 
 struct LoanLivenessTraversal<'a, 'tcx> {
-    liveness: &'a mut LivenessValues,
+    /// The liveness NLLs computed. Read only: region inference has already been seeded from it.
+    liveness: &'a LivenessValues,
+
+    /// Where the liveness this traversal materializes is recorded instead.
+    loan_liveness: &'a mut LivenessValues,
     live_region_variances: &'a mut BTreeMap<RegionVid, ConstraintDirection>,
     live_loans: &'a mut LiveLoans,
     universal_regions: &'a UniversalRegions<'tcx>,
@@ -176,7 +220,7 @@ impl LocalizedConstraintGraphTraversal for LoanLivenessTraversal<'_, '_> {
     fn mk_visitor(
         &mut self,
         region: RegionVid,
-    ) -> (&LivenessValues, &BTreeMap<RegionVid, ConstraintDirection>, Self::Visitor<'_>) {
+    ) -> (LoanLiveness<'_>, &BTreeMap<RegionVid, ConstraintDirection>, Self::Visitor<'_>) {
         if let Some((local, drop_args)) =
             self.deferred_locals_for_liveness.use_deferred_local(region)
         {
@@ -194,30 +238,30 @@ impl LocalizedConstraintGraphTraversal for LoanLivenessTraversal<'_, '_> {
                 let local_ty = self.calc.body.local_decls[local].ty;
                 self.calc.tcx.for_each_free_region(&local_ty, |live_region| {
                     let region = self.universal_regions.to_region_vid(live_region);
-                    self.liveness.add_points(region, &self.calc.use_live_at);
+                    self.loan_liveness.add_points(region, &self.calc.use_live_at);
                 });
             }
             if !self.calc.drop_live_at.is_empty() {
                 for drop_arg in drop_args {
                     self.calc.tcx.for_each_free_region(&drop_arg, |live_region| {
                         let region = self.universal_regions.to_region_vid(live_region);
-                        self.liveness.add_points(region, &self.calc.drop_live_at);
+                        self.loan_liveness.add_points(region, &self.calc.drop_live_at);
                     });
                 }
             }
         }
 
-        (
-            self.liveness,
-            self.live_region_variances,
-            LoanLivenessVisitor { liveness: self.liveness, live_loans: self.live_loans },
-        )
+        let liveness = LoanLiveness::new(self.liveness, self.loan_liveness);
+        (liveness, self.live_region_variances, LoanLivenessVisitor {
+            liveness,
+            live_loans: self.live_loans,
+        })
     }
 }
 
 /// Visitor to record loan liveness when traversing the localized constraint graph.
 struct LoanLivenessVisitor<'a> {
-    liveness: &'a LivenessValues,
+    liveness: LoanLiveness<'a>,
     live_loans: &'a mut LiveLoans,
 }
 

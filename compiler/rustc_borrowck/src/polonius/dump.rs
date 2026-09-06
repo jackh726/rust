@@ -11,7 +11,7 @@ use rustc_session::config::MirIncludeSpans;
 use crate::borrow_set::BorrowSet;
 use crate::constraints::OutlivesConstraint;
 use crate::polonius::{
-    LocalizedConstraintGraphTraversal, LocalizedConstraintGraphVisitor, LocalizedNode,
+    LoanLiveness, LocalizedConstraintGraphTraversal, LocalizedConstraintGraphVisitor, LocalizedNode,
     PoloniusContext,
 };
 use crate::region_infer::values::LivenessValues;
@@ -40,7 +40,10 @@ pub(crate) fn dump_polonius_mir<'tcx>(
     // If we have a polonius graph to dump along the rest of the MIR and NLL info, we extract its
     // constraints here.
     let mut collector = LocalizedOutlivesConstraintCollectorTraversal {
-        liveness: regioncx.liveness_constraints(),
+        liveness: LoanLiveness::new(
+            regioncx.liveness_constraints(),
+            polonius_context.loan_liveness.as_ref().expect("loan liveness should be computed"),
+        ),
         live_region_variances: &polonius_context.live_region_variances,
         constraints: Vec::new(),
     };
@@ -85,7 +88,7 @@ struct LocalizedOutlivesConstraint {
 }
 
 struct LocalizedOutlivesConstraintCollectorTraversal<'a> {
-    liveness: &'a LivenessValues,
+    liveness: LoanLiveness<'a>,
     live_region_variances: &'a std::collections::BTreeMap<RegionVid, super::ConstraintDirection>,
     constraints: Vec<LocalizedOutlivesConstraint>,
 }
@@ -102,7 +105,7 @@ impl<'outer> LocalizedConstraintGraphTraversal
         &mut self,
         _region: RegionVid,
     ) -> (
-        &LivenessValues,
+        LoanLiveness<'_>,
         &std::collections::BTreeMap<RegionVid, super::ConstraintDirection>,
         Self::Visitor<'_>,
     ) {

@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
-use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Location};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
@@ -10,8 +9,7 @@ use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
 use crate::BorrowSet;
 use crate::constraints::OutlivesConstraint;
 use crate::dataflow::BorrowIndex;
-use crate::polonius::ConstraintDirection;
-use crate::region_infer::values::LivenessValues;
+use crate::polonius::{ConstraintDirection, LoanLiveness};
 use crate::type_check::Locations;
 use crate::universal_regions::UniversalRegions;
 
@@ -62,7 +60,7 @@ pub(super) trait LocalizedConstraintGraphTraversal {
     fn mk_visitor(
         &mut self,
         region: RegionVid,
-    ) -> (&LivenessValues, &BTreeMap<RegionVid, ConstraintDirection>, Self::Visitor<'_>);
+    ) -> (LoanLiveness<'_>, &BTreeMap<RegionVid, ConstraintDirection>, Self::Visitor<'_>);
 }
 
 /// The visitor interface when traversing a `LocalizedConstraintGraph`.
@@ -180,7 +178,7 @@ impl LocalizedConstraintGraph {
                     if let Some(succ) = compute_forward_successor(
                         node.region,
                         next_point,
-                        liveness.points(),
+                        liveness,
                         live_region_variances,
                         is_universal_region,
                     ) {
@@ -195,7 +193,7 @@ impl LocalizedConstraintGraph {
                         if let Some(succ) = compute_forward_successor(
                             node.region,
                             next_point,
-                            liveness.points(),
+                            liveness,
                             live_region_variances,
                             is_universal_region,
                         ) {
@@ -214,7 +212,7 @@ impl LocalizedConstraintGraph {
                             node.region,
                             node.point,
                             previous_point,
-                            liveness.points(),
+                            liveness,
                             live_region_variances,
                         ) {
                             successor_found(succ);
@@ -234,7 +232,7 @@ impl LocalizedConstraintGraph {
                                 node.region,
                                 node.point,
                                 previous_point,
-                                liveness.points(),
+                                liveness,
                                 live_region_variances,
                             ) {
                                 successor_found(succ);
@@ -258,7 +256,7 @@ impl LocalizedConstraintGraph {
 fn compute_forward_successor(
     region: RegionVid,
     next_point: PointIndex,
-    live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
+    liveness: LoanLiveness<'_>,
     live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
     is_universal_region: bool,
 ) -> Option<LocalizedNode> {
@@ -269,7 +267,7 @@ fn compute_forward_successor(
     }
 
     // 2. Otherwise, gather the edges due to explicit region liveness, when applicable.
-    if !live_regions.contains(region, next_point) {
+    if !liveness.is_live_at_point(region, next_point) {
         return None;
     }
 
@@ -308,12 +306,12 @@ fn compute_backward_successor(
     region: RegionVid,
     current_point: PointIndex,
     previous_point: PointIndex,
-    live_regions: &SparseIntervalMatrix<RegionVid, PointIndex>,
+    liveness: LoanLiveness<'_>,
     live_region_variances: &BTreeMap<RegionVid, ConstraintDirection>,
 ) -> Option<LocalizedNode> {
     // Liveness flows into the regions live at the next point. So, in a backwards view, we'll link
     // the region from the current point, if it's live there, to the previous point.
-    if !live_regions.contains(region, current_point) {
+    if !liveness.is_live_at_point(region, current_point) {
         return None;
     }
 
