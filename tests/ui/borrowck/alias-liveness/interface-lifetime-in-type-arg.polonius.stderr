@@ -1,0 +1,23 @@
+error[E0597]: `local` does not live long enough
+  --> $DIR/interface-lifetime-in-type-arg.rs:42:33
+   |
+LL |         let local = Lifetimed(&());
+   |             ----- binding `local` declared here
+LL |         let r: &Lifetimed<'_> = &local;
+   |                                 ^^^^^^ borrowed value does not live long enough
+LL |         p = make(r);
+LL |     }
+   |     - `local` dropped here while still borrowed
+LL |     let v = p.produce();
+LL |     let _leaked = leak_it(v);
+   |                   ---------- argument requires that `local` is borrowed for `'static`
+   |
+note: requirement that the value outlives `'static` introduced here
+  --> $DIR/interface-lifetime-in-type-arg.rs:34:15
+   |
+LL | fn leak_it<T: 'static>(val: T) -> &'static T {
+   |               ^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.

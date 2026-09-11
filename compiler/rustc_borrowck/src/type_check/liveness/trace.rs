@@ -576,7 +576,16 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
         for &kind in &drop_data.dropck_result.kinds {
-            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at, false);
+            // `use2`: the alias's own drop glue is bounded by its outlives bound, but a `Drop`
+            // impl on a *wrapper* can call the alias's trait bounds. Only exempt the kind that
+            // is the dropped type itself.
+            let use_live = match rustc_trait_selection::traits::outlives_for_liveness::interface_liveness_mode() {
+                rustc_trait_selection::traits::outlives_for_liveness::InterfaceLivenessMode::UseOrForeignDrop => {
+                    kind.as_type() != Some(dropped_ty)
+                }
+                _ => false,
+            };
+            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at, use_live);
             polonius::legacy::emit_drop_facts(
                 self.typeck.tcx(),
                 dropped_local,

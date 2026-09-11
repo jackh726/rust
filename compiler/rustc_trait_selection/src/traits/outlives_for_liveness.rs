@@ -484,6 +484,7 @@ pub enum InterfaceLivenessMode {
     Flat,
     Rec,
     UseOnly,
+    UseOrForeignDrop,
     Check,
 }
 
@@ -494,8 +495,10 @@ pub fn interface_liveness_mode() -> InterfaceLivenessMode {
         Ok("flat") => InterfaceLivenessMode::Flat,
         Ok("rec") => InterfaceLivenessMode::Rec,
         Ok("use") => InterfaceLivenessMode::UseOnly,
+        Ok("use2") => InterfaceLivenessMode::UseOrForeignDrop,
         Ok("check") => InterfaceLivenessMode::Check,
-        _ => InterfaceLivenessMode::Off,
+        Ok("off") => InterfaceLivenessMode::Off,
+        _ => InterfaceLivenessMode::UseOnly,
     })
 }
 
@@ -912,7 +915,9 @@ where
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::UseOnly | InterfaceLivenessMode::Check
+                    InterfaceLivenessMode::UseOnly
+                    | InterfaceLivenessMode::UseOrForeignDrop
+                    | InterfaceLivenessMode::Check
                         if self.use_live =>
                     {
                         let iface = interface_live_args(tcx, def_id);
@@ -931,7 +936,9 @@ where
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::UseOnly | InterfaceLivenessMode::Check => {}
+                    InterfaceLivenessMode::UseOnly
+                    | InterfaceLivenessMode::UseOrForeignDrop
+                    | InterfaceLivenessMode::Check => {}
                 }
             }
 
