@@ -476,8 +476,12 @@ fn live_args_for_outlives_clause<'tcx>(
 /// * `rec`   — like `flat`, but a nested alias in the interface only contributes the args
 ///   that are live for *it*, so `impl Future<Output = impl Trait + 'static> + 'static`
 ///   still keeps nothing alive.
-/// * `check` — `rec`, plus a declaration-site error when the alias's interface mentions an
-///   arg that its own outlives bounds already pruned (so `rec` is a no-op for item bounds).
+/// * `use`   — `rec`, but only for use-liveness: a value that can only be dropped can't reach
+///   the alias's interface. **The default.**
+/// * `use2`  — `use`, except that an alias reached through dropck of some *other* type (whose
+///   `Drop` impl may therefore have bounds on it) does use the interface rule.
+/// * `check` — `use`, plus a declaration-site error when the alias's interface mentions an
+///   arg that its own outlives bounds already pruned (so the union is a no-op for item bounds).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InterfaceLivenessMode {
     Off,
