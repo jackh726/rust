@@ -532,7 +532,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
     /// points `live_at`.
     fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
         debug!("add_use_live_facts_for(value={:?})", value);
-        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at);
+        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at, true);
     }
 
     /// Some variable with type `live_ty` is "drop live" at `location`
@@ -576,7 +576,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
         for &kind in &drop_data.dropck_result.kinds {
-            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at);
+            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at, false);
             polonius::legacy::emit_drop_facts(
                 self.typeck.tcx(),
                 dropped_local,
@@ -592,6 +592,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         typeck: &mut TypeChecker<'_, 'tcx>,
         value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
         live_at: &IntervalSet<PointIndex>,
+        use_live: bool,
     ) {
         debug!("make_all_regions_live(value={:?})", value);
         debug!(
@@ -607,6 +608,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
 
                 typeck.constraints.liveness_constraints.add_points(live_region_vid, live_at);
             },
+            use_live,
         });
 
         // When using `-Zpolonius=next`, we record the variance of each live region.

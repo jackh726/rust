@@ -230,6 +230,10 @@ pub(super) fn check_well_formed(
     tcx: TyCtxt<'_>,
     def_id: LocalDefId,
 ) -> Result<(), ErrorGuaranteed> {
+    // PROTOTYPE: declaration-site check that an alias's outlives bounds don't prune away args
+    // that its own interface exposes.
+    rustc_trait_selection::traits::outlives_for_liveness::check_alias_interface_bounds(tcx, def_id);
+
     let mut res = crate::check::check::check_item_type(tcx, def_id);
 
     for param in &tcx.generics_of(def_id).own_params {
