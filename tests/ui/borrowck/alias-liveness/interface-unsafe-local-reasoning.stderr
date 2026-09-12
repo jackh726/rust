@@ -1,0 +1,21 @@
+error: lifetime may not live long enough
+  --> $DIR/interface-unsafe-local-reasoning.rs:33:5
+   |
+LL | fn honest<'r>(r: &'r str) -> impl 'static + Into<&'r str> {
+   |           -- lifetime `'r` defined here
+LL |     Wrapper(NonNull::from(r), PhantomData)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ returning this value requires that `'r` must outlive `'static`
+   |
+help: consider changing `impl Into<&'r str> + 'static`'s explicit `'static` bound to the lifetime of argument `r`
+   |
+LL - fn honest<'r>(r: &'r str) -> impl 'static + Into<&'r str> {
+LL + fn honest<'r>(r: &'r str) -> impl 'r + Into<&'r str> {
+   |
+help: alternatively, add an explicit `'static` bound to this reference
+   |
+LL - fn honest<'r>(r: &'r str) -> impl 'static + Into<&'r str> {
+LL + fn honest<'r>(r: &'static str) -> impl 'static + Into<&'r str> {
+   |
+
+error: aborting due to 1 previous error
+
