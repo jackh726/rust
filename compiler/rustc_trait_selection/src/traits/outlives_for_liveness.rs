@@ -510,6 +510,30 @@ pub fn interface_liveness_mode() -> InterfaceLivenessMode {
     })
 }
 
+/// PROTOTYPE (env-gated, `RUSTC_DYN_PRUNE=1`): apply the alias-style pruning to `dyn` too.
+///
+/// The idea: `dyn Trait<'a> + 'b` erases a `T` that the coercion site proved `T: 'b`, so `'b`
+/// bounds everything the value can hold and the trait's own args look interface-only —
+/// apparently the same situation an opaque is in. That would align `dyn` and `impl` in the
+/// *permissive* direction, where the `rec` rule aligns them in the conservative one.
+///
+/// **It is unsound, and this mode exists to record why.** With it,
+/// `tests/ui/dropck/dropck_trait_cycle_checked.rs` compiles, and the resulting program reads
+/// freed memory in entirely safe code. The asymmetry is real: an opaque's args *are* its
+/// hidden type's regions, and `capturable` is an upper bound on them proven at the
+/// definition. A `dyn` has no definition — the erased type is chosen afresh at every
+/// coercion and its own regions are gone. The trait args are the only record left of what
+/// the value can reach, which is exactly what dropck reads them as. There is nothing to
+/// prune a `dyn` *with*.
+///
+/// Also breaks `dropck/dropck-object-cycle.rs`, `nll/issue-69114-static-ty.rs` and
+/// `borrowck/closure-upvar-named-lifetime.rs`.
+pub fn dyn_prune() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("RUSTC_DYN_PRUNE").is_some())
+}
+
 pub(crate) fn alias_def_id<'tcx>(kind: ty::AliasTyKind<'tcx>) -> DefId {
     match kind {
         ty::AliasTyKind::Projection { def_id }
@@ -952,6 +976,12 @@ where
                     InterfaceLivenessMode::UseOnly
                     | InterfaceLivenessMode::UseOrForeignDrop => {}
                 }
+            }
+
+            // `dyn Trait<'a> + 'b`: the erased type was proven `: 'b` at the coercion, so
+            // `'b` bounds everything the value can hold and `'a` is interface-only.
+            ty::Dynamic(_, region) if dyn_prune() => {
+                region.visit_with(self);
             }
 
             _ => ty.super_visit_with(self),
