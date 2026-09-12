@@ -1,0 +1,26 @@
+error: lifetime may not live long enough
+  --> $DIR/hidden-type-cannot-beat-its-bound.rs:25:5
+   |
+LL | fn rpit<'a, 'b>(payload: &'a Payload) -> impl Produce<'a> + 'b + use<'a, 'b> {
+   |         --  -- lifetime `'b` defined here
+   |         |
+   |         lifetime `'a` defined here
+LL |     payload
+   |     ^^^^^^^ function was supposed to return data with lifetime `'b` but it is returning data with lifetime `'a`
+   |
+   = help: consider adding the following bound: `'a: 'b`
+
+error: lifetime may not live long enough
+  --> $DIR/hidden-type-cannot-beat-its-bound.rs:31:5
+   |
+LL | fn tait<'a, 'b>(payload: &'a Payload) -> Tait<'a, 'b> {
+   |         --  -- lifetime `'b` defined here
+   |         |
+   |         lifetime `'a` defined here
+LL |     payload
+   |     ^^^^^^^ function was supposed to return data with lifetime `'b` but it is returning data with lifetime `'a`
+   |
+   = help: consider adding the following bound: `'a: 'b`
+
+error: aborting due to 2 previous errors
+
