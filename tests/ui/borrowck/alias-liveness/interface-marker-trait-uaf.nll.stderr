@@ -1,0 +1,16 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-marker-trait-uaf.rs:51:24
+   |
+LL |         let s = String::from("hello world");
+   |             - binding `s` declared here
+LL |         o = inner::foo(&s);
+   |                        ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     let _unrelated = String::from("UB! UB! UB! UB! UB! UB!");
+LL |     let dangling: &str = inner::Yield::get(&o);
+   |                                            -- borrow later used here
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.

@@ -1,0 +1,16 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-marker-trait-dyn.rs:20:23
+   |
+LL |         let s = String::from("hi");
+   |             - binding `s` declared here
+LL |         let r: &str = &s;
+   |                       ^^ borrowed value does not live long enough
+LL |         d = Box::new(foo(r));
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     drop(d);
+   |          - borrow later used here
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.

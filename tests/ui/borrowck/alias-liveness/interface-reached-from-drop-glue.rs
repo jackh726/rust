@@ -1,31 +1,19 @@
-//@ check-pass
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Zpolonius=off
 //@ [polonius] compile-flags: -Zpolonius=next
 //@ edition: 2024
 
-// The open question behind restricting the interface rule to use-liveness.
+// Why the interface rule is *not* restricted to use-liveness.
 //
-// `_w` is never used, only dropped, so we keep using just the args the alias's
-// outlives bounds allow it to capture — and `+ 'static` allows none. But `W`'s
-// `Drop` impl *does* reach the alias's interface: it calls `next()` and gets a
-// `&'a Lifetimed<'a>` back.
+// `_w` is never used, only dropped — so "a value you can only drop can't reach its
+// interface" would say none of the alias's interface args need to be live here. But
+// `W`'s `Drop` impl does reach the interface: it calls `next()` and gets a
+// `&'a Lifetimed<'a>` back. Carving drop-liveness out would accept this.
 //
-// So "a value that can only be dropped can't reach its interface" is not true in
-// general. It is true of the alias's own drop glue, which is what the outlives
-// bound bounds; it is not true once a `Drop` impl with bounds on the alias gets
-// involved.
-//
-// I could not turn this into UB: the value `next()` hands back really is
-// `'static`, only its type claims `'a`, and for the impl backing the interface to
-// fabricate a dangling `&'a` it would have to name `'a`, which would make `'a` a
-// parameter of `W` and therefore structurally live at the drop. But #161038 was
-// built out of an "accepted, should be rejected" of exactly this shape, so this
-// wants a real answer rather than a failure to exploit.
-//
-// `RUSTC_ALIAS_IFACE=rec` rejects this (no drop carve-out at all), as does
-// `RUSTC_ALIAS_IFACE=use2` (carve-out only for the alias's own drop glue).
+// (Restricting to use-liveness is otherwise very attractive: it takes the ui-suite
+// fallout to zero and the measured crater fallout to one crate. It is available as
+// `RUSTC_ALIAS_IFACE=use` in the prototype, and this is the test that says no.)
 
 struct Lifetimed<'a>(&'a ());
 static LIFETIMED: Lifetimed<'static> = Lifetimed(&());
@@ -57,7 +45,7 @@ fn main() {
     let _w;
     {
         let s = String::from("x");
-        _w = W(make(&s));
+        _w = W(make(&s)); //~ ERROR `s` does not live long enough
     }
     // `_w` is only dropped here, never used.
 }

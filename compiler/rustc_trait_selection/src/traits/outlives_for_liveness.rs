@@ -475,13 +475,15 @@ fn live_args_for_outlives_clause<'tcx>(
 ///   projection bound of the alias is live, no matter what the alias's outlives bounds say.
 /// * `rec`   — like `flat`, but a nested alias in the interface only contributes the args
 ///   that are live for *it*, so `impl Future<Output = impl Trait + 'static> + 'static`
-///   still keeps nothing alive.
+///   still keeps nothing alive. **The default.**
 /// * `use`   — `rec`, but only for use-liveness: a value that can only be dropped can't reach
-///   the alias's interface. **The default.**
+///   the alias's interface. Unsound in the presence of a `Drop` impl with bounds on the alias;
+///   see `tests/ui/borrowck/alias-liveness/interface-reached-from-drop-glue.rs`.
 /// * `use2`  — `use`, except that an alias reached through dropck of some *other* type (whose
 ///   `Drop` impl may therefore have bounds on it) does use the interface rule.
-/// * `check` — `use`, plus a declaration-site error when the alias's interface mentions an
+/// * `check` — `rec`, plus a declaration-site error when the alias's interface mentions an
 ///   arg that its own outlives bounds already pruned (so the union is a no-op for item bounds).
+/// * `check-lt` — `check`, but only reports *lifetime* args, not type params.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InterfaceLivenessMode {
     Off,
@@ -490,6 +492,7 @@ pub enum InterfaceLivenessMode {
     UseOnly,
     UseOrForeignDrop,
     Check,
+    CheckLifetimes,
 }
 
 pub fn interface_liveness_mode() -> InterfaceLivenessMode {
@@ -502,7 +505,8 @@ pub fn interface_liveness_mode() -> InterfaceLivenessMode {
         Ok("use2") => InterfaceLivenessMode::UseOrForeignDrop,
         Ok("check") => InterfaceLivenessMode::Check,
         Ok("off") => InterfaceLivenessMode::Off,
-        _ => InterfaceLivenessMode::UseOnly,
+        Ok("check-lt") => InterfaceLivenessMode::CheckLifetimes,
+        _ => InterfaceLivenessMode::Rec,
     })
 }
 
@@ -709,9 +713,11 @@ fn declared_outlives_bounds<'tcx>(
 /// Those two claims are inconsistent: the second one means `'r` has to be live for as long as
 /// the opaque is, which is exactly what the first one says isn't necessary.
 pub fn check_alias_interface_bounds<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) {
-    if interface_liveness_mode() != InterfaceLivenessMode::Check {
-        return;
-    }
+    let lifetimes_only = match interface_liveness_mode() {
+        InterfaceLivenessMode::Check => false,
+        InterfaceLivenessMode::CheckLifetimes => true,
+        _ => return,
+    };
     let is_opaque = match tcx.def_kind(def_id) {
         DefKind::OpaqueTy => true,
         // The synthetic assoc type of an RPITIT delegates to its opaque, which is checked
@@ -781,6 +787,9 @@ pub fn check_alias_interface_bounds<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId)
     let self_identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
     for idx in interface.iter() {
         let arg = self_identity_args[idx as usize];
+        if lifetimes_only && arg.as_region().is_none() {
+            continue;
+        }
         let mut bad = None;
         for &bound in &outlives_bounds {
             let bound = to_ctx_region(bound);
@@ -914,14 +923,14 @@ where
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::Rec => {
+                    InterfaceLivenessMode::Rec
+                    | InterfaceLivenessMode::Check
+                    | InterfaceLivenessMode::CheckLifetimes => {
                         for idx in interface_live_args(tcx, def_id).iter() {
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::UseOnly
-                    | InterfaceLivenessMode::UseOrForeignDrop
-                    | InterfaceLivenessMode::Check
+                    InterfaceLivenessMode::UseOnly | InterfaceLivenessMode::UseOrForeignDrop
                         if self.use_live =>
                     {
                         let iface = interface_live_args(tcx, def_id);
@@ -941,8 +950,7 @@ where
                         }
                     }
                     InterfaceLivenessMode::UseOnly
-                    | InterfaceLivenessMode::UseOrForeignDrop
-                    | InterfaceLivenessMode::Check => {}
+                    | InterfaceLivenessMode::UseOrForeignDrop => {}
                 }
             }
 
