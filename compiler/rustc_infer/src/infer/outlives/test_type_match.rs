@@ -3,7 +3,9 @@ use std::collections::hash_map::Entry;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt};
+use rustc_middle::ty::{
+    self, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitableExt,
+};
 use rustc_type_ir::relate::relate_args_with_variances;
 use tracing::instrument;
 
@@ -73,6 +75,50 @@ pub fn extract_verify_if_eq<'tcx>(
     }
 }
 
+/// Syntactically match `pattern` (whose variables bound at `INNERMOST` are the
+/// pattern's holes) against `value`, returning the value each bound region had to
+/// take. `None` if they cannot be made equal. Same caveats as
+/// [`extract_verify_if_eq`].
+///
+/// This errs on the side of matching: free regions match any region (the pattern
+/// usually comes from the param-env, with `ReEarlyParam`s, and `value` from borrowck,
+/// with `ReVar`s), and alias rigidity is ignored.
+#[instrument(level = "debug", skip(tcx), ret)]
+pub fn match_higher_ranked_ty<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    pattern: ty::Binder<'tcx, Ty<'tcx>>,
+    value: Ty<'tcx>,
+) -> Option<FxHashMap<ty::BoundRegion<'tcx>, ty::Region<'tcx>>> {
+    let mut m = MatchAgainstHigherRankedOutlives::new(tcx);
+    m.free_regions_match_anything = true;
+    let mut erase = EraseRigidity { tcx };
+    m.relate(pattern.skip_binder().fold_with(&mut erase), value.fold_with(&mut erase)).ok()?;
+    Some(m.map)
+}
+
+// FIXME(#155345): see the corresponding FIXME in `live_args_for_alias_from_outlives_bounds`.
+struct EraseRigidity<'tcx> {
+    tcx: TyCtxt<'tcx>,
+}
+
+impl<'tcx> TypeFolder<TyCtxt<'tcx>> for EraseRigidity<'tcx> {
+    fn cx(&self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
+        if !ty.has_aliases() {
+            return ty;
+        }
+        match *ty.kind() {
+            ty::Alias(_, alias) => {
+                Ty::new_alias(self.tcx, ty::IsRigid::No, alias.fold_with(self))
+            }
+            _ => ty.super_fold_with(self),
+        }
+    }
+}
+
 /// True if a (potentially higher-ranked) outlives
 #[instrument(level = "debug", skip(tcx))]
 pub(super) fn can_match_erased_ty<'tcx>(
@@ -95,6 +141,8 @@ struct MatchAgainstHigherRankedOutlives<'tcx> {
     tcx: TyCtxt<'tcx>,
     pattern_depth: ty::DebruijnIndex,
     map: FxHashMap<ty::BoundRegion<'tcx>, ty::Region<'tcx>>,
+    /// See [`match_higher_ranked_ty`].
+    free_regions_match_anything: bool,
 }
 
 impl<'tcx> MatchAgainstHigherRankedOutlives<'tcx> {
@@ -103,6 +151,7 @@ impl<'tcx> MatchAgainstHigherRankedOutlives<'tcx> {
             tcx,
             pattern_depth: ty::INNERMOST,
             map: FxHashMap::default(),
+            free_regions_match_anything: false,
         }
     }
 }
@@ -183,7 +232,9 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstHigherRankedOutlives<'tcx>
             && depth == self.pattern_depth
         {
             self.bind(br, value)
-        } else if pattern == value {
+        } else if pattern == value
+            || (self.free_regions_match_anything && !matches!(pattern.kind(), ty::ReBound(..)))
+        {
             Ok(pattern)
         } else {
             self.no_match()

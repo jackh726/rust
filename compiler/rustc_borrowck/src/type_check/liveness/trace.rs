@@ -599,15 +599,15 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
             values::pretty_print_points(location_map, live_at.iter()),
         );
 
-        value.visit_with(&mut FreeRegionsVisitor {
-            tcx: typeck.tcx(),
-            param_env: typeck.infcx.param_env,
-            op: |r| {
+        value.visit_with(&mut FreeRegionsVisitor::new(
+            typeck.tcx(),
+            typeck.infcx.param_env,
+            |r| {
                 let live_region_vid = typeck.universal_regions.to_region_vid(r);
 
                 typeck.constraints.liveness_constraints.add_points(live_region_vid, live_at);
             },
-        });
+        ));
 
         // When using `-Zpolonius=next`, we record the variance of each live region.
         if let Some(polonius_context) = typeck.polonius_context.as_mut() {

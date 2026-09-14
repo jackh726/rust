@@ -4,8 +4,8 @@ use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::bug;
 use rustc_middle::ty::{
-    self, Flags, ImplTraitInTraitData, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
-    TypeVisitableExt, TypeVisitor,
+    self, Flags, ImplTraitInTraitData, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
+    TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
 };
 
 use crate::infer::outlives::test_type_match;
@@ -473,9 +473,12 @@ fn live_args_for_outlives_clause<'tcx>(
 /// * `off`  — status quo.
 /// * `flat` — PR #161154: every generic arg *syntactically* mentioned in a trait or projection
 ///   bound of the alias is live, no matter what the alias's outlives bounds say.
-/// * `rec`  — like `flat`, but a nested alias in the interface only contributes the args that
-///   are live for *it*, so `impl Future<Output = impl Trait + 'static> + 'static` still keeps
-///   nothing alive. **The default.**
+/// * `rec`  — like `flat`, but the interface is visited *at the use site* with the alias's actual
+///   args and this same visitor, so a nested alias is pruned by its own outlives bounds and the
+///   body's where-clauses exactly as if it were held directly:
+///   `impl Future<Output = impl Trait + 'static> + 'static` keeps nothing alive, and neither does
+///   `impl Iterator<Item = T::Item<'a>> + 'static` under `for<'x> T::Item<'x>: 'static`. The
+///   body's trait and projection clauses on the alias count as interface too. **The default.**
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InterfaceLivenessMode {
     Off,
@@ -541,116 +544,64 @@ fn for_each_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
     visitor: &mut V,
 ) {
     for clause in tcx.item_bounds(def_id).instantiate_identity().skip_norm_wip() {
-        match clause.kind().skip_binder() {
-            ty::ClauseKind::Trait(trait_pred) => {
-                for arg in &trait_pred.trait_ref.args[1..] {
-                    arg.visit_with(visitor);
-                }
-            }
-            ty::ClauseKind::Projection(proj_pred) => {
-                for arg in &proj_pred.projection_term.args[1..] {
-                    arg.visit_with(visitor);
-                }
-                proj_pred.term.visit_with(visitor);
-            }
-            _ => {}
-        }
+        visit_interface_part(clause.kind().skip_binder(), visitor);
     }
 }
 
-/// The positions of `def_id`'s identity args that can be *observed* through the alias's
-/// interface.
-///
-/// Unlike [`flat_interface_args`], a nested alias occurring in the interface only contributes
-/// the args that are live for *that* alias, recursively. This is what makes
-/// `impl Future<Output = impl Trait + 'static> + 'static` keep nothing alive, while
-/// `impl 'static + Into<&'r str>` still keeps `'r` alive.
-#[tracing::instrument(level = "debug", skip(tcx), ret)]
-pub fn interface_live_args<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> DenseBitSet<u32> {
-    let mut collector = InterfaceCollector {
-        tcx,
-        positions: DenseBitSet::new_empty(tcx.generics_of(def_id).count()),
-        stack: vec![def_id],
-    };
-    for_each_interface_part(tcx, def_id, &mut collector);
-    collector.positions
+/// Visit the part of one bound `Self: ..` that describes the interface of `Self`: the other
+/// args of a trait or projection bound, and the term of a projection bound. Anything else
+/// (in particular outlives bounds) contributes nothing.
+fn visit_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
+    clause: ty::ClauseKind<'tcx>,
+    visitor: &mut V,
+) {
+    match clause {
+        ty::ClauseKind::Trait(trait_pred) => {
+            for arg in &trait_pred.trait_ref.args[1..] {
+                arg.visit_with(visitor);
+            }
+        }
+        ty::ClauseKind::Projection(proj_pred) => {
+            for arg in &proj_pred.projection_term.args[1..] {
+                arg.visit_with(visitor);
+            }
+            proj_pred.term.visit_with(visitor);
+        }
+        _ => {}
+    }
 }
 
-struct InterfaceCollector<'tcx> {
+/// FIXME(#155345): instantiated item bounds are unnormalized, while the alias arm (via
+/// `extract_verify_if_eq`) expects aliases stamped the way the body's are: rigid under the new
+/// solver, `IsRigid::No` under the old one (which never stamps `Yes`). Treating a normalizable
+/// alias as rigid is sound for liveness, since its bounds hold for whatever it normalizes to,
+/// but imprecise: `<Owned as Tr>::Item<'a>` keeps `'a` live even when it is `String`.
+/// Normalizing in the body's infcx instead would fix both.
+struct AssumeRigid<'tcx> {
     tcx: TyCtxt<'tcx>,
-    positions: DenseBitSet<u32>,
-    /// Aliases we are already inside of, to keep `type A: Iterator<Item = Self::A>` from
-    /// recursing forever.
-    stack: Vec<DefId>,
 }
 
-impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for InterfaceCollector<'tcx> {
-    fn visit_region(&mut self, r: ty::Region<'tcx>) {
-        if let ty::ReEarlyParam(ebr) = r.kind() {
-            self.positions.insert(ebr.index);
-        }
+impl<'tcx> TypeFolder<TyCtxt<'tcx>> for AssumeRigid<'tcx> {
+    fn cx(&self) -> TyCtxt<'tcx> {
+        self.tcx
     }
 
-    fn visit_ty(&mut self, ty: Ty<'tcx>) {
+    fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
+        if !ty.has_aliases() {
+            return ty;
+        }
         match *ty.kind() {
-            ty::Param(pt) => {
-                self.positions.insert(pt.index);
+            ty::Alias(_, alias) => {
+                let rigid = if self.tcx.next_trait_solver_globally() {
+                    ty::IsRigid::Yes
+                } else {
+                    ty::IsRigid::No
+                };
+                Ty::new_alias(self.tcx, rigid, alias.fold_with(self))
             }
-            ty::Alias(_, ty::AliasTy { kind, args, .. }) => {
-                let tcx = self.tcx;
-                let def_id = alias_def_id(kind);
-                let live = live_args_for_nested_alias(tcx, kind, def_id, &mut self.stack);
-                for idx in live.iter() {
-                    args[idx as usize].visit_with(self);
-                }
-            }
-            _ => {
-                ty.super_visit_with(self);
-            }
+            _ => ty.super_fold_with(self),
         }
     }
-}
-
-/// The args of a nested alias that have to be live when a value of that alias is observable:
-/// the ones its own outlives bounds allow it to capture, plus the ones observable through its
-/// own interface.
-fn live_args_for_nested_alias<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    kind: ty::AliasTyKind<'tcx>,
-    def_id: DefId,
-    stack: &mut Vec<DefId>,
-) -> DenseBitSet<u32> {
-    let mut live = tcx.live_args_for_alias_from_outlives_bounds(kind).clone();
-    if let Some(variances) = tcx.opt_alias_variances(kind) {
-        for (idx, variance) in variances.iter().enumerate() {
-            if *variance == ty::Bivariant {
-                live.remove(idx as u32);
-            }
-        }
-    }
-    if stack.contains(&def_id) {
-        // We are already computing this alias's interface further up the stack, so its
-        // contribution is accounted for there. `item_bounds` elaborates supertraits, so this is
-        // hit by any alias whose bounds mention one of its own projections, e.g.
-        // `trait Observer: Future<Output = Wrap<Self::Value>>`.
-        //
-        // FIXME(prototype): this is only right because the recursive occurrence has the same
-        // args as the outer one. A real implementation wants a fixpoint (or a cycle-recovering
-        // query) to also handle `type A<'a>: Iterator<Item = Self::A<'b>>`.
-        return live;
-    }
-    stack.push(def_id);
-    let positions = interface_live_args(tcx, def_id);
-    let mut collector = InterfaceCollector {
-        tcx,
-        positions: DenseBitSet::new_empty(tcx.generics_of(def_id).count()),
-        stack: std::mem::take(stack),
-    };
-    for_each_interface_part(tcx, def_id, &mut collector);
-    *stack = collector.stack;
-    stack.pop();
-    live.union(&positions);
-    live
 }
 
 /// Visits free regions in the type that are relevant for liveness computation.
@@ -663,9 +614,75 @@ fn live_args_for_nested_alias<'tcx>(
 /// args are visited. If there are no applicable bounds, we walk through the
 /// alias's (non-bivariant) args structurally.
 pub struct FreeRegionsVisitor<'tcx, OP: FnMut(ty::Region<'tcx>)> {
-    pub tcx: TyCtxt<'tcx>,
-    pub param_env: ty::ParamEnv<'tcx>,
-    pub op: OP,
+    tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    op: OP,
+    /// Aliases whose interface we are currently visiting. See the cycle comment in `visit_ty`.
+    interface_stack: Vec<DefId>,
+}
+
+impl<'tcx, OP: FnMut(ty::Region<'tcx>)> FreeRegionsVisitor<'tcx, OP> {
+    pub fn new(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, op: OP) -> Self {
+        FreeRegionsVisitor { tcx, param_env, op, interface_stack: Vec::new() }
+    }
+
+    /// PROTOTYPE: visit everything that can be *obtained* from a value of the alias `ty`,
+    /// using this same visitor, so that a nested alias is treated exactly as it would be if it
+    /// were held directly in this body: its own outlives bounds *and* this body's where-clauses
+    /// prune it.
+    ///
+    /// The interface is every bound we know `ty` satisfies here, not just the alias's own item
+    /// bounds: a where-clause `for<'x> T::Item<'x>: Into<&'x str>` exposes `'a` through
+    /// `T::Item<'a>` just as an item bound would. Since the body's outlives clauses are allowed
+    /// to prune an alias, its trait and projection clauses have to count too.
+    fn visit_alias_interface(&mut self, ty: Ty<'tcx>, def_id: DefId, args: ty::GenericArgsRef<'tcx>) {
+        let tcx = self.tcx;
+        if self.interface_stack.contains(&def_id) {
+            // We are already visiting this alias's interface further up, so only its
+            // capturable args (visited by the caller) are added here. `item_bounds` elaborates
+            // supertraits, so this is hit by any alias whose bounds mention one of its own
+            // projections, e.g. `trait Observer: Future<Output = Wrap<Self::Value>>`, where
+            // `<Opaque as Observer>::Value` has `Opaque` as an arg.
+            //
+            // FIXME(prototype): this is only precise when the recursive occurrence's interface
+            // adds nothing new, which holds when it has the same args. A real implementation
+            // wants a fixpoint to also handle `type A<'a>: Iterator<Item = Self::A<'b>>`. It
+            // must never fall back to "every arg": that reproduces `flat`.
+            return;
+        }
+        self.interface_stack.push(def_id);
+
+        for clause in tcx.item_bounds(def_id).instantiate(tcx, args).skip_norm_wip() {
+            let clause = clause.fold_with(&mut AssumeRigid { tcx });
+            visit_interface_part(clause.kind().skip_binder(), self);
+        }
+
+        for clause in self.param_env.caller_bounds() {
+            let bound_self_ty = clause.kind().map_bound(|kind| match kind {
+                ty::ClauseKind::Trait(pred) => Some(pred.self_ty()),
+                ty::ClauseKind::Projection(pred) => Some(pred.self_ty()),
+                _ => None,
+            });
+            let Some(self_ty) = bound_self_ty.transpose() else { continue };
+            if !matches!(self_ty.skip_binder().kind(), ty::Alias(_, alias) if alias_def_id(alias.kind) == def_id)
+            {
+                continue;
+            }
+            // `for<'x> T::Item<'x>: Into<&'x str>` applies to `T::Item<'a>` with `'x := 'a`.
+            let Some(map) = test_type_match::match_higher_ranked_ty(tcx, self_ty, ty) else {
+                continue;
+            };
+            // A bound region that doesn't occur in the self type is universally quantified
+            // (`T::Item<'a>: for<'y> Into<&'y str>`), so any region will do; `'static` keeps
+            // nothing extra alive.
+            let kind = tcx.instantiate_bound_regions_uncached(clause.kind(), |br| {
+                map.get(&br).copied().unwrap_or(tcx.lifetimes.re_static)
+            });
+            visit_interface_part(kind, self);
+        }
+
+        self.interface_stack.pop();
+    }
 }
 
 impl<'tcx, OP> TypeVisitor<TyCtxt<'tcx>> for FreeRegionsVisitor<'tcx, OP>
@@ -738,23 +755,7 @@ where
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::Rec => {
-                        let iface = interface_live_args(tcx, def_id);
-                        if std::env::var_os("RUSTC_ALIAS_IFACE_DEBUG").is_some()
-                            && !iface.is_empty()
-                        {
-                            eprintln!(
-                                "IFACE {} capturable={:?} iface={:?} args={:?}",
-                                tcx.def_path_str(def_id),
-                                capturable.iter().collect::<Vec<_>>(),
-                                iface.iter().collect::<Vec<_>>(),
-                                args,
-                            );
-                        }
-                        for idx in iface.iter() {
-                            args[idx as usize].visit_with(self);
-                        }
-                    }
+                    InterfaceLivenessMode::Rec => self.visit_alias_interface(ty, def_id, args),
                 }
             }
 
