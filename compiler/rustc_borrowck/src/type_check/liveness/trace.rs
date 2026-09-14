@@ -19,7 +19,7 @@ use rustc_trait_selection::traits::query::dropck_outlives;
 use rustc_trait_selection::traits::query::type_op::{DropckOutlives, TypeOpOutput};
 use tracing::debug;
 
-use crate::polonius::record_live_region_variance;
+use crate::polonius::{DeferredLocals, record_live_region_variance};
 use crate::region_infer::values::{self, LivenessValues};
 use crate::type_check::liveness::local_use_map::LocalUseMap;
 use crate::type_check::{NormalizeLocation, TypeChecker};
@@ -60,11 +60,18 @@ pub(super) fn trace<'tcx>(
 
     let mut results = LivenessResults::new(typeck, calc);
 
+    let deferred_locals = DeferredLocals::default();
+
     results.add_extra_drop_facts(relevant_live_locals);
 
     results.compute_for_all_locals(relevant_live_locals);
 
     results.dropck_boring_locals(boring_locals);
+
+    if let Some(polonius_context) = &mut typeck.polonius_context {
+        polonius_context.deferred_locals_for_liveness = deferred_locals;
+        polonius_context.local_use_map = Some(local_use_map);
+    }
 }
 
 pub(crate) struct LivenessComputation<'a, 'tcx> {
@@ -73,7 +80,7 @@ pub(crate) struct LivenessComputation<'a, 'tcx> {
     pub(crate) body: &'a Body<'tcx>,
 
     /// Defines the `PointIndex` mapping
-    location_map: &'a DenseLocationMap,
+    pub(crate) location_map: &'a DenseLocationMap,
 
     /// Mapping to/from the various indices used for initialization tracking.
     move_data: &'a MoveData<'tcx>,
@@ -161,15 +168,6 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
             }
 
             if !self.comp.drop_live_at.is_empty() {
-                // `drop_live_at` is using a DenseBitSet, but `add_drop_live_facts_for` expects
-                // an IntervalSet. We thus convert between those two here.
-                let mut set: IntervalSet<PointIndex> =
-                    IntervalSet::new(self.comp.drop_live_at.domain_size());
-                for item in self.comp.drop_live_at.iter() {
-                    // We iterate the `drop_live_at` set from smallest to largest values, so
-                    // we can use append to add things to the interval set at the end.
-                    set.append(item);
-                }
                 let local_span = self.comp.body.local_decls[local].source_info.span;
                 Self::add_drop_live_facts_for(
                     self.typeck,
@@ -179,7 +177,7 @@ impl<'a, 'typeck, 'tcx> LivenessResults<'a, 'typeck, 'tcx> {
                     local_ty,
                     local_span,
                     &self.comp.drop_locations,
-                    &set,
+                    &self.comp.drop_live_at(),
                 );
             }
         }
@@ -350,6 +348,18 @@ impl<'a, 'tcx> LivenessComputation<'a, 'tcx> {
             drop_locations: vec![],
             stack: vec![],
         }
+    }
+
+    pub(crate) fn drop_live_at(&self) -> IntervalSet<PointIndex> {
+        // `drop_live_at` is using a DenseBitSet, but `add_drop_live_facts_for`
+        // expects an IntervalSet.
+        let mut set: IntervalSet<PointIndex> = IntervalSet::new(self.drop_live_at.domain_size());
+        for item in self.drop_live_at.iter() {
+            // We iterate the `drop_live_at` set from smallest to largest values, so
+            // we can use append to add things to the interval set at the end.
+            set.append(item);
+        }
+        set
     }
 
     pub(crate) fn compute(&mut self, local: Local) {
