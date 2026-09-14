@@ -12,8 +12,8 @@
 // `&'a Lifetimed<'a>` back. Carving drop-liveness out would accept this.
 //
 // (Restricting to use-liveness is otherwise very attractive: it takes the ui-suite
-// fallout to zero and the measured crater fallout to one crate. It is available as
-// `RUSTC_ALIAS_IFACE=use` in the prototype, and this is the test that says no.)
+// fallout to zero and the measured crater fallout to one crate. This is the test that
+// says no.)
 
 struct Lifetimed<'a>(&'a ());
 static LIFETIMED: Lifetimed<'static> = Lifetimed(&());

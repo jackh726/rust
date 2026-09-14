@@ -470,68 +470,27 @@ fn live_args_for_outlives_clause<'tcx>(
 
 /// PROTOTYPE (env-gated): which alias-interface liveness rule to apply.
 ///
-/// * `off`   — status quo.
-/// * `flat`  — PR #161154: every generic arg *syntactically* mentioned in a trait or
-///   projection bound of the alias is live, no matter what the alias's outlives bounds say.
-/// * `rec`   — like `flat`, but a nested alias in the interface only contributes the args
-///   that are live for *it*, so `impl Future<Output = impl Trait + 'static> + 'static`
-///   still keeps nothing alive. **The default.**
-/// * `use`   — `rec`, but only for use-liveness: a value that can only be dropped can't reach
-///   the alias's interface. Unsound in the presence of a `Drop` impl with bounds on the alias;
-///   see `tests/ui/borrowck/alias-liveness/interface-reached-from-drop-glue.rs`.
-/// * `use2`  — `use`, except that an alias reached through dropck of some *other* type (whose
-///   `Drop` impl may therefore have bounds on it) does use the interface rule.
-/// * `check` — `rec`, plus a declaration-site error when the alias's interface mentions an
-///   arg that its own outlives bounds already pruned (so the union is a no-op for item bounds).
-/// * `check-lt` — `check`, but only reports *lifetime* args, not type params.
+/// * `off`  — status quo.
+/// * `flat` — PR #161154: every generic arg *syntactically* mentioned in a trait or projection
+///   bound of the alias is live, no matter what the alias's outlives bounds say.
+/// * `rec`  — like `flat`, but a nested alias in the interface only contributes the args that
+///   are live for *it*, so `impl Future<Output = impl Trait + 'static> + 'static` still keeps
+///   nothing alive. **The default.**
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum InterfaceLivenessMode {
     Off,
     Flat,
     Rec,
-    UseOnly,
-    UseOrForeignDrop,
-    Check,
-    CheckLifetimes,
 }
 
 pub fn interface_liveness_mode() -> InterfaceLivenessMode {
     use std::sync::OnceLock;
     static MODE: OnceLock<InterfaceLivenessMode> = OnceLock::new();
     *MODE.get_or_init(|| match std::env::var("RUSTC_ALIAS_IFACE").as_deref() {
-        Ok("flat") => InterfaceLivenessMode::Flat,
-        Ok("rec") => InterfaceLivenessMode::Rec,
-        Ok("use") => InterfaceLivenessMode::UseOnly,
-        Ok("use2") => InterfaceLivenessMode::UseOrForeignDrop,
-        Ok("check") => InterfaceLivenessMode::Check,
         Ok("off") => InterfaceLivenessMode::Off,
-        Ok("check-lt") => InterfaceLivenessMode::CheckLifetimes,
+        Ok("flat") => InterfaceLivenessMode::Flat,
         _ => InterfaceLivenessMode::Rec,
     })
-}
-
-/// PROTOTYPE (env-gated, `RUSTC_DYN_PRUNE=1`): apply the alias-style pruning to `dyn` too.
-///
-/// The idea: `dyn Trait<'a> + 'b` erases a `T` that the coercion site proved `T: 'b`, so `'b`
-/// bounds everything the value can hold and the trait's own args look interface-only —
-/// apparently the same situation an opaque is in. That would align `dyn` and `impl` in the
-/// *permissive* direction, where the `rec` rule aligns them in the conservative one.
-///
-/// **It is unsound, and this mode exists to record why.** With it,
-/// `tests/ui/dropck/dropck_trait_cycle_checked.rs` compiles, and the resulting program reads
-/// freed memory in entirely safe code. The asymmetry is real: an opaque's args *are* its
-/// hidden type's regions, and `capturable` is an upper bound on them proven at the
-/// definition. A `dyn` has no definition — the erased type is chosen afresh at every
-/// coercion and its own regions are gone. The trait args are the only record left of what
-/// the value can reach, which is exactly what dropck reads them as. There is nothing to
-/// prune a `dyn` *with*.
-///
-/// Also breaks `dropck/dropck-object-cycle.rs`, `nll/issue-69114-static-ty.rs` and
-/// `borrowck/closure-upvar-named-lifetime.rs`.
-pub fn dyn_prune() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("RUSTC_DYN_PRUNE").is_some())
 }
 
 pub(crate) fn alias_def_id<'tcx>(kind: ty::AliasTyKind<'tcx>) -> DefId {
@@ -681,6 +640,7 @@ fn live_args_for_nested_alias<'tcx>(
         return live;
     }
     stack.push(def_id);
+    let positions = interface_live_args(tcx, def_id);
     let mut collector = InterfaceCollector {
         tcx,
         positions: DenseBitSet::new_empty(tcx.generics_of(def_id).count()),
@@ -689,173 +649,8 @@ fn live_args_for_nested_alias<'tcx>(
     for_each_interface_part(tcx, def_id, &mut collector);
     *stack = collector.stack;
     stack.pop();
-    live.union(&collector.positions);
+    live.union(&positions);
     live
-}
-
-/// The outlives bounds declared on `def_id` itself, i.e. the `'b`s in `Alias<..>: 'b`.
-///
-/// This is the same set that [`live_args_for_alias_from_outlives_bounds`] uses to decide which
-/// args an alias may capture.
-fn declared_outlives_bounds<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    kind: ty::AliasTyKind<'tcx>,
-) -> Vec<ty::Region<'tcx>> {
-    let def_id = alias_def_id(kind);
-    let self_identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
-    let alias_ty = Ty::new_alias(
-        tcx,
-        ty::IsRigid::No,
-        ty::AliasTy::new_from_args(tcx, kind, self_identity_args),
-    );
-    tcx.item_bounds(def_id)
-        .instantiate_identity()
-        .skip_norm_wip()
-        .iter()
-        .filter_map(|clause| {
-            let outlives = clause.as_type_outlives_clause()?;
-            if let Some(outlives) = outlives.no_bound_vars()
-                && outlives.0 == alias_ty
-            {
-                Some(outlives.1)
-            } else {
-                test_type_match::extract_verify_if_eq(
-                    tcx,
-                    &outlives.map_bound(|ty::OutlivesClause(ty, bound)| VerifyIfEq { ty, bound }),
-                    alias_ty,
-                )
-            }
-        })
-        .collect()
-}
-
-/// Declaration-site check: an alias's outlives bounds must not prune away an arg that its own
-/// interface exposes.
-///
-/// `fn foo<'r>(r: &'r str) -> impl 'static + Into<&'r str>` declares that its hidden type
-/// captures nothing (`: 'static`) while also promising that you can get a `&'r str` out of it.
-/// Those two claims are inconsistent: the second one means `'r` has to be live for as long as
-/// the opaque is, which is exactly what the first one says isn't necessary.
-pub fn check_alias_interface_bounds<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) {
-    let lifetimes_only = match interface_liveness_mode() {
-        InterfaceLivenessMode::Check => false,
-        InterfaceLivenessMode::CheckLifetimes => true,
-        _ => return,
-    };
-    let is_opaque = match tcx.def_kind(def_id) {
-        DefKind::OpaqueTy => true,
-        // The synthetic assoc type of an RPITIT delegates to its opaque, which is checked
-        // separately.
-        DefKind::AssocTy if tcx.opt_rpitit_info(def_id.to_def_id()).is_some() => return,
-        // Only *trait* associated types have item bounds; an impl's associated type is just
-        // an alias for its value.
-        DefKind::AssocTy
-            if tcx.associated_item(def_id.to_def_id()).container
-                == ty::AssocContainer::Trait =>
-        {
-            false
-        }
-        DefKind::AssocTy => return,
-        _ => return,
-    };
-    let kind = if is_opaque {
-        ty::AliasTyKind::Opaque { def_id: def_id.to_def_id() }
-    } else {
-        ty::AliasTyKind::Projection { def_id: def_id.to_def_id() }
-    };
-
-    let outlives_bounds = declared_outlives_bounds(tcx, kind);
-    if outlives_bounds.is_empty() {
-        // Nothing is pruned, so nothing can be pruned wrongly.
-        return;
-    }
-
-    let interface = interface_live_args(tcx, def_id.to_def_id());
-    if interface.is_empty() {
-        return;
-    }
-
-    // `region_known_to_outlive`/`ty_known_to_outlive` want the context the alias's bounds were
-    // proven in: for opaques that is the parent item (bounds and WF types are not lowered for
-    // the opaque itself), and its regions have to be mapped back to the parent's.
-    let (ctx_def_id, param_env, wf_tys) = if is_opaque {
-        let parent = match tcx.opaque_ty_origin(def_id) {
-            rustc_hir::OpaqueTyOrigin::FnReturn { parent, .. }
-            | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, .. }
-            | rustc_hir::OpaqueTyOrigin::TyAlias { parent, .. } => parent,
-        };
-        let wf_tys = FxIndexSet::from_iter(
-            tcx.assumed_wf_types(parent.expect_local()).iter().map(|(ty, _)| *ty),
-        );
-        (parent, tcx.param_env(parent), wf_tys)
-    } else {
-        let wf_tys =
-            tcx.assumed_wf_types(def_id).iter().map(|(ty, _)| *ty).collect::<FxIndexSet<_>>();
-        (def_id.to_def_id(), tcx.param_env(def_id), wf_tys)
-    };
-
-    let generics = tcx.generics_of(def_id);
-    let to_ctx_region = |r: ty::Region<'tcx>| -> ty::Region<'tcx> {
-        if !is_opaque {
-            return r;
-        }
-        match r.kind() {
-            ty::ReEarlyParam(ebr) if (ebr.index as usize) >= generics.parent_count => {
-                let region_def_id = generics.param_at(ebr.index as usize, tcx).def_id;
-                tcx.map_opaque_lifetime_to_parent_lifetime(region_def_id.expect_local())
-            }
-            _ => r,
-        }
-    };
-
-    let self_identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
-    for idx in interface.iter() {
-        let arg = self_identity_args[idx as usize];
-        if lifetimes_only && arg.as_region().is_none() {
-            continue;
-        }
-        let mut bad = None;
-        for &bound in &outlives_bounds {
-            let bound = to_ctx_region(bound);
-            let known = match arg.kind() {
-                ty::GenericArgKind::Const(_) => true,
-                ty::GenericArgKind::Lifetime(r) => {
-                    let r = to_ctx_region(r);
-                    r == bound
-                        || region_known_to_outlive(
-                            tcx,
-                            ctx_def_id.expect_local(),
-                            param_env,
-                            &wf_tys,
-                            r,
-                            bound,
-                        )
-                }
-                ty::GenericArgKind::Type(t) => ty_known_to_outlive(
-                    tcx,
-                    ctx_def_id.expect_local(),
-                    param_env,
-                    &wf_tys,
-                    t,
-                    bound,
-                ),
-            };
-            if !known {
-                bad = Some(bound);
-                break;
-            }
-        }
-        let Some(bound) = bad else { continue };
-        let param = generics.param_at(idx as usize, tcx);
-        tcx.dcx().span_err(
-            tcx.def_span(def_id),
-            format!(
-                "the bounds of this alias let you observe `{}`, but it is bounded by `{bound}` \
-                 and `{}: {bound}` is not known to hold",
-                param.name, param.name,
-            ),
-        );
-    }
 }
 
 /// Visits free regions in the type that are relevant for liveness computation.
@@ -871,10 +666,6 @@ pub struct FreeRegionsVisitor<'tcx, OP: FnMut(ty::Region<'tcx>)> {
     pub tcx: TyCtxt<'tcx>,
     pub param_env: ty::ParamEnv<'tcx>,
     pub op: OP,
-    /// Whether the value whose regions we're visiting may still be *used*, as opposed to only
-    /// dropped. An alias's interface can only be reached by using it, so for a drop-live value
-    /// only the args it may actually capture have to be live.
-    pub use_live: bool,
 }
 
 impl<'tcx, OP> TypeVisitor<TyCtxt<'tcx>> for FreeRegionsVisitor<'tcx, OP>
@@ -947,16 +738,7 @@ where
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::Rec
-                    | InterfaceLivenessMode::Check
-                    | InterfaceLivenessMode::CheckLifetimes => {
-                        for idx in interface_live_args(tcx, def_id).iter() {
-                            args[idx as usize].visit_with(self);
-                        }
-                    }
-                    InterfaceLivenessMode::UseOnly | InterfaceLivenessMode::UseOrForeignDrop
-                        if self.use_live =>
-                    {
+                    InterfaceLivenessMode::Rec => {
                         let iface = interface_live_args(tcx, def_id);
                         if std::env::var_os("RUSTC_ALIAS_IFACE_DEBUG").is_some()
                             && !iface.is_empty()
@@ -973,15 +755,7 @@ where
                             args[idx as usize].visit_with(self);
                         }
                     }
-                    InterfaceLivenessMode::UseOnly
-                    | InterfaceLivenessMode::UseOrForeignDrop => {}
                 }
-            }
-
-            // `dyn Trait<'a> + 'b`: the erased type was proven `: 'b` at the coercion, so
-            // `'b` bounds everything the value can hold and `'a` is interface-only.
-            ty::Dynamic(_, region) if dyn_prune() => {
-                region.visit_with(self);
             }
 
             _ => ty.super_visit_with(self),

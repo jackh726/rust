@@ -532,7 +532,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
     /// points `live_at`.
     fn add_use_live_facts_for(&mut self, value: Ty<'tcx>, live_at: &IntervalSet<PointIndex>) {
         debug!("add_use_live_facts_for(value={:?})", value);
-        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at, true);
+        Self::make_all_regions_live(self.location_map, self.typeck, value, live_at);
     }
 
     /// Some variable with type `live_ty` is "drop live" at `location`
@@ -576,16 +576,7 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         // All things in the `outlives` array may be touched by
         // the destructor and must be live at this point.
         for &kind in &drop_data.dropck_result.kinds {
-            // `use2`: the alias's own drop glue is bounded by its outlives bound, but a `Drop`
-            // impl on a *wrapper* can call the alias's trait bounds. Only exempt the kind that
-            // is the dropped type itself.
-            let use_live = match rustc_trait_selection::traits::outlives_for_liveness::interface_liveness_mode() {
-                rustc_trait_selection::traits::outlives_for_liveness::InterfaceLivenessMode::UseOrForeignDrop => {
-                    kind.as_type() != Some(dropped_ty)
-                }
-                _ => false,
-            };
-            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at, use_live);
+            Self::make_all_regions_live(self.location_map, self.typeck, kind, live_at);
             polonius::legacy::emit_drop_facts(
                 self.typeck.tcx(),
                 dropped_local,
@@ -601,7 +592,6 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
         typeck: &mut TypeChecker<'_, 'tcx>,
         value: impl TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
         live_at: &IntervalSet<PointIndex>,
-        use_live: bool,
     ) {
         debug!("make_all_regions_live(value={:?})", value);
         debug!(
@@ -617,7 +607,6 @@ impl<'tcx> LivenessContext<'_, '_, 'tcx> {
 
                 typeck.constraints.liveness_constraints.add_points(live_region_vid, live_at);
             },
-            use_live,
         });
 
         // When using `-Zpolonius=next`, we record the variance of each live region.
