@@ -1,0 +1,15 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-concrete-caller-no-clause.rs:42:30
+   |
+LL |         let s = String::from("x");
+   |             - binding `s` declared here
+LL |         sink = wrap::<Owned>(&s);
+   |                              ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     sink.feed(String::new());
+   |     ---- borrow later used here
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.
