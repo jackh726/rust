@@ -1,0 +1,27 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-marker-trait-unify.rs:31:23
+   |
+LL |         let s = String::from("hi");
+   |             - binding `s` declared here
+LL |         let r: &str = &s;
+   |                       ^^ borrowed value does not live long enough
+...
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     println!("{out}");
+   |                --- borrow later used here
+
+error[E0499]: cannot borrow `v` as mutable more than once at a time
+  --> $DIR/interface-marker-trait-unify.rs:50:22
+   |
+LL |         let o = foo_mut(&mut v);
+   |                         ------ first mutable borrow occurs here
+LL |         out = tie(o, &mut v);
+   |               ---    ^^^^^^ second mutable borrow occurs here
+   |               |
+   |               first borrow later used by call
+
+error: aborting due to 2 previous errors
+
+Some errors have detailed explanations: E0499, E0597.
+For more information about an error, try `rustc --explain E0499`.

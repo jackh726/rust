@@ -3,9 +3,7 @@ use std::collections::hash_map::Entry;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::{
-    self, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitableExt,
-};
+use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt};
 use rustc_type_ir::relate::relate_args_with_variances;
 use tracing::instrument;
 
@@ -46,9 +44,6 @@ pub fn extract_verify_if_eq<'tcx>(
     assert!(!verify_if_eq_b.has_escaping_bound_vars());
     let mut m = MatchAgainstHigherRankedOutlives::new(tcx);
     let verify_if_eq = verify_if_eq_b.skip_binder();
-    debug_assert!(
-        !tcx.next_trait_solver_globally() || !(verify_if_eq.ty, test_ty).has_non_rigid_aliases()
-    );
     m.relate(verify_if_eq.ty, test_ty).ok()?;
 
     if let ty::RegionKind::ReBound(index_kind, br) = verify_if_eq.bound.kind() {
@@ -82,7 +77,7 @@ pub fn extract_verify_if_eq<'tcx>(
 ///
 /// This errs on the side of matching: free regions match any region (the pattern
 /// usually comes from the param-env, with `ReEarlyParam`s, and `value` from borrowck,
-/// with `ReVar`s), and alias rigidity is ignored.
+/// with `ReVar`s). Like every use of this matcher, it ignores alias rigidity.
 #[instrument(level = "debug", skip(tcx), ret)]
 pub fn match_higher_ranked_ty<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -91,32 +86,8 @@ pub fn match_higher_ranked_ty<'tcx>(
 ) -> Option<FxHashMap<ty::BoundRegion<'tcx>, ty::Region<'tcx>>> {
     let mut m = MatchAgainstHigherRankedOutlives::new(tcx);
     m.free_regions_match_anything = true;
-    let mut erase = EraseRigidity { tcx };
-    m.relate(pattern.skip_binder().fold_with(&mut erase), value.fold_with(&mut erase)).ok()?;
+    m.relate(pattern.skip_binder(), value).ok()?;
     Some(m.map)
-}
-
-// FIXME(#155345): see the corresponding FIXME in `live_args_for_alias_from_outlives_bounds`.
-struct EraseRigidity<'tcx> {
-    tcx: TyCtxt<'tcx>,
-}
-
-impl<'tcx> TypeFolder<TyCtxt<'tcx>> for EraseRigidity<'tcx> {
-    fn cx(&self) -> TyCtxt<'tcx> {
-        self.tcx
-    }
-
-    fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
-        if !ty.has_aliases() {
-            return ty;
-        }
-        match *ty.kind() {
-            ty::Alias(_, alias) => {
-                Ty::new_alias(self.tcx, ty::IsRigid::No, alias.fold_with(self))
-            }
-            _ => ty.super_fold_with(self),
-        }
-    }
 }
 
 /// True if a (potentially higher-ranked) outlives
@@ -249,6 +220,13 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstHigherRankedOutlives<'tcx>
             self.no_match()
         } else if pattern == value {
             Ok(pattern)
+        } else if let (ty::Alias(_, pattern_alias), ty::Alias(_, value_alias)) =
+            (*pattern.kind(), *value.kind())
+        {
+            // Rigidness is normalization state. This matcher only needs to know
+            // whether both sides are the same alias shape.
+            self.relate(pattern_alias, value_alias)?;
+            Ok(pattern)
         } else {
             relate::structurally_relate_tys(self, pattern, value)
         }
@@ -261,6 +239,13 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstHigherRankedOutlives<'tcx>
         value: ty::Const<'tcx>,
     ) -> RelateResult<'tcx, ty::Const<'tcx>> {
         if pattern == value {
+            Ok(pattern)
+        } else if let (
+            ty::ConstKind::Alias(_, pattern_alias),
+            ty::ConstKind::Alias(_, value_alias),
+        ) = (pattern.kind(), value.kind())
+        {
+            self.relate(pattern_alias, value_alias)?;
             Ok(pattern)
         } else {
             relate::structurally_relate_consts(self, pattern, value)

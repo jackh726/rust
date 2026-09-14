@@ -1,0 +1,25 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-nested-opaque-captures.rs:28:20
+   |
+LL |         let s = String::from("x");
+   |             - binding `s` declared here
+LL |         fut = make(&s);
+   |                    ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     drop(fut);
+   |          --- borrow later used here
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/interface-nested-opaque-captures.rs:28:15
+   |
+LL |         fut = make(&s);
+   |               ^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL | fn make<'a>(x: &'a str) -> impl Future<Output = impl W + use<'a>> + 'static + use<> {
+   |                                                                             +++++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.

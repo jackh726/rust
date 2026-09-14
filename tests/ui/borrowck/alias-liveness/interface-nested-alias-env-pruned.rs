@@ -1,7 +1,8 @@
 //@ ignore-compare-mode-polonius (explicit revisions)
-//@ revisions: nll polonius
+//@ revisions: nll polonius next
 //@ [nll] compile-flags: -Zpolonius=off
 //@ [polonius] compile-flags: -Zpolonius=next
+//@ [next] compile-flags: -Znext-solver=globally -Zpolonius=next
 //@ edition: 2024
 //@ run-pass
 

@@ -1,5 +1,5 @@
 error[E0515]: cannot return value referencing local variable `s`
-  --> $DIR/interface-env-trait-clause.rs:43:5
+  --> $DIR/interface-env-trait-clause.rs:44:5
    |
 LL |         let r: &str = &s;
    |                       -- `s` is borrowed here
@@ -8,7 +8,7 @@ LL |     v.into()
    |     ^^^^^^^^ returns a value referencing data owned by the current function
 
 error[E0515]: cannot return value referencing local variable `s`
-  --> $DIR/interface-env-trait-clause.rs:65:5
+  --> $DIR/interface-env-trait-clause.rs:66:5
    |
 LL |         it = wrap::<T>(&s);
    |                        -- `s` is borrowed here
@@ -17,7 +17,7 @@ LL |     it.next().unwrap().into()
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^ returns a value referencing data owned by the current function
 
 error[E0515]: cannot return value referencing local variable `s`
-  --> $DIR/interface-env-trait-clause.rs:89:5
+  --> $DIR/interface-env-trait-clause.rs:90:5
    |
 LL |         let r: &str = &s;
    |                       -- `s` is borrowed here

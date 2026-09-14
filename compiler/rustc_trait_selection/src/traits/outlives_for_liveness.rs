@@ -4,8 +4,8 @@ use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::bug;
 use rustc_middle::ty::{
-    self, Flags, ImplTraitInTraitData, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable,
-    TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
+    self, Flags, ImplTraitInTraitData, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
+    TypeVisitableExt, TypeVisitor,
 };
 
 use crate::infer::outlives::test_type_match;
@@ -57,10 +57,6 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
                 test_type_match::extract_verify_if_eq(
                     tcx,
                     &outlives.map_bound(|ty::OutlivesClause(ty, bound)| VerifyIfEq { ty, bound }),
-                    // FIXME(#155345): Region handling should generally only
-                    // deal with rigid aliases, making sure we do so correctly
-                    // everywhere is effort, so we're just using `No` everywhere
-                    // for now. This should change soon.
                     alias_ty,
                 )
             }
@@ -468,83 +464,12 @@ fn live_args_for_outlives_clause<'tcx>(
     }
 }
 
-/// PROTOTYPE (env-gated): which alias-interface liveness rule to apply.
-///
-/// * `off`  — status quo.
-/// * `flat` — PR #161154: every generic arg *syntactically* mentioned in a trait or projection
-///   bound of the alias is live, no matter what the alias's outlives bounds say.
-/// * `rec`  — like `flat`, but the interface is visited *at the use site* with the alias's actual
-///   args and this same visitor, so a nested alias is pruned by its own outlives bounds and the
-///   body's where-clauses exactly as if it were held directly:
-///   `impl Future<Output = impl Trait + 'static> + 'static` keeps nothing alive, and neither does
-///   `impl Iterator<Item = T::Item<'a>> + 'static` under `for<'x> T::Item<'x>: 'static`. The
-///   body's trait and projection clauses on the alias count as interface too. **The default.**
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum InterfaceLivenessMode {
-    Off,
-    Flat,
-    Rec,
-}
-
-pub fn interface_liveness_mode() -> InterfaceLivenessMode {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<InterfaceLivenessMode> = OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("RUSTC_ALIAS_IFACE").as_deref() {
-        Ok("off") => InterfaceLivenessMode::Off,
-        Ok("flat") => InterfaceLivenessMode::Flat,
-        _ => InterfaceLivenessMode::Rec,
-    })
-}
-
 pub(crate) fn alias_def_id<'tcx>(kind: ty::AliasTyKind<'tcx>) -> DefId {
     match kind {
         ty::AliasTyKind::Projection { def_id }
         | ty::AliasTyKind::Inherent { def_id }
         | ty::AliasTyKind::Opaque { def_id }
         | ty::AliasTyKind::Free { def_id } => def_id,
-    }
-}
-
-/// For a given alias, return the positions of the identity args that show up in its trait or
-/// projection bounds, *syntactically*. For `type Foo<'a, 'b>: Trait<'a> + 'b`, this is `{0}`.
-///
-/// This is the rule from PR #161154 (`flat` mode).
-#[tracing::instrument(level = "debug", skip(tcx), ret)]
-fn flat_interface_args<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> DenseBitSet<u32> {
-    struct Collector {
-        positions: DenseBitSet<u32>,
-    }
-    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for Collector {
-        fn visit_region(&mut self, r: ty::Region<'tcx>) {
-            if let ty::ReEarlyParam(ebr) = r.kind() {
-                self.positions.insert(ebr.index);
-            }
-        }
-        fn visit_ty(&mut self, ty: Ty<'tcx>) {
-            if let ty::Param(pt) = *ty.kind() {
-                self.positions.insert(pt.index);
-            }
-            ty.super_visit_with(self);
-        }
-    }
-
-    let mut collector =
-        Collector { positions: DenseBitSet::new_empty(tcx.generics_of(def_id).count()) };
-    for_each_interface_part(tcx, def_id, &mut collector);
-    collector.positions
-}
-
-/// Walk the parts of `def_id`'s item bounds that describe its *interface*: the arguments of its
-/// trait and projection bounds (other than the alias itself) and the terms of its projection
-/// bounds. Outlives bounds are deliberately skipped: they describe the alias's hidden type,
-/// not what can be observed through it.
-fn for_each_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
-    tcx: TyCtxt<'tcx>,
-    def_id: DefId,
-    visitor: &mut V,
-) {
-    for clause in tcx.item_bounds(def_id).instantiate_identity().skip_norm_wip() {
-        visit_interface_part(clause.kind().skip_binder(), visitor);
     }
 }
 
@@ -568,39 +493,6 @@ fn visit_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
             proj_pred.term.visit_with(visitor);
         }
         _ => {}
-    }
-}
-
-/// FIXME(#155345): instantiated item bounds are unnormalized, while the alias arm (via
-/// `extract_verify_if_eq`) expects aliases stamped the way the body's are: rigid under the new
-/// solver, `IsRigid::No` under the old one (which never stamps `Yes`). Treating a normalizable
-/// alias as rigid is sound for liveness, since its bounds hold for whatever it normalizes to,
-/// but imprecise: `<Owned as Tr>::Item<'a>` keeps `'a` live even when it is `String`.
-/// Normalizing in the body's infcx instead would fix both.
-struct AssumeRigid<'tcx> {
-    tcx: TyCtxt<'tcx>,
-}
-
-impl<'tcx> TypeFolder<TyCtxt<'tcx>> for AssumeRigid<'tcx> {
-    fn cx(&self) -> TyCtxt<'tcx> {
-        self.tcx
-    }
-
-    fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
-        if !ty.has_aliases() {
-            return ty;
-        }
-        match *ty.kind() {
-            ty::Alias(_, alias) => {
-                let rigid = if self.tcx.next_trait_solver_globally() {
-                    ty::IsRigid::Yes
-                } else {
-                    ty::IsRigid::No
-                };
-                Ty::new_alias(self.tcx, rigid, alias.fold_with(self))
-            }
-            _ => ty.super_fold_with(self),
-        }
     }
 }
 
@@ -653,7 +545,9 @@ impl<'tcx, OP: FnMut(ty::Region<'tcx>)> FreeRegionsVisitor<'tcx, OP> {
         self.interface_stack.push(def_id);
 
         for clause in tcx.item_bounds(def_id).instantiate(tcx, args).skip_norm_wip() {
-            let clause = clause.fold_with(&mut AssumeRigid { tcx });
+            // FIXME: these bounds aren't normalized, so a normalizable alias in them is treated
+            // like a rigid one. That's sound (its bounds hold for whatever it normalizes to)
+            // but imprecise: see `interface-concrete-caller-unnormalized.rs`.
             visit_interface_part(clause.kind().skip_binder(), self);
         }
 
@@ -746,17 +640,7 @@ where
                     }
                 }
 
-                // PROTOTYPE: whatever the alias's interface exposes has to be live too, no
-                // matter what its own outlives bounds or the caller's where-clauses claim.
-                match interface_liveness_mode() {
-                    InterfaceLivenessMode::Off => {}
-                    InterfaceLivenessMode::Flat => {
-                        for idx in flat_interface_args(tcx, def_id).iter() {
-                            args[idx as usize].visit_with(self);
-                        }
-                    }
-                    InterfaceLivenessMode::Rec => self.visit_alias_interface(ty, def_id, args),
-                }
+                self.visit_alias_interface(ty, def_id, args);
             }
 
             _ => ty.super_visit_with(self),

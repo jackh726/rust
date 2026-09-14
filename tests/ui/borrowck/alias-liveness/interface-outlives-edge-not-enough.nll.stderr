@@ -1,0 +1,45 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-outlives-edge-not-enough.rs:47:25
+   |
+LL |         let s = String::from("huh");
+   |             - binding `s` declared here
+LL |         {
+LL |             let a = foo(&s);
+   |                         ^^ borrowed value does not live long enough
+...
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     println!("{dangling}");
+   |                -------- borrow later used here
+
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-outlives-edge-not-enough.rs:63:27
+   |
+LL |         let s = String::from("huh");
+   |             - binding `s` declared here
+...
+LL |             let r: &str = &s;
+   |                           ^^ borrowed value does not live long enough
+...
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     println!("{dangling}");
+   |                -------- borrow later used here
+
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-outlives-edge-not-enough.rs:83:27
+   |
+LL |         let s = String::from("huh");
+   |             - binding `s` declared here
+...
+LL |             let r: &str = &s;
+   |                           ^^ borrowed value does not live long enough
+...
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     println!("{dangling}");
+   |                -------- borrow later used here
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0597`.

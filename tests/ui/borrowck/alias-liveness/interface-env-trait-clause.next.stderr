@@ -1,0 +1,30 @@
+error[E0515]: cannot return value referencing local variable `s`
+  --> $DIR/interface-env-trait-clause.rs:44:5
+   |
+LL |         let r: &str = &s;
+   |                       -- `s` is borrowed here
+...
+LL |     v.into()
+   |     ^^^^^^^^ returns a value referencing data owned by the current function
+
+error[E0515]: cannot return value referencing local variable `s`
+  --> $DIR/interface-env-trait-clause.rs:66:5
+   |
+LL |         it = wrap::<T>(&s);
+   |                        -- `s` is borrowed here
+LL |     }
+LL |     it.next().unwrap().into()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^ returns a value referencing data owned by the current function
+
+error[E0515]: cannot return value referencing local variable `s`
+  --> $DIR/interface-env-trait-clause.rs:90:5
+   |
+LL |         let r: &str = &s;
+   |                       -- `s` is borrowed here
+...
+LL |     v.into()
+   |     ^^^^^^^^ returns a value referencing data owned by the current function
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0515`.
