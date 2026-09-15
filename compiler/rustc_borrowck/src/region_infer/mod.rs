@@ -13,6 +13,7 @@ use rustc_middle::traits::{ObligationCause, ObligationCauseCode};
 use rustc_middle::ty::{self, RegionVid, TyCtxt};
 use rustc_span::Span;
 use tracing::{Level, debug, enabled, instrument};
+pub(crate) use unsolved_region_context::*;
 
 use crate::BorrowckInferCtxt;
 use crate::constraints::{ConstraintSccIndex, OutlivesConstraint, OutlivesConstraintSet};
@@ -24,6 +25,7 @@ mod graphviz;
 pub(crate) mod opaque_types;
 mod region_context;
 mod reverse_sccs;
+mod unsolved_region_context;
 
 pub(crate) mod values;
 
