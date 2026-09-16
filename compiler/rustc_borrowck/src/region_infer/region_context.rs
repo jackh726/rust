@@ -80,6 +80,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             scc_values,
             type_tests: _,
             universal_region_relations,
+            type_test_constraints: _,
         } = unsolved_region_context;
 
         Self {
