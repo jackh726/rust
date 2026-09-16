@@ -379,14 +379,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         {
             for &predecessor in &body.basic_blocks.predecessors()[block] {
                 let point = self.location_map.point_from_location(body.terminator_loc(predecessor));
-                let region_block = self.region_block(region, predecessor);
                 let i = BlockIndex::from_point(point, predecessor, self.location_map);
-                if Self::add_at_point_inner(
-                    &mut self.region_blocks[region_block],
-                    i,
-                    closure[BlockIndex::ZERO],
-                ) {
-                    let block = self.region_blocks[region_block].block;
+                let (region_block, state) = self.region_block(region, predecessor);
+                if Self::add_at_point_inner(state, i, closure[BlockIndex::ZERO]) {
                     let last = self.rpo_index.len() as u32 - 1;
                     self.backward_queue.push(region_block, last - self.rpo_index[block]);
                 }
@@ -402,8 +397,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         };
         let graph = self.graph;
         for successor in graph.logical_successors(region) {
-            let region_block = self.region_block(successor, block);
-            self.add_at_points(region_block, &closure);
+            self.add_at_points(successor, block, &closure);
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
         let physical_points = graph.physical_points(region);
@@ -469,9 +463,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
     /// The index of the `(region, block)` pair, creating its state if this is the first time the
     /// batch reaches the region in this block.
-    fn region_block(&mut self, region: RegionVid, block: BasicBlock) -> RegionInBlockIndex {
+    fn region_block(
+        &mut self,
+        region: RegionVid,
+        block: BasicBlock,
+    ) -> (RegionInBlockIndex, &mut RegionInBlock) {
         if let Some(&region_block) = self.region_block_indices.get(&(region, block)) {
-            return region_block;
+            return (region_block, &mut self.region_blocks[region_block]);
         }
 
         let universal = self.universal_regions.is_universal_region(region);
@@ -509,23 +507,23 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             pending: IndexVec::from_elem_n(LoanSet::EMPTY, len),
         });
         self.region_block_indices.insert((region, block), region_block);
-        region_block
+        (region_block, &mut self.region_blocks[region_block])
     }
 
     /// Records that the loans in `loans`, indexed by point offset within the pair's block, reach
     /// the pair's region.
     fn add_at_points(
         &mut self,
-        region_block: RegionInBlockIndex,
+        region: RegionVid,
+        block: BasicBlock,
         loans: &IndexSlice<BlockIndex, LoanSet>,
     ) {
-        let state = &mut self.region_blocks[region_block];
+        let (region_block, state) = self.region_block(region, block);
         let mut any_new = false;
         for (i, &loans) in loans.iter_enumerated() {
             any_new |= Self::add_at_point_inner(state, i, loans);
         }
         if any_new {
-            let block = self.region_blocks[region_block].block;
             self.forward_queue.push(region_block, self.rpo_index[block]);
         }
     }
@@ -538,10 +536,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         point: PointIndex,
         loans: LoanSet,
     ) {
-        let region_block = self.region_block(region, block);
         let block_index = BlockIndex::from_point(point, block, self.location_map);
-        if Self::add_at_point_inner(&mut self.region_blocks[region_block], block_index, loans) {
-            let block = self.region_blocks[region_block].block;
+        let (region_block, state) = self.region_block(region, block);
+        if Self::add_at_point_inner(state, block_index, loans) {
             self.forward_queue.push(region_block, self.rpo_index[block]);
         }
     }
