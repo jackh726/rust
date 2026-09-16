@@ -46,7 +46,7 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use rustc_data_structures::fx::FxHashMap;
-use rustc_index::bit_set::GrowableBitSet;
+use rustc_index::bit_set::{DenseBitSet, GrowableBitSet};
 use rustc_index::{IndexSlice, IndexVec};
 use rustc_middle::mir::{BasicBlock, Body};
 use rustc_middle::ty::{RegionVid, TypeVisitable};
@@ -188,11 +188,6 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// FIXME: a bucket queue over the reverse postorder index would make this O(1) per operation.
     forward_queue: Queue,
     backward_queue: Queue,
-
-    /// Buffers reused across `process` calls, one entry per point of the block being processed.
-    pending_buf: IndexVec<BlockIndex, LoanSet>,
-    closure_buf: IndexVec<BlockIndex, LoanSet>,
-    live_buf: GrowableBitSet<BlockIndex>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -234,9 +229,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             rpo_index,
             forward_queue: Queue::new(),
             backward_queue: Queue::new(),
-            pending_buf: IndexVec::new(),
-            closure_buf: IndexVec::new(),
-            live_buf: GrowableBitSet::new_empty(),
         }
     }
 
@@ -309,18 +301,14 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let len = state.loans.len();
 
         // Take the pending loans, leaving the pair with none.
-        let mut pending = std::mem::take(&mut self.pending_buf);
-        pending.raw.clear();
-        pending.resize(len, LoanSet::EMPTY);
+        let mut pending = IndexVec::from_elem_n(LoanSet::EMPTY, len);
         std::mem::swap(&mut state.pending, &mut pending);
         if pending.iter().all(|loans| loans.is_empty()) {
-            self.pending_buf = pending;
             return;
         }
 
-        let mut live = std::mem::take(&mut self.live_buf);
-        live.clear();
-        live.ensure(len);
+        let block_len = self.body[block].statements.len() + 1;
+        let mut live = DenseBitSet::new_empty(block_len);
         let terminator = PointIndex::from_usize(entry.as_usize() + len - 1);
         if universal {
             live.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(len));
@@ -341,9 +329,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
-        let mut closure = std::mem::take(&mut self.closure_buf);
-        closure.raw.clear();
-        closure.raw.extend_from_slice(&pending.raw);
+        let mut closure = pending.clone();
         if matches!(direction, Forward | Bidirectional) {
             let mut previous = LoanSet::EMPTY;
             for (i, loans) in closure.iter_enumerated_mut() {
@@ -374,25 +360,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
-        self.propagate_liveness_edges(region_block, &closure, &live);
-        self.propagate_subset_edges(region_block, entry, terminator, &closure);
+        // The liveness edges leaving the block: to the entry point of the successor blocks, and to
+        // the terminator of the predecessor blocks.
 
-        self.pending_buf = pending;
-        self.live_buf = live;
-        self.closure_buf = closure;
-    }
-
-    /// The liveness edges leaving the block: to the entry point of the successor blocks, and to
-    /// the terminator of the predecessor blocks.
-    fn propagate_liveness_edges(
-        &mut self,
-        region_block: RegionInBlockIndex,
-        closure: &IndexSlice<BlockIndex, LoanSet>,
-        live: &GrowableBitSet<BlockIndex>,
-    ) {
-        let state = &self.region_blocks[region_block];
-        let (region, block) = (state.region, state.block);
-        let (universal, direction) = (state.universal, state.direction);
         let body = self.body;
         let last = BlockIndex::from_usize(closure.len() - 1);
         if matches!(direction, Forward | Bidirectional) && !closure[last].is_empty() {
@@ -422,17 +392,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
             }
         }
-    }
 
-    /// The subset edges: a logical one hands every point reached to the target region unchanged,
-    /// a physical one applies at its own point only, and only if that point has been reached.
-    fn propagate_subset_edges(
-        &mut self,
-        region_block: RegionInBlockIndex,
-        entry: PointIndex,
-        terminator: PointIndex,
-        closure: &IndexSlice<BlockIndex, LoanSet>,
-    ) {
+        // The subset edges: a logical one hands every point reached to the target region unchanged,
+        // a physical one applies at its own point only, and only if that point has been reached.
+
         let (region, block) = {
             let state = &self.region_blocks[region_block];
             (state.region, state.block)
@@ -440,7 +403,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let graph = self.graph;
         for successor in graph.logical_successors(region) {
             let region_block = self.region_block(successor, block);
-            self.add_at_points(region_block, closure);
+            self.add_at_points(region_block, &closure);
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
         let physical_points = graph.physical_points(region);
