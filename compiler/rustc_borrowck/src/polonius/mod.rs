@@ -36,6 +36,7 @@
 mod constraints;
 mod dump;
 pub(crate) mod legacy;
+mod loan_liveness;
 mod liveness;
 mod liveness_constraints;
 
