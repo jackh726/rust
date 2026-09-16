@@ -185,7 +185,10 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     forward_queue: Queue,
     backward_queue: Queue,
 
-    /// Buffers reused across `process` calls, one entry per point of the block being processed.
+    /// Buffers reused across `process` calls.
+    //
+    // It might seem tempting to remove these. However, the allocations avoided
+    // by keeping these around can be up to 20% on some benchmarks.
     pending_buf: IndexVec<BlockIndex, LoanSet>,
     closure_buf: IndexVec<BlockIndex, LoanSet>,
     live_buf: GrowableBitSet<BlockIndex>,
@@ -370,25 +373,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
-        self.propagate_liveness_edges(region_block, &closure, &live);
-        self.propagate_subset_edges(region_block, entry, terminator, &closure);
+        // The liveness edges leaving the block: to the entry point of the successor blocks, and to
+        // the terminator of the predecessor blocks.
 
-        self.pending_buf = pending;
-        self.live_buf = live;
-        self.closure_buf = closure;
-    }
-
-    /// The liveness edges leaving the block: to the entry point of the successor blocks, and to
-    /// the terminator of the predecessor blocks.
-    fn propagate_liveness_edges(
-        &mut self,
-        region_block: RegionInBlockIndex,
-        closure: &IndexSlice<BlockIndex, LoanSet>,
-        live: &GrowableBitSet<BlockIndex>,
-    ) {
-        let state = &self.region_blocks[region_block];
-        let (region, block) = (state.region, state.block);
-        let (universal, direction) = (state.universal, state.direction);
         let body = self.body;
         let last = BlockIndex::from_usize(closure.len() - 1);
         if matches!(direction, Forward | Bidirectional) && !closure[last].is_empty() {
@@ -418,17 +405,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
             }
         }
-    }
 
-    /// The subset edges: a logical one hands every point reached to the target region unchanged,
-    /// a physical one applies at its own point only, and only if that point has been reached.
-    fn propagate_subset_edges(
-        &mut self,
-        region_block: RegionInBlockIndex,
-        entry: PointIndex,
-        terminator: PointIndex,
-        closure: &IndexSlice<BlockIndex, LoanSet>,
-    ) {
+        // The subset edges: a logical one hands every point reached to the target region unchanged,
+        // a physical one applies at its own point only, and only if that point has been reached.
+
         let (region, block) = {
             let state = &self.region_blocks[region_block];
             (state.region, state.block)
@@ -436,7 +416,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let graph = self.graph;
         for successor in graph.logical_successors(region) {
             let region_block = self.region_block(successor, block);
-            self.add_at_points(region_block, closure);
+            self.add_at_points(region_block, &closure);
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
         let physical_points = graph.physical_points(region);
@@ -452,6 +432,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
             }
         }
+
+        self.pending_buf = pending;
+        self.live_buf = live;
+        self.closure_buf = closure;
     }
 
     fn materialize_liveness(
