@@ -14,6 +14,7 @@ use rustc_middle::mir::{
     TerminatorKind,
 };
 use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeFoldable, UniverseIndex, fold_regions};
+use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::{DUMMY_SP, bug};
@@ -21,10 +22,11 @@ use tracing::{debug, instrument, trace};
 
 use crate::constraints::graph::NormalConstraintGraph;
 use crate::constraints::{ConstraintSccIndex, OutlivesConstraint, OutlivesConstraintSet};
-use crate::consumers::PoloniusOutput;
+use crate::consumers::{BorrowSet, PoloniusOutput};
 use crate::dataflow::BorrowIndex;
 use crate::diagnostics::{RegionErrorKind, RegionErrors, UniverseInfo};
 use crate::handle_placeholders::{LoweredConstraints, RegionTracker};
+use crate::polonius::PoloniusContext;
 use crate::region_infer::values::{LivenessValues, RegionElement, RegionValues};
 use crate::region_infer::{
     BestBlame, ConstraintSccs, RegionDefinition, RegionRelationCheckResult, Trace, TypeTest,
@@ -792,12 +794,20 @@ impl<'tcx> UnsolvedRegionInferenceContext<'tcx> {
     /// Performs region inference and report errors if we see any
     /// unsatisfiable constraints. If this is a closure, returns the
     /// region requirements to propagate to our creator, if any.
-    #[instrument(skip(self, infcx, body, polonius_output), level = "debug")]
+    #[instrument(
+        skip(self, infcx, body, polonius_output, polonius_context_and_args),
+        level = "debug"
+    )]
     pub(crate) fn solve(
         mut self,
-        infcx: &InferCtxt<'tcx>,
+        infcx: &BorrowckInferCtxt<'tcx>,
         body: &Body<'tcx>,
         polonius_output: Option<Box<PoloniusOutput>>,
+        polonius_context_and_args: Option<(
+            &mut PoloniusContext<'tcx>,
+            &MoveData<'tcx>,
+            &BorrowSet<'tcx>,
+        )>,
     ) -> (RegionInferenceContext<'tcx>, Option<ClosureRegionRequirements<'tcx>>, RegionErrors<'tcx>)
     {
         let mir_def_id = body.source.def_id();
@@ -835,6 +845,23 @@ impl<'tcx> UnsolvedRegionInferenceContext<'tcx> {
         }
 
         debug!(?errors_buffer);
+
+        // If requested for `-Zpolonius=next`, compute loan liveness information.
+        // This is done at the end of `solve`; it's okay because liveness above
+        // is *pessimistic*: any region outliving a universal region is also
+        // considered live for the entire function. Any deferred regions *are*
+        // regions that fit this category.
+        if let Some((polonius_context, move_data, borrow_set)) = polonius_context_and_args {
+            polonius_context.compute_loan_liveness(
+                infcx,
+                &mut self.data.liveness_constraints,
+                self.data.constraints.outlives().iter().copied(),
+                &self.data.universal_region_relations.universal_regions,
+                body,
+                move_data,
+                borrow_set,
+            );
+        }
 
         let propagated_outlives_requirements = propagated_outlives_requirements.unwrap_or_default();
         if propagated_outlives_requirements.is_empty() {

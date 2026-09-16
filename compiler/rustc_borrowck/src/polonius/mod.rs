@@ -47,7 +47,7 @@ use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::{Body, Local};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
+use rustc_mir_dataflow::points::PointIndex;
 
 pub(self) use self::constraints::*;
 pub(crate) use self::dump::dump_polonius_mir;
@@ -143,7 +143,6 @@ impl<'tcx> PoloniusContext<'tcx> {
         universal_regions: &UniversalRegions<'tcx>,
         body: &Body<'tcx>,
         move_data: &MoveData<'tcx>,
-        location_map: Rc<DenseLocationMap>,
         borrow_set: &BorrowSet<'tcx>,
     ) {
         // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
@@ -152,8 +151,10 @@ impl<'tcx> PoloniusContext<'tcx> {
             // From the outlives constraints, liveness, and variances, we can compute reachability
             // on the lazy localized constraint graph to trace the liveness of loans, for the next
             // step in the chain (the NLL loan scope and active loans computations).
-            let graph =
-                LocalizedConstraintGraph::new(Rc::clone(&location_map), outlives_constraints);
+            let graph = LocalizedConstraintGraph::new(
+                Rc::clone(liveness.location_map()),
+                outlives_constraints,
+            );
 
             let local_use_map = self
                 .local_use_map
@@ -161,7 +162,9 @@ impl<'tcx> PoloniusContext<'tcx> {
                 .expect("local use map should be computed before loan liveness");
             let deferred_locals_for_liveness =
                 std::mem::take(&mut self.deferred_locals_for_liveness);
-            let mut live_loans = LiveLoans::new(location_map.num_points(), borrow_set.len());
+            let mut live_loans =
+                LiveLoans::new(liveness.location_map().num_points(), borrow_set.len());
+            let location_map = Rc::clone(liveness.location_map());
             let comp =
                 LivenessComputation::new(infcx, body, &location_map, move_data, &local_use_map);
             let mut liveness_source = DeferredLivenessSource {

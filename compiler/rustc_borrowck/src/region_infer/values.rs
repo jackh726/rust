@@ -191,6 +191,10 @@ impl LivenessValues {
         )
     }
 
+    pub(crate) fn location_map(&self) -> &Rc<DenseLocationMap> {
+        &self.location_map
+    }
+
     #[inline]
     pub(crate) fn point_from_location(&self, location: Location) -> PointIndex {
         self.location_map.point_from_location(location)
