@@ -9,6 +9,7 @@ use rustc_infer::infer::region_constraints::{VerifyBound, VerifyIfEq};
 use rustc_infer::infer::{InferCtxt, NllRegionVariableOrigin};
 use rustc_middle::mir::{AnnotationSource, Body, ConstraintCategory, Location, ReturnConstraint};
 use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeFoldable, UniverseIndex, fold_regions};
+use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::{DUMMY_SP, bug};
@@ -16,8 +17,10 @@ use tracing::{debug, instrument, trace};
 
 use crate::constraints::graph::NormalConstraintGraph;
 use crate::constraints::{ConstraintSccIndex, OutlivesConstraint, OutlivesConstraintSet};
+use crate::consumers::BorrowSet;
 use crate::diagnostics::{RegionErrorKind, RegionErrors, UniverseInfo};
 use crate::handle_placeholders::{LoweredConstraints, RegionTracker};
+use crate::polonius::PoloniusContext;
 use crate::polonius::legacy::PoloniusOutput;
 use crate::region_infer::values::{LivenessValues, RegionElement, RegionValues};
 use crate::region_infer::{
@@ -1510,5 +1513,27 @@ impl<'tcx> UnsolvedRegionInferenceContext<'tcx> {
     /// mean they are unequal).
     fn scc_representative(&self, scc: ConstraintSccIndex) -> RegionVid {
         self.scc_annotations[scc].representative.rvid()
+    }
+
+    /// Computes loan liveness for `-Zpolonius=next`.
+    pub(crate) fn compute_loan_liveness(
+        &mut self,
+        infcx: &BorrowckInferCtxt<'tcx>,
+        polonius_context: &mut PoloniusContext<'tcx>,
+        body: &Body<'tcx>,
+        move_data: &MoveData<'tcx>,
+        borrow_set: &BorrowSet<'tcx>,
+    ) {
+        let location_map = Rc::clone(self.liveness_constraints.location_map());
+        polonius_context.compute_loan_liveness(
+            infcx,
+            &mut self.liveness_constraints,
+            self.constraints.outlives().iter().copied(),
+            &self.universal_region_relations.universal_regions,
+            body,
+            move_data,
+            location_map,
+            borrow_set,
+        )
     }
 }
