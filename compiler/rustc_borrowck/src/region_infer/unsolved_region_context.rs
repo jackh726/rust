@@ -8,12 +8,15 @@ use rustc_infer::infer::region_constraints::{VerifyBound, VerifyIfEq};
 use rustc_infer::infer::{InferCtxt, NllRegionVariableOrigin};
 use rustc_middle::mir::{Body, ConstraintCategory};
 use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeFoldable, fold_regions};
+use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
 use tracing::{debug, instrument};
 
 use crate::constraints::{ConstraintSccIndex, OutlivesConstraint};
+use crate::consumers::BorrowSet;
 use crate::diagnostics::{RegionErrorKind, RegionErrors};
 use crate::handle_placeholders::LoweredConstraints;
+use crate::polonius::PoloniusContext;
 use crate::polonius::legacy::PoloniusOutput;
 use crate::region_infer::values::{RegionElement, RegionValues};
 use crate::region_infer::{
@@ -1056,5 +1059,27 @@ impl<'tcx> UnsolvedRegionInferenceContext<'tcx> {
     /// mean they are unequal).
     fn scc_representative(&self, scc: ConstraintSccIndex) -> RegionVid {
         self.scc_annotations[scc].representative.rvid()
+    }
+
+    /// Computes loan liveness for `-Zpolonius=next`.
+    pub(crate) fn compute_loan_liveness(
+        &mut self,
+        infcx: &BorrowckInferCtxt<'tcx>,
+        polonius_context: &mut PoloniusContext<'tcx>,
+        body: &Body<'tcx>,
+        move_data: &MoveData<'tcx>,
+        location_map: &Rc<DenseLocationMap>,
+        borrow_set: &BorrowSet<'tcx>,
+    ) {
+        polonius_context.compute_loan_liveness(
+            infcx,
+            &mut self.data.liveness_constraints,
+            self.data.constraints.outlives().iter().copied(),
+            &self.data.universal_region_relations.universal_regions,
+            body,
+            move_data,
+            location_map,
+            borrow_set,
+        )
     }
 }

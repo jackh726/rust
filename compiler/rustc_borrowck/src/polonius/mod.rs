@@ -143,7 +143,7 @@ impl<'tcx> PoloniusContext<'tcx> {
         universal_regions: &UniversalRegions<'tcx>,
         body: &Body<'tcx>,
         move_data: &MoveData<'tcx>,
-        location_map: Rc<DenseLocationMap>,
+        location_map: &Rc<DenseLocationMap>,
         borrow_set: &BorrowSet<'tcx>,
     ) {
         // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
