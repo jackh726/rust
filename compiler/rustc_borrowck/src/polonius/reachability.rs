@@ -176,7 +176,7 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     // by keeping these around can be up to 20% on some benchmarks.
     pending_buf: IndexVec<BlockIndex, LoanSet>,
     block_loans_buf: IndexVec<BlockIndex, LoanSet>,
-    live_buf: GrowableBitSet<BlockIndex>,
+    liveness_buf: GrowableBitSet<BlockIndex>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -209,7 +209,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             graph,
             universal_regions,
             region_blocks: LoanReachabilityRegionBlocks {
-                location_map,
                 body,
                 liveness,
                 live_region_variances,
@@ -225,7 +224,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             backward_queue: Queue::new(),
             pending_buf: IndexVec::new(),
             block_loans_buf: IndexVec::new(),
-            live_buf: GrowableBitSet::new_empty(),
+            liveness_buf: GrowableBitSet::new_empty(),
         }
     }
 
@@ -322,7 +321,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // called for this `RegionInBlock`, but turns out this is the most
         // efficient both in instructions and memory compared to both eagerly
         // computing at creation *or* lazily computing and caching for later.
-        let mut liveness = std::mem::take(&mut self.live_buf);
+        let liveness = &mut self.liveness_buf;
         liveness.clear();
         liveness.ensure(block_len);
         if universal {
@@ -346,7 +345,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         // We first need to propagate the loans within the block.
 
-        let mut block_loans = std::mem::take(&mut self.block_loans_buf);
+        let block_loans = &mut self.block_loans_buf;
         block_loans.raw.clear();
         block_loans.raw.extend_from_slice(&pending.raw);
         if matches!(direction, Forward | Bidirectional) {
@@ -465,13 +464,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
 
         self.pending_buf = pending;
-        self.live_buf = liveness;
-        self.block_loans_buf = block_loans;
     }
 }
 
 struct LoanReachabilityRegionBlocks<'a, 'tcx> {
-    location_map: &'a DenseLocationMap,
     body: &'a Body<'tcx>,
     liveness: &'a mut LivenessValues,
     live_region_variances: &'a mut LiveRegionVariances,
@@ -546,29 +542,6 @@ impl<'a, 'tcx> LoanReachabilityRegionBlocks<'a, 'tcx> {
         });
 
         let block_len = self.body[block].statements.len() + 1;
-        let entry = self.location_map.entry_point(block);
-        let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
-
-        let mut liveness = DenseBitSet::new_empty(block_len);
-        if universal {
-            liveness.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(block_len));
-        } else if let Some(live_points) = self.liveness.points().row(region) {
-            for interval in live_points.iter_intervals() {
-                if interval.end <= entry {
-                    continue;
-                }
-                if interval.start > terminator {
-                    break;
-                }
-                let start = interval.start.as_usize().max(entry.as_usize());
-                let end = interval.end.as_usize().min(terminator.as_usize() + 1);
-                liveness.insert_range(
-                    BlockIndex::from_usize(start - entry.as_usize())
-                        ..BlockIndex::from_usize(end - entry.as_usize()),
-                );
-            }
-        }
-
         let region_block = self.region_blocks.push(RegionInBlock {
             region,
             block,
