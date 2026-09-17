@@ -473,13 +473,15 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // a physical one applies at its own point only, and only if that point has been reached.
 
         for successor_region in self.graph.logical_successors(region) {
+            // This unfortunately too hot to just call `insert_pending_loans_and_queue_forward`
+            // for each block index
+            let region_block = self.region_block(successor_region, block);
+            let mut any_new = false;
             for (block_index, &loans) in block_loans.iter_enumerated() {
-                self.insert_pending_loans_and_queue_forward(
-                    successor_region,
-                    block,
-                    block_index,
-                    loans,
-                );
+                any_new |= self.region_blocks[region_block].insert_pending_loans(block_index, loans);
+            }
+            if any_new {
+                self.forward_queue.push(region_block, self.rpo_index[block]);
             }
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
@@ -582,7 +584,16 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         block_index: BlockIndex,
         loans: LoanSet,
     ) -> Option<RegionInBlockIndex> {
-        let region_block = *self.region_block_indices.entry((region, block)).or_insert_with(|| {
+        let region_block = self.region_block(region, block);
+        self.region_blocks[region_block]
+            .insert_pending_loans(block_index, loans)
+            .then_some(region_block)
+    }
+
+    /// The index of the `(region, block)` pair, creating its state if this is the first time the
+    /// batch reaches the region in this block.
+    fn region_block(&mut self, region: RegionVid, block: BasicBlock) -> RegionInBlockIndex {
+        *self.region_block_indices.entry((region, block)).or_insert_with(|| {
             let universal = self.universal_regions.is_universal_region(region);
 
             // The first time any loan reaches `region`: computes the liveness that was deferred for it,
@@ -618,11 +629,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 pending: IndexVec::from_elem_n(LoanSet::EMPTY, block_len),
             });
             region_block
-        });
-
-        self.region_blocks[region_block]
-            .insert_pending_loans(block_index, loans)
-            .then_some(region_block)
+        })
     }
 }
 
