@@ -209,7 +209,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             graph,
             universal_regions,
             region_blocks: LoanReachabilityRegionBlocks {
-                location_map,
                 body,
                 liveness,
                 live_region_variances,
@@ -461,7 +460,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 }
 
 struct LoanReachabilityRegionBlocks<'a, 'tcx> {
-    location_map: &'a DenseLocationMap,
     body: &'a Body<'tcx>,
     liveness: &'a mut LivenessValues,
     live_region_variances: &'a mut LiveRegionVariances,
@@ -565,29 +563,6 @@ impl<'a, 'tcx> LoanReachabilityRegionBlocks<'a, 'tcx> {
         });
 
         let block_len = self.body[block].statements.len() + 1;
-        let entry = self.location_map.entry_point(block);
-        let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
-
-        let mut liveness = DenseBitSet::new_empty(block_len);
-        if universal {
-            liveness.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(block_len));
-        } else if let Some(live_points) = self.liveness.points().row(region) {
-            for interval in live_points.iter_intervals() {
-                if interval.end <= entry {
-                    continue;
-                }
-                if interval.start > terminator {
-                    break;
-                }
-                let start = interval.start.as_usize().max(entry.as_usize());
-                let end = interval.end.as_usize().min(terminator.as_usize() + 1);
-                liveness.insert_range(
-                    BlockIndex::from_usize(start - entry.as_usize())
-                        ..BlockIndex::from_usize(end - entry.as_usize()),
-                );
-            }
-        }
-
         let region_block = self.region_blocks.push(RegionInBlock {
             region,
             block,
