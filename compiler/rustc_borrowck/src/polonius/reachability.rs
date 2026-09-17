@@ -251,14 +251,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let block_index = BlockIndex::from_point(point, block, self.location_map);
                 let region_block = self.region_block(region, block);
                 let state = &mut self.region_blocks[region_block];
-                Self::add_at_point_inner(
-                    region_block,
-                    state,
-                    block_index,
-                    LoanSet::single(bit),
-                    &mut self.forward_queue,
-                    self.rpo_index[block],
-                );
+                let loans = LoanSet::single(bit);
+                let new = loans.difference(state.loans[block_index]);
+                if !new.is_empty() {
+                    state.loans[block_index].insert(new);
+                    state.pending[block_index].insert(new);
+                    self.forward_queue.push(region_block, self.rpo_index[block]);
+                }
             }
 
             loop {
@@ -388,14 +387,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                     let block_index = BlockIndex::from_point(point, successor, self.location_map);
                     let region_block = self.region_block(region, successor);
                     let state = &mut self.region_blocks[region_block];
-                    Self::add_at_point_inner(
-                        region_block,
-                        state,
-                        block_index,
-                        closure[last],
-                        &mut self.forward_queue,
-                        self.rpo_index[block],
-                    );
+                    let loans = closure[last];
+                    let new = loans.difference(state.loans[block_index]);
+                    if !new.is_empty() {
+                        state.loans[block_index].insert(new);
+                        state.pending[block_index].insert(new);
+                        self.forward_queue.push(region_block, self.rpo_index[block]);
+                    }
                 }
             }
         }
@@ -405,18 +403,17 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         {
             for &predecessor in &body.basic_blocks.predecessors()[block] {
                 let point = self.location_map.point_from_location(body.terminator_loc(predecessor));
-                let i = BlockIndex::from_point(point, predecessor, self.location_map);
+                let block_index = BlockIndex::from_point(point, predecessor, self.location_map);
                 let region_block = self.region_block(region, predecessor);
                 let state = &mut self.region_blocks[region_block];
                 let last = self.rpo_index.len() as u32 - 1;
-                Self::add_at_point_inner(
-                    region_block,
-                    state,
-                    i,
-                    closure[BlockIndex::ZERO],
-                    &mut self.backward_queue,
-                    last - self.rpo_index[block],
-                );
+                let loans = closure[BlockIndex::ZERO];
+                let new = loans.difference(state.loans[block_index]);
+                if !new.is_empty() {
+                    state.loans[block_index].insert(new);
+                    state.pending[block_index].insert(new);
+                    self.backward_queue.push(region_block, last - self.rpo_index[block]);
+                }
             }
         }
 
@@ -426,15 +423,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         for successor in self.graph.logical_successors(region) {
             let region_block = self.region_block(successor, block);
             let state = &mut self.region_blocks[region_block];
-            for (i, &loans) in closure.iter_enumerated() {
-                Self::add_at_point_inner(
-                    region_block,
-                    state,
-                    i,
-                    loans,
-                    &mut self.forward_queue,
-                    self.rpo_index[block],
-                );
+            for (block_index, &loans) in closure.iter_enumerated() {
+                let new = loans.difference(state.loans[block_index]);
+                if !new.is_empty() {
+                    state.loans[block_index].insert(new);
+                    state.pending[block_index].insert(new);
+                    self.forward_queue.push(region_block, self.rpo_index[block]);
+                }
             }
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
@@ -451,14 +446,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                     let block_index = BlockIndex::from_point(point, block, self.location_map);
                     let region_block = self.region_block(successor, block);
                     let state = &mut self.region_blocks[region_block];
-                    Self::add_at_point_inner(
-                        region_block,
-                        state,
-                        block_index,
-                        loans,
-                        &mut self.forward_queue,
-                        self.rpo_index[block],
-                    );
+                    let new = loans.difference(state.loans[block_index]);
+                    if !new.is_empty() {
+                        state.loans[block_index].insert(new);
+                        state.pending[block_index].insert(new);
+                        self.forward_queue.push(region_block, self.rpo_index[block]);
+                    }
                 }
             }
         }
@@ -553,25 +546,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         });
         self.region_block_indices.insert((region, block), region_block);
         region_block
-    }
-
-    /// Records that the loans in `loans` reach the pair at `block_index`, and returns whether any
-    /// of them is new there.
-    fn add_at_point_inner(
-        region_block: RegionInBlockIndex,
-        state: &mut RegionInBlock,
-        block_index: BlockIndex,
-        loans: LoanSet,
-        queue: &mut Queue,
-        queue_priority: u32,
-    ) {
-        let new = loans.difference(state.loans[block_index]);
-        if new.is_empty() {
-            return;
-        }
-        state.loans[block_index].insert(new);
-        state.pending[block_index].insert(new);
-        queue.push(region_block, queue_priority);
     }
 }
 
