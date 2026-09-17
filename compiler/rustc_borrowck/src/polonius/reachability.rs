@@ -148,23 +148,10 @@ struct RegionInBlock {
 pub(super) struct LoanReachability<'a, 'tcx> {
     body: &'a Body<'tcx>,
     location_map: &'a DenseLocationMap,
-    liveness: &'a mut LivenessValues,
     graph: &'a LocalizedConstraintGraph,
-    live_region_variances: &'a mut LiveRegionVariances,
     universal_regions: &'a UniversalRegions<'tcx>,
 
-    deferred_locals_for_liveness: DeferredLocals<'tcx>,
-    calc: LivenessComputation<'a, 'tcx>,
-
-    /// The direction of each reached region's liveness edges, computed on the first touch.
-    directions: IndexVec<RegionVid, Option<ConstraintDirection>>,
-
-    /// What the current batch has reached, per `(region, block)` pair.
-    ///
-    /// FIXME: this allocates two vectors per pair per batch; a single arena reused across batches
-    /// would avoid that.
-    region_blocks: IndexVec<RegionInBlockIndex, RegionInBlock>,
-    region_block_indices: FxHashMap<(RegionVid, BasicBlock), RegionInBlockIndex>,
+    region_blocks: LoanReachabilityRegionBlocks<'a, 'tcx>,
 
     /// The position of each block in a reverse postorder of the CFG.
     rpo_index: IndexVec<BasicBlock, u32>,
@@ -219,17 +206,21 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
 
         LoanReachability {
-            body,
             location_map,
-            liveness,
+            body,
             graph,
-            live_region_variances,
             universal_regions,
-            deferred_locals_for_liveness,
-            calc: comp,
-            directions: IndexVec::new(),
-            region_blocks: IndexVec::new(),
-            region_block_indices: FxHashMap::default(),
+            region_blocks: LoanReachabilityRegionBlocks {
+                body,
+                liveness,
+                live_region_variances,
+                universal_regions,
+                deferred_locals_for_liveness,
+                comp,
+                directions: IndexVec::new(),
+                region_blocks: IndexVec::new(),
+                region_block_indices: FxHashMap::default(),
+            },
             rpo_index,
             forward_queue: Queue::new(),
             backward_queue: Queue::new(),
@@ -256,15 +247,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let block = start.block;
 
                 let block_index = BlockIndex::from_point(point, block, self.location_map);
-                let region_block = self.region_block(region, block);
-                let state = &mut self.region_blocks[region_block];
-                let loans = LoanSet::single(bit);
-                let new = loans.difference(state.loans[block_index]);
-                if !new.is_empty() {
-                    state.loans[block_index].insert(new);
-                    state.pending[block_index].insert(new);
-                    self.forward_queue.push(region_block, self.rpo_index[block]);
-                }
+                let (region_block, state) = self.region_blocks.region_block(region, block);
+                state.loans[block_index].insert(LoanSet::single(bit));
+                state.pending[block_index].insert(LoanSet::single(bit));
+                self.forward_queue.push(region_block, self.rpo_index[block]);
             }
 
             loop {
@@ -282,8 +268,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
             }
 
-            self.region_blocks.raw.clear();
-            self.region_block_indices.clear();
+            self.region_blocks.region_blocks.raw.clear();
+            self.region_blocks.region_block_indices.clear();
             self.forward_queue.clear();
             self.backward_queue.clear();
         }
@@ -291,9 +277,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         #[cfg(debug_assertions)]
         debug_check_against_dfs(
             self.body,
-            self.liveness,
+            self.region_blocks.liveness,
             self.graph,
-            self.live_region_variances,
+            self.region_blocks.live_region_variances,
             self.universal_regions,
             borrow_set,
             &live_loans,
@@ -313,9 +299,11 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         live_loans: &mut LiveLoans,
         batch_start: usize,
     ) {
-        let state = &mut self.region_blocks[region_block];
-        let (region, block) = (state.region, state.block);
-        let (universal, direction) = (state.universal, state.direction);
+        let state = &mut self.region_blocks.region_blocks[region_block];
+        let region = state.region;
+        let block = state.block;
+        let universal = state.universal;
+        let direction = state.direction;
         let block_len = state.loans.len();
 
         let entry = self.location_map.entry_point(block);
@@ -340,7 +328,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         liveness.ensure(block_len);
         if universal {
             liveness.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(block_len));
-        } else if let Some(live_points) = self.liveness.points().row(region) {
+        } else if let Some(live_points) = self.region_blocks.liveness.points().row(region) {
             for interval in live_points.iter_intervals() {
                 if interval.end <= entry {
                     continue;
@@ -406,13 +394,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         if matches!(direction, Forward | Bidirectional) && !block_loans[last].is_empty() {
             for successor in body[block].terminator().successors() {
                 let successor_entry = self.location_map.entry_point(successor);
-                if !self.liveness.is_live_at_point(region, successor_entry) {
+                if !self.region_blocks.liveness.is_live_at_point(region, successor_entry) {
                     continue;
                 }
 
                 let block_index = BlockIndex::from_usize(0);
-                let region_block = self.region_block(region, successor);
-                let state = &mut self.region_blocks[region_block];
+                let (region_block, state) = self.region_blocks.region_block(region, successor);
                 let loans = block_loans[last];
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
@@ -429,14 +416,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             for &predecessor in &body.basic_blocks.predecessors()[block] {
                 let point = self.location_map.point_from_location(body.terminator_loc(predecessor));
                 let block_index = BlockIndex::from_point(point, predecessor, self.location_map);
-                let region_block = self.region_block(region, predecessor);
-                let state = &mut self.region_blocks[region_block];
-                let last = self.rpo_index.len() as u32 - 1;
+                let (region_block, state) = self.region_blocks.region_block(region, predecessor);
                 let loans = block_loans[BlockIndex::ZERO];
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
                     state.loans[block_index].insert(new);
                     state.pending[block_index].insert(new);
+                    let last = self.rpo_index.len() as u32 - 1;
                     self.backward_queue.push(region_block, last - self.rpo_index[block]);
                 }
             }
@@ -446,8 +432,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // a physical one applies at its own point only, and only if that point has been reached.
 
         for successor in self.graph.logical_successors(region) {
-            let region_block = self.region_block(successor, block);
-            let state = &mut self.region_blocks[region_block];
+            let (region_block, state) = self.region_blocks.region_block(successor, block);
             for (block_index, &loans) in block_loans.iter_enumerated() {
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
@@ -469,8 +454,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             if !loans.is_empty() {
                 for successor in self.graph.physical_successors(region, point) {
                     let block_index = BlockIndex::from_point(point, block, self.location_map);
-                    let region_block = self.region_block(successor, block);
-                    let state = &mut self.region_blocks[region_block];
+                    let (region_block, state) = self.region_blocks.region_block(successor, block);
                     let new = loans.difference(state.loans[block_index]);
                     if !new.is_empty() {
                         state.loans[block_index].insert(new);
@@ -485,7 +469,29 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         self.live_buf = liveness;
         self.block_loans_buf = block_loans;
     }
+}
 
+struct LoanReachabilityRegionBlocks<'a, 'tcx> {
+    body: &'a Body<'tcx>,
+    liveness: &'a mut LivenessValues,
+    live_region_variances: &'a mut LiveRegionVariances,
+    universal_regions: &'a UniversalRegions<'tcx>,
+
+    deferred_locals_for_liveness: DeferredLocals<'tcx>,
+    comp: LivenessComputation<'a, 'tcx>,
+
+    /// The direction of each reached region's liveness edges, computed on the first touch.
+    directions: IndexVec<RegionVid, Option<ConstraintDirection>>,
+
+    /// What the current batch has reached, per `(region, block)` pair.
+    ///
+    /// FIXME: this allocates two vectors per pair per batch; a single arena reused across batches
+    /// would avoid that.
+    region_blocks: IndexVec<RegionInBlockIndex, RegionInBlock>,
+    region_block_indices: FxHashMap<(RegionVid, BasicBlock), RegionInBlockIndex>,
+}
+
+impl<'a, 'tcx> LoanReachabilityRegionBlocks<'a, 'tcx> {
     fn materialize_liveness(
         deferred_locals_for_liveness: &mut DeferredLocals<'tcx>,
         liveness: &mut LivenessValues,
@@ -505,9 +511,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
     /// The index of the `(region, block)` pair, creating its state if this is the first time the
     /// batch reaches the region in this block.
-    fn region_block(&mut self, region: RegionVid, block: BasicBlock) -> RegionInBlockIndex {
+    fn region_block(
+        &mut self,
+        region: RegionVid,
+        block: BasicBlock,
+    ) -> (RegionInBlockIndex, &mut RegionInBlock) {
         if let Some(&region_block) = self.region_block_indices.get(&(region, block)) {
-            return region_block;
+            return (region_block, &mut self.region_blocks[region_block]);
         }
 
         let universal = self.universal_regions.is_universal_region(region);
@@ -521,7 +531,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 self.liveness,
                 self.live_region_variances,
                 self.universal_regions,
-                &mut self.calc,
+                &mut self.comp,
                 region,
             );
             if universal {
@@ -545,7 +555,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             pending: IndexVec::from_elem_n(LoanSet::EMPTY, len),
         });
         self.region_block_indices.insert((region, block), region_block);
-        region_block
+        (region_block, &mut self.region_blocks[region_block])
     }
 }
 
