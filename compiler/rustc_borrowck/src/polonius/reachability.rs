@@ -361,6 +361,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
+        // We first need to propagate the loans within the block.
+
         let mut block_loans = std::mem::take(&mut self.block_loans_buf);
         block_loans.raw.clear();
         block_loans.raw.extend_from_slice(&pending.raw);
