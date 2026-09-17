@@ -254,7 +254,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let loans = LoanSet::single(bit);
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
-                    state.loans[block_index].insert(new);
                     state.pending[block_index].insert(new);
                     self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
@@ -344,6 +343,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 );
             }
         }
+
+        // We first need to propagate the loans within the block.
 
         let mut block_loans = pending.clone();
         if matches!(direction, Forward | Bidirectional) {
