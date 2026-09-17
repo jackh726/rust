@@ -47,7 +47,7 @@ use std::collections::BinaryHeap;
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_index::IndexVec;
-use rustc_index::bit_set::{DenseBitSet, GrowableBitSet};
+use rustc_index::bit_set::GrowableBitSet;
 use rustc_middle::mir::{BasicBlock, Body};
 use rustc_middle::ty::{RegionVid, TypeVisitable};
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
@@ -174,9 +174,13 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     forward_queue: Queue,
     backward_queue: Queue,
 
-    /// Buffers reused across `process` calls, one entry per point of the block being processed.
+    /// Buffers reused across `process` calls.
+    //
+    // It might seem tempting to remove these. However, the allocations avoided
+    // by keeping these around can be up to 20% on some benchmarks.
     pending_buf: IndexVec<BlockIndex, LoanSet>,
     block_loans_buf: IndexVec<BlockIndex, LoanSet>,
+    liveness_buf: GrowableBitSet<BlockIndex>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -224,6 +228,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             backward_queue: Queue::new(),
             pending_buf: IndexVec::new(),
             block_loans_buf: IndexVec::new(),
+            liveness_buf: GrowableBitSet::new_empty(),
         }
     }
 
@@ -319,7 +324,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // called for this `RegionInBlock`, but turns out this is the most
         // efficient both in instructions and memory compared to both eagerly
         // computing at creation *or* lazily computing and caching for later.
-        let mut liveness = DenseBitSet::new_empty(block_len);
+        let liveness = &mut self.liveness_buf;
+        liveness.clear();
+        liveness.ensure(block_len);
         if universal {
             liveness.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(block_len));
         } else if let Some(live_points) = self.region_blocks.liveness.points().row(region) {
