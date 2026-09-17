@@ -373,6 +373,11 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
+        // At this point, we have propagated the loans *within* this block
+        // It would be nice to use `state.loans` directly, but
+        // `self.region_block` makes that tricky
+        let block_loans = block_loans;
+
         for (block_index, &loans) in block_loans.iter_enumerated() {
             state.loans[block_index].insert(loans);
             if liveness.contains(block_index) {
@@ -384,11 +389,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
             }
         }
-
-        // At this point, we have propagated the loans *within* this block
-        // It would be nice to use `state.loans` directly, but
-        // `self.region_block` makes that tricky
-        let block_loans = block_loans;
 
         // The liveness edges leaving the block: to the entry point of the successor blocks, and to
         // the terminator of the predecessor blocks.
