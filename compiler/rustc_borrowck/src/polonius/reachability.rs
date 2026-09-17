@@ -320,8 +320,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let state = &mut self.region_blocks[region_block];
         let (region, block) = (state.region, state.block);
         let (universal, direction) = (state.universal, state.direction);
-        let entry = self.location_map.entry_point(block);
         let block_len = state.loans.len();
+
+        let entry = self.location_map.entry_point(block);
+        let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
 
         // Take the pending loans, leaving the pair with none.
         let mut pending = std::mem::take(&mut self.pending_buf);
@@ -333,12 +335,15 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             return;
         }
 
-        let mut live = std::mem::take(&mut self.live_buf);
-        live.clear();
-        live.ensure(block_len);
-        let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
+        // It may seem weird to recompute this liveness every time process is
+        // called for this `RegionInBlock`, but turns out this is the most
+        // efficient both in instructions and memory compared to both eagerly
+        // computing at creation *or* lazily computing and caching for later.
+        let mut liveness = std::mem::take(&mut self.live_buf);
+        liveness.clear();
+        liveness.ensure(block_len);
         if universal {
-            live.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(block_len));
+            liveness.insert_range(BlockIndex::ZERO..BlockIndex::from_usize(block_len));
         } else if let Some(live_points) = self.liveness.points().row(region) {
             for interval in live_points.iter_intervals() {
                 if interval.end <= entry {
@@ -349,7 +354,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
                 let start = interval.start.as_usize().max(entry.as_usize());
                 let end = interval.end.as_usize().min(terminator.as_usize() + 1);
-                live.insert_range(
+                liveness.insert_range(
                     BlockIndex::from_usize(start - entry.as_usize())
                         ..BlockIndex::from_usize(end - entry.as_usize()),
                 );
@@ -362,7 +367,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         if matches!(direction, Forward | Bidirectional) {
             let mut previous = LoanSet::EMPTY;
             for (i, loans) in closure.iter_enumerated_mut() {
-                if live.contains(i) {
+                if liveness.contains(i) {
                     loans.insert(previous);
                 }
                 previous = *loans;
@@ -374,13 +379,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             for (i, loans) in closure.iter_enumerated_mut().rev() {
                 let here = pending[i].union(carry);
                 loans.insert(here);
-                carry = if live.contains(i) { here } else { LoanSet::EMPTY };
+                carry = if liveness.contains(i) { here } else { LoanSet::EMPTY };
             }
         }
 
         for (i, &loans) in closure.iter_enumerated() {
             state.loans[i].insert(loans);
-            if live.contains(i) {
+            if liveness.contains(i) {
                 for bit in loans.iter() {
                     live_loans
                         .insert(entry + i.index(), BorrowIndex::from_usize(batch_start + bit));
@@ -412,7 +417,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
         if matches!(direction, Backward | Bidirectional)
             && !closure[BlockIndex::ZERO].is_empty()
-            && live.contains(BlockIndex::ZERO)
+            && liveness.contains(BlockIndex::ZERO)
         {
             for &predecessor in &body.basic_blocks.predecessors()[block] {
                 let point = self.location_map.point_from_location(body.terminator_loc(predecessor));
@@ -433,8 +438,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // The subset edges: a logical one hands every point reached to the target region unchanged,
         // a physical one applies at its own point only, and only if that point has been reached.
 
-        let graph = self.graph;
-        for successor in graph.logical_successors(region) {
+        for successor in self.graph.logical_successors(region) {
             let region_block = self.region_block(successor, block);
             let state = &mut self.region_blocks[region_block];
             for (block_index, &loans) in closure.iter_enumerated() {
@@ -447,15 +451,16 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
-        let physical_points = graph.physical_points(region);
+        let physical_points = self.graph.physical_points(region);
         let start = physical_points.partition_point(|&point| point < entry);
+        let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
         for &point in &physical_points[start..] {
             if point > terminator {
                 break;
             }
             let loans = closure[BlockIndex::from_usize(point.as_usize() - entry.as_usize())];
             if !loans.is_empty() {
-                for successor in graph.physical_successors(region, point) {
+                for successor in self.graph.physical_successors(region, point) {
                     let block_index = BlockIndex::from_point(point, block, self.location_map);
                     let region_block = self.region_block(successor, block);
                     let state = &mut self.region_blocks[region_block];
@@ -470,7 +475,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
 
         self.pending_buf = pending;
-        self.live_buf = live;
+        self.live_buf = liveness;
         self.closure_buf = closure;
     }
 
