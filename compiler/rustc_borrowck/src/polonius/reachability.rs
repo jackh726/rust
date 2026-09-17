@@ -191,14 +191,6 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// FIXME: a bucket queue over the reverse postorder index would make this O(1) per operation.
     forward_queue: Queue,
     backward_queue: Queue,
-
-    /// Buffers reused across `process` calls.
-    //
-    // It might seem tempting to remove these. However, the allocations avoided
-    // by keeping these around can be up to 20% on some benchmarks.
-    pending_buf: IndexVec<BlockIndex, LoanSet>,
-    block_loans_buf: IndexVec<BlockIndex, LoanSet>,
-    liveness_buf: GrowableBitSet<BlockIndex>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -244,9 +236,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             rpo_index,
             forward_queue: Queue::new(),
             backward_queue: Queue::new(),
-            pending_buf: IndexVec::new(),
-            block_loans_buf: IndexVec::new(),
-            liveness_buf: GrowableBitSet::new_empty(),
         }
     }
 
@@ -255,6 +244,10 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
     pub(super) fn compute_live_loans(&mut self, borrow_set: &BorrowSet<'tcx>) -> LiveLoans {
         let num_loans = borrow_set.len();
         let mut live_loans = LiveLoans::new(self.location_map.num_points(), num_loans);
+
+        let mut pending_buf = IndexVec::new();
+        let mut block_loans_buf = IndexVec::new();
+        let mut liveness_buf = GrowableBitSet::new_empty();
 
         for batch_start in (0..num_loans).step_by(BATCH_SIZE) {
             // Each loan of the batch enters the graph at the region and point it is introduced
@@ -266,23 +259,37 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let region = loan.region;
                 let block = start.block;
 
-                let (region_block, state) = self.region_blocks.region_block(region, block);
-                state.insert_pending_loans(
+                self.insert_pending_loans_and_queue_forward(
+                    region,
+                    block,
                     BlockIndex::from_point(point, block, self.location_map),
                     LoanSet::single(bit),
                 );
-                self.forward_queue.push(region_block, self.rpo_index[block]);
             }
 
             loop {
                 while let Some(region_block) = self.forward_queue.pop() {
-                    self.process(region_block, &mut live_loans, batch_start);
+                    self.process(
+                        region_block,
+                        &mut live_loans,
+                        batch_start,
+                        &mut pending_buf,
+                        &mut block_loans_buf,
+                        &mut liveness_buf,
+                    );
                 }
                 if self.backward_queue.is_empty() {
                     break;
                 }
                 while let Some(region_block) = self.backward_queue.pop() {
-                    self.process(region_block, &mut live_loans, batch_start);
+                    self.process(
+                        region_block,
+                        &mut live_loans,
+                        batch_start,
+                        &mut pending_buf,
+                        &mut block_loans_buf,
+                        &mut liveness_buf,
+                    );
                 }
                 if self.forward_queue.is_empty() {
                     break;
@@ -319,6 +326,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         region_block: RegionInBlockIndex,
         live_loans: &mut LiveLoans,
         batch_start: usize,
+
+        // It might seem tempting to remove these. However, the allocations avoided
+        // by keeping these around can be up to 20% on some benchmarks.
+        pending_buf: &mut IndexVec<BlockIndex, LoanSet>,
+        block_loans_buf: &mut IndexVec<BlockIndex, LoanSet>,
+        liveness_buf: &mut GrowableBitSet<BlockIndex>,
     ) {
         let state = &mut self.region_blocks.region_blocks[region_block];
         let region = state.region;
@@ -335,7 +348,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         }
 
         // Take the pending loans, leaving the pair with none.
-        let mut pending = std::mem::take(&mut self.pending_buf);
+        let mut pending = &mut *pending_buf;
         pending.raw.clear();
         pending.resize(block_len, LoanSet::EMPTY);
         std::mem::swap(&mut state.pending, &mut pending);
@@ -344,7 +357,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // called for this `RegionInBlock`, but turns out this is the most
         // efficient both in instructions and memory compared to both eagerly
         // computing at creation *or* lazily computing and caching for later.
-        let liveness = &mut self.liveness_buf;
+        let liveness = &mut *liveness_buf;
         liveness.clear();
         liveness.ensure(block_len);
         if universal {
@@ -369,7 +382,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         // We first need to propagate the loans within the block.
 
-        let block_loans = &mut self.block_loans_buf;
+        let block_loans = &mut *block_loans_buf;
         block_loans.raw.clear();
         block_loans.raw.extend_from_slice(&pending.raw);
         if matches!(direction, Forward | Bidirectional) {
@@ -394,7 +407,6 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // At this point, we have propagated the loans *within* this block.
         // So, mark this as immutable so we don't accidentally modify it.
         // It would be nice to use `state.loans` directly, but `self.region_block` makes that tricky
-        self.pending_buf = pending;
         let block_loans = &*block_loans;
 
         for (block_index, &loans) in block_loans.iter_enumerated() {
@@ -413,6 +425,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // The liveness edges leaving the block: to the entry point of the successor blocks, and to
         // the terminator of the predecessor blocks.
 
+        let start_live = liveness.contains(BlockIndex::ZERO);
+
         let last = BlockIndex::from_usize(block_len - 1);
         if matches!(direction, Forward | Bidirectional) && !block_loans[last].is_empty() {
             for successor in self.body[block].terminator().successors() {
@@ -420,30 +434,27 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 if !self.region_blocks.liveness.is_live_at_point(region, successor_entry) {
                     continue;
                 }
-
-                let (region_block, state) = self.region_blocks.region_block(region, successor);
-                if state.insert_pending_loans(BlockIndex::from_usize(0), block_loans[last]) {
-                    self.forward_queue.push(region_block, self.rpo_index[block]);
-                }
+                self.insert_pending_loans_and_queue_forward(
+                    region,
+                    successor,
+                    BlockIndex::from_usize(0),
+                    block_loans[last],
+                );
             }
         }
         if matches!(direction, Backward | Bidirectional)
             && !block_loans[BlockIndex::ZERO].is_empty()
-            && liveness.contains(BlockIndex::ZERO)
+            && start_live
         {
             for &predecessor in &self.body.basic_blocks.predecessors()[block] {
                 let point =
                     self.location_map.point_from_location(self.body.terminator_loc(predecessor));
-                let (region_block, state) = self.region_blocks.region_block(region, predecessor);
-                if state.insert_pending_loans(
+                self.insert_pending_loans_and_queue_backward(
+                    region,
+                    predecessor,
                     BlockIndex::from_point(point, predecessor, self.location_map),
                     block_loans[BlockIndex::ZERO],
-                ) {
-                    self.backward_queue.push(
-                        region_block,
-                        (self.rpo_index.len() as u32) - 1 - self.rpo_index[block],
-                    );
-                }
+                );
             }
         }
 
@@ -451,13 +462,13 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         // a physical one applies at its own point only, and only if that point has been reached.
 
         for successor_region in self.graph.logical_successors(region) {
-            let (region_block, state) = self.region_blocks.region_block(successor_region, block);
-            let mut any_new = false;
             for (block_index, &loans) in block_loans.iter_enumerated() {
-                any_new |= state.insert_pending_loans(block_index, loans);
-            }
-            if any_new {
-                self.forward_queue.push(region_block, self.rpo_index[block]);
+                self.insert_pending_loans_and_queue_forward(
+                    successor_region,
+                    block,
+                    block_index,
+                    loans,
+                );
             }
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
@@ -471,15 +482,43 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             if loans.is_empty() {
                 continue;
             }
-            for successor in self.graph.physical_successors(region, point) {
-                let (region_block, state) = self.region_blocks.region_block(successor, block);
-                if state.insert_pending_loans(
+            for successor_region in self.graph.physical_successors(region, point) {
+                self.insert_pending_loans_and_queue_forward(
+                    successor_region,
+                    block,
                     BlockIndex::from_point(point, block, self.location_map),
                     loans,
-                ) {
-                    self.forward_queue.push(region_block, self.rpo_index[block]);
-                }
+                );
             }
+        }
+    }
+
+    fn insert_pending_loans_and_queue_forward(
+        &mut self,
+        region: RegionVid,
+        block: BasicBlock,
+        block_index: BlockIndex,
+        loans: LoanSet,
+    ) {
+        if let Some(region_block) =
+            self.region_blocks.insert_pending_loans(region, block, block_index, loans)
+        {
+            self.forward_queue.push(region_block, self.rpo_index[block]);
+        }
+    }
+
+    fn insert_pending_loans_and_queue_backward(
+        &mut self,
+        region: RegionVid,
+        block: BasicBlock,
+        block_index: BlockIndex,
+        loans: LoanSet,
+    ) {
+        if let Some(region_block) =
+            self.region_blocks.insert_pending_loans(region, block, block_index, loans)
+        {
+            self.backward_queue
+                .push(region_block, (self.rpo_index.len() as u32) - 1 - self.rpo_index[block]);
         }
     }
 }
@@ -551,53 +590,54 @@ impl<'a, 'tcx> LoanReachabilityRegionBlocks<'a, 'tcx> {
         }
     }
 
-    /// The index of the `(region, block)` pair, creating its state if this is the first time the
-    /// batch reaches the region in this block.
-    fn region_block(
+    fn insert_pending_loans(
         &mut self,
         region: RegionVid,
         block: BasicBlock,
-    ) -> (RegionInBlockIndex, &mut RegionInBlock) {
-        if let Some(&region_block) = self.region_block_indices.get(&(region, block)) {
-            return (region_block, &mut self.region_blocks[region_block]);
-        }
+        block_index: BlockIndex,
+        loans: LoanSet,
+    ) -> Option<RegionInBlockIndex> {
+        let region_block = *self.region_block_indices.entry((region, block)).or_insert_with(|| {
+            let universal = self.universal_regions.is_universal_region(region);
 
-        let universal = self.universal_regions.is_universal_region(region);
+            // The first time any loan reaches `region`: computes the liveness that was deferred for it,
+            // since everything below reads this region's liveness and variance, and the direction of its
+            // liveness edges.
+            let direction = *self.directions.get_or_insert_with(region, || {
+                Self::materialize_liveness(
+                    &mut self.deferred_locals_for_liveness,
+                    self.liveness,
+                    self.live_region_variances,
+                    self.universal_regions,
+                    &mut self.comp,
+                    region,
+                );
+                if universal {
+                    Forward
+                } else {
+                    self.live_region_variances
+                        .get(region)
+                        .copied()
+                        .flatten()
+                        .unwrap_or(ConstraintDirection::Bidirectional)
+                }
+            });
 
-        // The first time any loan reaches `region`: computes the liveness that was deferred for it,
-        // since everything below reads this region's liveness and variance, and the direction of its
-        // liveness edges.
-        let direction = *self.directions.get_or_insert_with(region, || {
-            Self::materialize_liveness(
-                &mut self.deferred_locals_for_liveness,
-                self.liveness,
-                self.live_region_variances,
-                self.universal_regions,
-                &mut self.comp,
+            let block_len = self.body[block].statements.len() + 1;
+            let region_block = self.region_blocks.push(RegionInBlock {
                 region,
-            );
-            if universal {
-                Forward
-            } else {
-                self.live_region_variances
-                    .get(region)
-                    .copied()
-                    .flatten()
-                    .unwrap_or(ConstraintDirection::Bidirectional)
-            }
+                block,
+                universal,
+                direction,
+                loans: IndexVec::from_elem_n(LoanSet::EMPTY, block_len),
+                pending: IndexVec::from_elem_n(LoanSet::EMPTY, block_len),
+            });
+            region_block
         });
 
-        let block_len = self.body[block].statements.len() + 1;
-        let region_block = self.region_blocks.push(RegionInBlock {
-            region,
-            block,
-            universal,
-            direction,
-            loans: IndexVec::from_elem_n(LoanSet::EMPTY, block_len),
-            pending: IndexVec::from_elem_n(LoanSet::EMPTY, block_len),
-        });
-        self.region_block_indices.insert((region, block), region_block);
-        (region_block, &mut self.region_blocks[region_block])
+        self.region_blocks[region_block]
+            .insert_pending_loans(block_index, loans)
+            .then_some(region_block)
     }
 }
 
