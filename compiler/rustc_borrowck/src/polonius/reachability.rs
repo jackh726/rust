@@ -173,6 +173,10 @@ pub(super) struct LoanReachability<'a, 'tcx> {
     /// FIXME: a bucket queue over the reverse postorder index would make this O(1) per operation.
     forward_queue: Queue,
     backward_queue: Queue,
+
+    /// Buffers reused across `process` calls, one entry per point of the block being processed.
+    pending_buf: IndexVec<BlockIndex, LoanSet>,
+    block_loans_buf: IndexVec<BlockIndex, LoanSet>,
 }
 
 impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
@@ -219,6 +223,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             rpo_index,
             forward_queue: Queue::new(),
             backward_queue: Queue::new(),
+            pending_buf: IndexVec::new(),
+            block_loans_buf: IndexVec::new(),
         }
     }
 
@@ -301,9 +307,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
 
         // Take the pending loans, leaving the pair with none.
-        let mut pending = IndexVec::from_elem_n(LoanSet::EMPTY, block_len);
+        let mut pending = std::mem::take(&mut self.pending_buf);
+        pending.raw.clear();
+        pending.resize(block_len, LoanSet::EMPTY);
         std::mem::swap(&mut state.pending, &mut pending);
         if pending.iter().all(|loans| loans.is_empty()) {
+            self.pending_buf = pending;
             return;
         }
 
@@ -333,7 +342,9 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         // We first need to propagate the loans within the block.
 
-        let mut block_loans = pending.clone();
+        let block_loans = &mut self.block_loans_buf;
+        block_loans.raw.clear();
+        block_loans.raw.extend_from_slice(&pending.raw);
         if matches!(direction, Forward | Bidirectional) {
             let mut previous = LoanSet::EMPTY;
             for (block_index, loans) in block_loans.iter_enumerated_mut() {
@@ -444,6 +455,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 }
             }
         }
+
+        self.pending_buf = pending;
     }
 }
 
