@@ -250,6 +250,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
                 let block_index = BlockIndex::from_point(point, block, self.location_map);
                 let (region_block, state) = self.region_blocks.region_block(region, block);
+                state.loans[block_index].insert(LoanSet::single(bit));
                 state.pending[block_index].insert(LoanSet::single(bit));
                 self.forward_queue.push(region_block, self.rpo_index[block]);
             }
@@ -404,6 +405,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let loans = block_loans[last];
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
+                    state.loans[block_index].insert(new);
                     state.pending[block_index].insert(new);
                     self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
@@ -420,6 +422,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let loans = block_loans[BlockIndex::ZERO];
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
+                    state.loans[block_index].insert(new);
                     state.pending[block_index].insert(new);
                     let last = self.rpo_index.len() as u32 - 1;
                     self.backward_queue.push(region_block, last - self.rpo_index[block]);
@@ -435,6 +438,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             for (block_index, &loans) in block_loans.iter_enumerated() {
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
+                    state.loans[block_index].insert(new);
                     state.pending[block_index].insert(new);
                     self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
@@ -456,6 +460,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let (region_block, state) = self.region_blocks.region_block(successor, block);
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
+                    state.loans[block_index].insert(new);
                     state.pending[block_index].insert(new);
                     self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
