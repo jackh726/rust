@@ -450,17 +450,18 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             if point > terminator {
                 break;
             }
-            let loans = block_loans[BlockIndex::from_usize(point.as_usize() - entry.as_usize())];
-            if !loans.is_empty() {
-                for successor in self.graph.physical_successors(region, point) {
-                    let block_index = BlockIndex::from_point(point, block, self.location_map);
-                    let (region_block, state) = self.region_blocks.region_block(successor, block);
-                    let new = loans.difference(state.loans[block_index]);
-                    if !new.is_empty() {
-                        state.loans[block_index].insert(new);
-                        state.pending[block_index].insert(new);
-                        self.forward_queue.push(region_block, self.rpo_index[block]);
-                    }
+            let loans = block_loans[BlockIndex::from_point(point, block, self.location_map)];
+            if loans.is_empty() {
+                continue;
+            }
+            for successor in self.graph.physical_successors(region, point) {
+                let block_index = BlockIndex::from_point(point, block, self.location_map);
+                let (region_block, state) = self.region_blocks.region_block(successor, block);
+                let new = loans.difference(state.loans[block_index]);
+                if !new.is_empty() {
+                    state.loans[block_index].insert(new);
+                    state.pending[block_index].insert(new);
+                    self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
             }
         }
