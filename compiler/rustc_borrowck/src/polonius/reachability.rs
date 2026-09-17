@@ -132,8 +132,13 @@ struct RegionInBlock {
     universal: bool,
     /// The direction the region's liveness edges flow in.
     direction: ConstraintDirection,
-    loans: IndexVec<BlockIndex, LoanSet>,
+    /// The loans added for a block that have not yet been propagated.
     pending: IndexVec<BlockIndex, LoanSet>,
+    /// This serves to avoid requeuing a `RegionInBlock` when a given loan
+    /// has already been propagated *or will be*. This second part is important,
+    /// because there are *two queues* that a `RegionInBlock` can be pulled
+    /// from, and queuing in both is just slower.
+    loans: IndexVec<BlockIndex, LoanSet>,
 }
 
 /// Computes the points at which each loan is live, as the reachability of each loan within the
