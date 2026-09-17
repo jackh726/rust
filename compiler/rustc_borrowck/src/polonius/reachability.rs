@@ -137,6 +137,19 @@ struct RegionInBlock {
     loans: IndexVec<BlockIndex, LoanSet>,
 }
 
+impl RegionInBlock {
+    /// Inserts `loans` into the pending set for a given `block_index`.
+    /// Returns true if any loans are new compared to the existing set.
+    fn insert_pending_loans(&mut self, block_index: BlockIndex, loans: LoanSet) -> bool {
+        let new = loans.difference(self.loans[block_index]);
+        if !new.is_empty() {
+            self.loans[block_index].insert(new);
+            self.pending[block_index].insert(new);
+        }
+        !new.is_empty()
+    }
+}
+
 /// Computes the points at which each loan is live, as the reachability of each loan within the
 /// localized constraint graph. See the module documentation for the general shape of the
 /// computation.
@@ -251,8 +264,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
                 let block_index = BlockIndex::from_point(point, block, self.location_map);
                 let (region_block, state) = self.region_blocks.region_block(region, block);
-                state.loans[block_index].insert(LoanSet::single(bit));
-                state.pending[block_index].insert(LoanSet::single(bit));
+                state.insert_pending_loans(block_index, LoanSet::single(bit));
                 self.forward_queue.push(region_block, self.rpo_index[block]);
             }
 
@@ -312,15 +324,15 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         let entry = self.location_map.entry_point(block);
         let terminator = PointIndex::from_usize(entry.as_usize() + block_len - 1);
 
+        if state.pending.iter().all(|loans| loans.is_empty()) {
+            return;
+        }
+
         // Take the pending loans, leaving the pair with none.
         let mut pending = std::mem::take(&mut self.pending_buf);
         pending.raw.clear();
         pending.resize(block_len, LoanSet::EMPTY);
         std::mem::swap(&mut state.pending, &mut pending);
-        if pending.iter().all(|loans| loans.is_empty()) {
-            self.pending_buf = pending;
-            return;
-        }
 
         // It may seem weird to recompute this liveness every time process is
         // called for this `RegionInBlock`, but turns out this is the most
@@ -339,11 +351,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 if interval.start > terminator {
                     break;
                 }
-                let start = interval.start.as_usize().max(entry.as_usize());
-                let end = interval.end.as_usize().min(terminator.as_usize() + 1);
+                let block_start =
+                    interval.start.as_usize().max(entry.as_usize()) - entry.as_usize();
+                let block_end =
+                    interval.end.as_usize().min(terminator.as_usize() + 1) - entry.as_usize();
                 liveness.insert_range(
-                    BlockIndex::from_usize(start - entry.as_usize())
-                        ..BlockIndex::from_usize(end - entry.as_usize()),
+                    BlockIndex::from_usize(block_start)..BlockIndex::from_usize(block_end),
                 );
             }
         }
@@ -372,30 +385,31 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
-        // At this point, we have propagated the loans *within* this block
-        // It would be nice to use `state.loans` directly, but
-        // `self.region_block` makes that tricky
-        let block_loans = block_loans;
+        // At this point, we have propagated the loans *within* this block.
+        // So, mark this as immutable so we don't accidentally modify it.
+        // It would be nice to use `state.loans` directly, but `self.region_block` makes that tricky
+        self.pending_buf = pending;
+        let block_loans = &*block_loans;
 
         for (block_index, &loans) in block_loans.iter_enumerated() {
             state.loans[block_index].insert(loans);
-            if liveness.contains(block_index) {
-                for bit in loans.iter() {
-                    live_loans.insert(
-                        entry + block_index.index(),
-                        BorrowIndex::from_usize(batch_start + bit),
-                    );
-                }
+            if !liveness.contains(block_index) {
+                continue;
+            }
+            for bit in loans.iter() {
+                live_loans.insert(
+                    entry + block_index.index(),
+                    BorrowIndex::from_usize(batch_start + bit),
+                );
             }
         }
 
         // The liveness edges leaving the block: to the entry point of the successor blocks, and to
         // the terminator of the predecessor blocks.
 
-        let body = self.body;
         let last = BlockIndex::from_usize(block_len - 1);
         if matches!(direction, Forward | Bidirectional) && !block_loans[last].is_empty() {
-            for successor in body[block].terminator().successors() {
+            for successor in self.body[block].terminator().successors() {
                 let successor_entry = self.location_map.entry_point(successor);
                 if !self.region_blocks.liveness.is_live_at_point(region, successor_entry) {
                     continue;
@@ -403,11 +417,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
                 let block_index = BlockIndex::from_usize(0);
                 let (region_block, state) = self.region_blocks.region_block(region, successor);
-                let loans = block_loans[last];
-                let new = loans.difference(state.loans[block_index]);
-                if !new.is_empty() {
-                    state.loans[block_index].insert(new);
-                    state.pending[block_index].insert(new);
+                if state.insert_pending_loans(block_index, block_loans[last]) {
                     self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
             }
@@ -416,17 +426,16 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             && !block_loans[BlockIndex::ZERO].is_empty()
             && liveness.contains(BlockIndex::ZERO)
         {
-            for &predecessor in &body.basic_blocks.predecessors()[block] {
-                let point = self.location_map.point_from_location(body.terminator_loc(predecessor));
+            for &predecessor in &self.body.basic_blocks.predecessors()[block] {
+                let point =
+                    self.location_map.point_from_location(self.body.terminator_loc(predecessor));
                 let block_index = BlockIndex::from_point(point, predecessor, self.location_map);
                 let (region_block, state) = self.region_blocks.region_block(region, predecessor);
-                let loans = block_loans[BlockIndex::ZERO];
-                let new = loans.difference(state.loans[block_index]);
-                if !new.is_empty() {
-                    state.loans[block_index].insert(new);
-                    state.pending[block_index].insert(new);
-                    let last = self.rpo_index.len() as u32 - 1;
-                    self.backward_queue.push(region_block, last - self.rpo_index[block]);
+                if state.insert_pending_loans(block_index, block_loans[BlockIndex::ZERO]) {
+                    self.backward_queue.push(
+                        region_block,
+                        (self.rpo_index.len() as u32) - 1 - self.rpo_index[block],
+                    );
                 }
             }
         }
@@ -436,13 +445,12 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
 
         for successor in self.graph.logical_successors(region) {
             let (region_block, state) = self.region_blocks.region_block(successor, block);
+            let mut any_new = false;
             for (block_index, &loans) in block_loans.iter_enumerated() {
-                let new = loans.difference(state.loans[block_index]);
-                if !new.is_empty() {
-                    state.loans[block_index].insert(new);
-                    state.pending[block_index].insert(new);
-                    self.forward_queue.push(region_block, self.rpo_index[block]);
-                }
+                any_new |= state.insert_pending_loans(block_index, loans);
+            }
+            if any_new {
+                self.forward_queue.push(region_block, self.rpo_index[block]);
             }
         }
         // The points with physical edges are sorted, so we can jump to this block's range.
@@ -459,16 +467,11 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             for successor in self.graph.physical_successors(region, point) {
                 let block_index = BlockIndex::from_point(point, block, self.location_map);
                 let (region_block, state) = self.region_blocks.region_block(successor, block);
-                let new = loans.difference(state.loans[block_index]);
-                if !new.is_empty() {
-                    state.loans[block_index].insert(new);
-                    state.pending[block_index].insert(new);
+                if state.insert_pending_loans(block_index, loans) {
                     self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
             }
         }
-
-        self.pending_buf = pending;
     }
 }
 
