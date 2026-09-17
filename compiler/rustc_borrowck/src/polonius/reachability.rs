@@ -345,11 +345,11 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             }
         }
 
-        let mut closure = pending.clone();
+        let mut block_loans = pending.clone();
         if matches!(direction, Forward | Bidirectional) {
             let mut previous = LoanSet::EMPTY;
-            for (i, loans) in closure.iter_enumerated_mut() {
-                if liveness.contains(i) {
+            for (block_index, loans) in block_loans.iter_enumerated_mut() {
+                if liveness.contains(block_index) {
                     loans.insert(previous);
                 }
                 previous = *loans;
@@ -358,46 +358,55 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         if matches!(direction, Backward | Bidirectional) {
             // Backward edges are only taken from a point where the region is live.
             let mut carry = LoanSet::EMPTY;
-            for (i, loans) in closure.iter_enumerated_mut().rev() {
-                let here = pending[i].union(carry);
+            for (block_index, loans) in block_loans.iter_enumerated_mut().rev() {
+                let here = pending[block_index].union(carry);
                 loans.insert(here);
-                carry = if liveness.contains(i) { here } else { LoanSet::EMPTY };
+                carry = if liveness.contains(block_index) { here } else { LoanSet::EMPTY };
             }
         }
 
-        for (i, &loans) in closure.iter_enumerated() {
-            state.loans[i].insert(loans);
-            if liveness.contains(i) {
+        for (block_index, &loans) in block_loans.iter_enumerated() {
+            state.loans[block_index].insert(loans);
+            if liveness.contains(block_index) {
                 for bit in loans.iter() {
-                    live_loans
-                        .insert(entry + i.index(), BorrowIndex::from_usize(batch_start + bit));
+                    live_loans.insert(
+                        entry + block_index.index(),
+                        BorrowIndex::from_usize(batch_start + bit),
+                    );
                 }
             }
         }
+
+        // At this point, we have propagated the loans *within* this block
+        // It would be nice to use `state.loans` directly, but
+        // `self.region_block` makes that tricky
+        let block_loans = block_loans;
 
         // The liveness edges leaving the block: to the entry point of the successor blocks, and to
         // the terminator of the predecessor blocks.
 
         let body = self.body;
-        let last = BlockIndex::from_usize(closure.len() - 1);
-        if matches!(direction, Forward | Bidirectional) && !closure[last].is_empty() {
+        let last = BlockIndex::from_usize(block_len - 1);
+        if matches!(direction, Forward | Bidirectional) && !block_loans[last].is_empty() {
             for successor in body[block].terminator().successors() {
-                let point = self.location_map.entry_point(successor);
-                if universal || self.liveness.is_live_at_point(region, point) {
-                    let block_index = BlockIndex::from_point(point, successor, self.location_map);
-                    let region_block = self.region_block(region, successor);
-                    let state = &mut self.region_blocks[region_block];
-                    let loans = closure[last];
-                    let new = loans.difference(state.loans[block_index]);
-                    if !new.is_empty() {
-                        state.pending[block_index].insert(new);
-                        self.forward_queue.push(region_block, self.rpo_index[block]);
-                    }
+                let successor_entry = self.location_map.entry_point(successor);
+                if !self.liveness.is_live_at_point(region, successor_entry) {
+                    continue;
+                }
+
+                let block_index = BlockIndex::from_usize(0);
+                let region_block = self.region_block(region, successor);
+                let state = &mut self.region_blocks[region_block];
+                let loans = block_loans[last];
+                let new = loans.difference(state.loans[block_index]);
+                if !new.is_empty() {
+                    state.pending[block_index].insert(new);
+                    self.forward_queue.push(region_block, self.rpo_index[block]);
                 }
             }
         }
         if matches!(direction, Backward | Bidirectional)
-            && !closure[BlockIndex::ZERO].is_empty()
+            && !block_loans[BlockIndex::ZERO].is_empty()
             && liveness.contains(BlockIndex::ZERO)
         {
             for &predecessor in &body.basic_blocks.predecessors()[block] {
@@ -406,7 +415,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
                 let region_block = self.region_block(region, predecessor);
                 let state = &mut self.region_blocks[region_block];
                 let last = self.rpo_index.len() as u32 - 1;
-                let loans = closure[BlockIndex::ZERO];
+                let loans = block_loans[BlockIndex::ZERO];
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
                     state.pending[block_index].insert(new);
@@ -421,7 +430,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
         for successor in self.graph.logical_successors(region) {
             let region_block = self.region_block(successor, block);
             let state = &mut self.region_blocks[region_block];
-            for (block_index, &loans) in closure.iter_enumerated() {
+            for (block_index, &loans) in block_loans.iter_enumerated() {
                 let new = loans.difference(state.loans[block_index]);
                 if !new.is_empty() {
                     state.pending[block_index].insert(new);
@@ -437,7 +446,7 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             if point > terminator {
                 break;
             }
-            let loans = closure[BlockIndex::from_usize(point.as_usize() - entry.as_usize())];
+            let loans = block_loans[BlockIndex::from_usize(point.as_usize() - entry.as_usize())];
             if !loans.is_empty() {
                 for successor in self.graph.physical_successors(region, point) {
                     let block_index = BlockIndex::from_point(point, block, self.location_map);
