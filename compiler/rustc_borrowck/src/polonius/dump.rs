@@ -29,11 +29,11 @@ struct CachedLivenessSource<'a> {
     liveness: &'a LivenessValues,
 }
 
-impl<'a> LivenessSource for CachedLivenessSource<'a> {
+impl<'a> LivenessSource<'a> for CachedLivenessSource<'a> {
     fn liveness_for_region(&mut self, region: RegionVid) -> RegionLiveness<'_> {
-        RegionLiveness::new(region, self.live_region_variances, self.liveness)
+        RegionLiveness::new(region, self.live_region_variances, self.liveness.points())
     }
-    fn location_map(&self) -> &DenseLocationMap {
+    fn location_map(&self) -> &'a DenseLocationMap {
         self.liveness.location_map()
     }
 }

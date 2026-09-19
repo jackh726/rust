@@ -1,4 +1,5 @@
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexSet};
+use rustc_index::interval::{IntervalSet, SparseIntervalMatrix};
 use rustc_middle::mir::{Body, Location};
 use rustc_middle::ty::RegionVid;
 use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
@@ -8,7 +9,6 @@ use crate::BorrowSet;
 use crate::constraints::OutlivesConstraint;
 use crate::dataflow::BorrowIndex;
 use crate::polonius::{ConstraintDirection, LiveRegionVariances};
-use crate::region_infer::values::LivenessValues;
 use crate::type_check::Locations;
 use crate::universal_regions::UniversalRegions;
 
@@ -53,14 +53,14 @@ pub(super) struct LocalizedConstraintGraph {
 pub(super) struct RegionLiveness<'a> {
     region: RegionVid,
     direction: ConstraintDirection,
-    liveness: &'a LivenessValues,
+    live_points: Option<&'a IntervalSet<PointIndex>>,
 }
 
 impl<'a> RegionLiveness<'a> {
     pub(super) fn new(
         region: RegionVid,
         live_region_variances: &LiveRegionVariances,
-        liveness: &'a LivenessValues,
+        live_points: &'a SparseIntervalMatrix<RegionVid, PointIndex>,
     ) -> Self {
         // Note: there currently are cases related to promoted and const generics, where we don't yet
         // have variance information (possibly about temporary regions created when typeck sanitizes the
@@ -74,18 +74,19 @@ impl<'a> RegionLiveness<'a> {
             .copied()
             .flatten()
             .unwrap_or(ConstraintDirection::Bidirectional);
-        Self { region, direction, liveness }
+        let live_points = live_points.row(region);
+        Self { region, direction, live_points }
     }
 
     fn is_live_at(&self, point: PointIndex) -> bool {
-        self.liveness.points().contains(self.region, point)
+        self.live_points.map_or(false, |points| points.contains(point))
     }
 }
 
 /// The source of liveness information for a given region.
-pub(super) trait LivenessSource {
+pub(super) trait LivenessSource<'loc> {
     fn liveness_for_region(&mut self, region: RegionVid) -> RegionLiveness<'_>;
-    fn location_map(&self) -> &DenseLocationMap;
+    fn location_map(&self) -> &'loc DenseLocationMap;
 }
 
 /// The visitor interface when traversing a `LocalizedConstraintGraph`.
@@ -132,16 +133,18 @@ impl LocalizedConstraintGraph {
 
     /// Traverses the localized constraint graph per-loan, and notifies the `visitor` of discovered
     /// nodes and successors.
-    pub(super) fn traverse<'tcx>(
+    pub(super) fn traverse<'tcx, 'loc>(
         &self,
         body: &Body<'tcx>,
         universal_regions: &UniversalRegions<'tcx>,
         borrow_set: &BorrowSet<'tcx>,
-        liveness_source: &mut impl LivenessSource,
+        liveness_source: &mut impl LivenessSource<'loc>,
         visitor: &mut impl LocalizedConstraintGraphVisitor,
     ) {
         let mut visited = FxHashSet::default();
         let mut stack = Vec::new();
+
+        let location_map = liveness_source.location_map();
 
         // Compute reachability per loan by traversing each loan's subgraph starting from where it
         // is introduced.
@@ -151,7 +154,7 @@ impl LocalizedConstraintGraph {
 
             let start_node = LocalizedNode {
                 region: loan.region,
-                point: liveness_source.location_map().point_from_location(loan.reserve_location),
+                point: location_map.point_from_location(loan.reserve_location),
             };
             stack.push(start_node);
 
@@ -162,7 +165,7 @@ impl LocalizedConstraintGraph {
 
                 let liveness = liveness_source.liveness_for_region(node.region);
                 // We've reached a node we haven't visited before.
-                let location = liveness.liveness.location_map().to_location(node.point);
+                let location = location_map.to_location(node.point);
                 visitor.on_node_traversed(loan_idx, node, liveness.is_live_at(node.point));
 
                 // When we find a _new_ successor, we'd like to
@@ -208,7 +211,7 @@ impl LocalizedConstraintGraph {
                     // entry point.
                     for successor_block in body[location.block].terminator().successors() {
                         let next_location = Location { block: successor_block, statement_index: 0 };
-                        let next_point = liveness.liveness.point_from_location(next_location);
+                        let next_point = location_map.point_from_location(next_location);
                         if let Some(succ) =
                             compute_forward_successor(&liveness, next_point, is_universal_region)
                         {
@@ -238,7 +241,7 @@ impl LocalizedConstraintGraph {
                                 statement_index: body[pred_block].statements.len(),
                             };
                             let previous_point =
-                                liveness.liveness.point_from_location(previous_location);
+                                location_map.point_from_location(previous_location);
                             if let Some(succ) =
                                 compute_backward_successor(&liveness, node.point, previous_point)
                             {

@@ -1,4 +1,4 @@
-use rustc_data_structures::fx::FxHashMap;
+use rustc_index::IndexVec;
 use rustc_middle::mir::Local;
 use rustc_middle::ty::{GenericArg, RegionVid, Ty};
 
@@ -10,10 +10,10 @@ pub(crate) struct DeferredLocals<'tcx> {
     /// For each region, the local whose liveness is deferred.
     ///
     /// Importantly, because of MIR renumbering, this will always be a 1:1 relationship.
-    by_region: FxHashMap<RegionVid, Local>,
+    by_region: IndexVec<RegionVid, Option<Local>>,
 
     /// For each deferred local, gets the regions contained within that local at use and drop.
-    drop_args_by_local: FxHashMap<Local, Vec<GenericArg<'tcx>>>,
+    drop_args_by_local: IndexVec<Local, Option<Vec<GenericArg<'tcx>>>>,
 }
 
 impl<'tcx> DeferredLocals<'tcx> {
@@ -59,8 +59,8 @@ impl<'tcx> DeferredLocals<'tcx> {
         &mut self,
         region: RegionVid,
     ) -> Option<(Local, Vec<GenericArg<'tcx>>)> {
-        let local = self.by_region.remove(&region)?;
-        let drop_args = self.drop_args_by_local.remove(&local)?;
+        let local = self.by_region.remove(region)?;
+        let drop_args = self.drop_args_by_local.remove(local)?;
         Some((local, drop_args))
     }
 }

@@ -186,7 +186,7 @@ struct DeferredLivenessSource<'a, 'tcx> {
     comp: LivenessComputation<'a, 'tcx>,
 }
 
-impl LivenessSource for DeferredLivenessSource<'_, '_> {
+impl<'a> LivenessSource<'a> for DeferredLivenessSource<'a, '_> {
     fn liveness_for_region(&mut self, region: RegionVid) -> RegionLiveness<'_> {
         if let Some((local, drop_args)) =
             self.deferred_locals_for_liveness.use_deferred_local(region)
@@ -200,10 +200,10 @@ impl LivenessSource for DeferredLivenessSource<'_, '_> {
             );
         }
 
-        RegionLiveness::new(region, self.live_region_variances, self.liveness)
+        RegionLiveness::new(region, self.live_region_variances, self.liveness.points())
     }
 
-    fn location_map(&self) -> &rustc_mir_dataflow::points::DenseLocationMap {
+    fn location_map(&self) -> &'a rustc_mir_dataflow::points::DenseLocationMap {
         self.comp.location_map
     }
 }
