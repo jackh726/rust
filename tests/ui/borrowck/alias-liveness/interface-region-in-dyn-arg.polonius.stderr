@@ -1,0 +1,16 @@
+error[E0597]: `*x` does not live long enough
+  --> $DIR/interface-region-in-dyn-arg.rs:55:27
+   |
+LL |         let x: Box<Payload> = Box::new(Box::new(1));
+   |             - binding `x` declared here
+LL |         let r: &Payload = &*x;
+   |                           ^^^ borrowed value does not live long enough
+LL |         wrong = make(r).produce().get();
+LL |     }
+   |     - `*x` dropped here while still borrowed
+LL |     println!("{wrong}");
+   |                ----- borrow later used here
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.

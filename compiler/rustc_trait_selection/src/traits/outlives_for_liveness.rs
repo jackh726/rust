@@ -17,21 +17,6 @@ use crate::regions::{region_known_to_outlive, ty_known_to_outlive};
 /// alias itself, and the explicit and implicit outlives clauses of the alias.
 /// Callers should use the indices with the concrete args of the alias.
 ///
-/// ```ignore (illustrative)
-/// // Edition 2024: all args are captured
-/// fn foo<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized + 'a {}
-/// fn bar<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized + 'static {}
-/// fn baz<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized {}
-/// ```
-///
-/// In the above:
-///   - `foo` outlives `'a`, but we know that `'b: 'a` holds, so `'b` is *also* potentially live
-///     (and so is `T`, since `T: 'static` implies `T: 'a`)
-///   - `bar` outlives `'static`, so we know that no args are potentially live and we can return an empty set
-///   - `baz` has no outlives bound, so all args are potentially live
-///
-/// This isn't a query: the expensive part, `args_known_to_outlive_alias_params`, is.
-///
 /// There are three cases to consider:
 /// 1. If there are *no* outlives bounds, then all args are potentially live.
 /// 2. If there is a `'static` outlives bound, then we know that all args are
@@ -488,24 +473,23 @@ pub(crate) fn alias_def_id<'tcx>(kind: ty::AliasTyKind<'tcx>) -> DefId {
     }
 }
 
-/// Visit the part of one bound `Self: ..` that describes the interface of `Self`: the other
-/// args of a trait or projection bound, and the term of a projection bound. Anything else
-/// (in particular outlives bounds) contributes nothing.
+/// Visit what can be obtained from `Self` through a bound `Self: ..`: the other args of a trait
+/// or projection bound, and the term of a projection bound.
 fn visit_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
     clause: ty::ClauseKind<'tcx>,
     visitor: &mut V,
 ) {
     match clause {
-        ty::ClauseKind::Trait(trait_pred) => {
-            for arg in &trait_pred.trait_ref.args[1..] {
+        ty::ClauseKind::Trait(pred) => {
+            for arg in &pred.trait_ref.args[1..] {
                 arg.visit_with(visitor);
             }
         }
-        ty::ClauseKind::Projection(proj_pred) => {
-            for arg in &proj_pred.projection_term.args[1..] {
+        ty::ClauseKind::Projection(pred) => {
+            for arg in &pred.projection_term.args[1..] {
                 arg.visit_with(visitor);
             }
-            proj_pred.term.visit_with(visitor);
+            pred.term.visit_with(visitor);
         }
         _ => {}
     }
@@ -519,110 +503,78 @@ fn visit_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
 /// the alias's item bounds. Each such bound restricts which of the alias's
 /// args the underlying type could have captured, so only those (capturable)
 /// args are visited. If there are no applicable bounds, we walk through the
-/// alias's (non-bivariant) args structurally.
+/// alias's (non-bivariant) args structurally. Then we visit everything that can
+/// be obtained through the alias; see `visit_alias_interface`.
 pub struct FreeRegionsVisitor<'tcx, OP: FnMut(ty::Region<'tcx>)> {
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
-    op: OP,
-    /// Aliases whose interface we are currently visiting. See the cycle comment in `visit_ty`.
-    interface_stack: Vec<DefId>,
-    /// The where-clauses of those aliases, instantiated with their args: facts from their
-    /// definitions that hold here. See `visit_alias_interface`.
-    defn_clauses: Vec<ty::Clause<'tcx>>,
+    pub tcx: TyCtxt<'tcx>,
+    pub param_env: ty::ParamEnv<'tcx>,
+    pub op: OP,
+    /// The aliases whose interface is being visited.
+    pub interface_stack: Vec<ty::AliasTy<'tcx>>,
 }
 
 impl<'tcx, OP: FnMut(ty::Region<'tcx>)> FreeRegionsVisitor<'tcx, OP> {
-    pub fn new(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>, op: OP) -> Self {
-        FreeRegionsVisitor {
-            tcx,
-            param_env,
-            op,
-            interface_stack: Vec::new(),
-            defn_clauses: Vec::new(),
-        }
-    }
-
-    /// Every clause known to hold at this point of the walk: facts from the call site (the
-    /// body's param-env) and facts from the definitions of the aliases whose interface we're
-    /// inside of.
-    fn known_clauses(&self) -> impl Iterator<Item = ty::Clause<'tcx>> {
-        self.param_env.caller_bounds().chain(self.defn_clauses.iter().copied())
-    }
-
-    /// PROTOTYPE: visit everything that can be *obtained* from a value of the alias `ty`,
-    /// using this same visitor, so that a nested alias is treated exactly as it would be if it
-    /// were held directly in this body.
-    ///
-    /// Two kinds of facts apply, and both are clauses about the same instantiated types:
-    /// - Facts from the *definition*: the alias's own where-clauses, instantiated with `args`.
-    ///   For an opaque these include its parent fn's where-clauses. They hold wherever `ty` is
-    ///   well-formed, which this body had to prove to name it.
-    /// - Facts from the *call site*: this body's param-env.
-    ///
-    /// Outlives clauses prune an alias (in the alias arm). Trait and projection clauses whose
-    /// self type matches an alias add to its interface: `for<'x> T::Item<'x>: Into<&'x str>`
-    /// exposes `'a` through `T::Item<'a>` just as an item bound would. Since outlives clauses
-    /// are allowed to prune an alias, trait and projection clauses have to count too.
-    fn visit_alias_interface(&mut self, ty: Ty<'tcx>, def_id: DefId, args: ty::GenericArgsRef<'tcx>) {
+    /// An alias's outlives bounds only bound what it holds, not what can be obtained through
+    /// it: the other args and terms of its item bounds, and of the param-env's trait and
+    /// projection clauses about it. Visit those, instantiated with the alias's args. A nested
+    /// alias among them is visited like any other, so it's still pruned by its own bounds and
+    /// the param-env's.
+    fn visit_alias_interface(&mut self, ty: Ty<'tcx>, alias: ty::AliasTy<'tcx>) {
         let tcx = self.tcx;
-        if self.interface_stack.contains(&def_id) {
-            // We are already visiting this alias's interface further up, so only its
-            // capturable args (visited by the caller) are added here. `item_bounds` elaborates
-            // supertraits, so this is hit by any alias whose bounds mention one of its own
-            // projections, e.g. `trait Observer: Future<Output = Wrap<Self::Value>>`, where
-            // `<Opaque as Observer>::Value` has `Opaque` as an arg.
-            //
-            // FIXME(prototype): this is only precise when the recursive occurrence's interface
-            // adds nothing new, which holds when it has the same args. A real implementation
-            // wants a fixpoint to also handle `type A<'a>: Iterator<Item = Self::A<'b>>`. It
-            // must never fall back to "every arg": that reproduces `flat`.
+        let def_id = alias_def_id(alias.kind);
+        if self.interface_stack.contains(&alias) {
+            // Already being visited: `item_bounds` elaborates supertraits, so e.g.
+            // `trait Observer: Future<Output = W<Self::Value>>` puts an opaque in its own
+            // interface.
             return;
         }
-        self.interface_stack.push(def_id);
-        let defn_clauses_len = self.defn_clauses.len();
-        self.defn_clauses.extend(
-            tcx.clauses_of(def_id)
-                .instantiate(tcx, args)
-                .clauses
-                .into_iter()
-                .map(|clause| clause.skip_norm_wip()),
-        );
-
-        for clause in tcx.item_bounds(def_id).instantiate(tcx, args).skip_norm_wip() {
-            // These bounds aren't normalized, so a normalizable alias in them is treated like a
-            // rigid one. That's sound (its bounds hold for whatever it normalizes to), and the
-            // definition's where-clauses usually make it precise anyway: `wrap`'s
-            // `for<'x> T::Item<'x>: 'static` prunes `<Owned as Tr>::Item<'a>` in a caller of
-            // `wrap::<Owned>` (`interface-concrete-caller.rs`).
-            visit_interface_part(clause.kind().skip_binder(), self);
+        if self.interface_stack.iter().any(|outer| alias_def_id(outer.kind) == def_id) {
+            // The same alias with other args, which may never end: `type A<T>:
+            // Iterator<Item = Self::A<Vec<T>>>`. Everything below here would be built from
+            // `alias.args`, `'static` and the param-env, whose own free regions are always live,
+            // so visiting the args covers it. Unless a param-env clause can pull a region out of
+            // the middle of an arg.
+            if self.param_env.caller_bounds().any(|clause| match clause.kind().skip_binder() {
+                ty::ClauseKind::Trait(pred) => {
+                    pred.self_ty().has_escaping_bound_vars()
+                        && pred.trait_ref.args[1..].iter().any(|arg| arg.has_escaping_bound_vars())
+                }
+                ty::ClauseKind::Projection(pred) => {
+                    pred.self_ty().has_escaping_bound_vars()
+                        && (pred.projection_term.args[1..]
+                            .iter()
+                            .any(|arg| arg.has_escaping_bound_vars())
+                            || pred.term.has_escaping_bound_vars())
+                }
+                _ => false,
+            }) {
+                tcx.for_each_free_region(&ty, |r| (self.op)(r));
+            } else {
+                alias.args.visit_with(self);
+            }
+            return;
         }
 
-        let known_clauses: Vec<_> = self.known_clauses().collect();
-        for clause in known_clauses {
-            let bound_self_ty = clause.kind().map_bound(|kind| match kind {
+        self.interface_stack.push(alias);
+        for clause in tcx.item_bounds(def_id).instantiate(tcx, alias.args).skip_norm_wip() {
+            visit_interface_part(clause.kind().skip_binder(), self);
+        }
+        for clause in self.param_env.caller_bounds() {
+            let self_ty = clause.kind().map_bound(|kind| match kind {
                 ty::ClauseKind::Trait(pred) => Some(pred.self_ty()),
                 ty::ClauseKind::Projection(pred) => Some(pred.self_ty()),
                 _ => None,
             });
-            let Some(self_ty) = bound_self_ty.transpose() else { continue };
-            if !matches!(self_ty.skip_binder().kind(), ty::Alias(_, alias) if alias_def_id(alias.kind) == def_id)
-            {
-                continue;
-            }
             // `for<'x> T::Item<'x>: Into<&'x str>` applies to `T::Item<'a>` with `'x := 'a`.
+            let Some(self_ty) = self_ty.transpose() else { continue };
             let Some(map) = test_type_match::match_higher_ranked_ty(tcx, self_ty, ty) else {
                 continue;
             };
-            // A bound region that doesn't occur in the self type is universally quantified
-            // (`T::Item<'a>: for<'y> Into<&'y str>`), so any region will do; `'static` keeps
-            // nothing extra alive.
             let kind = tcx.instantiate_bound_regions_uncached(clause.kind(), |br| {
                 map.get(&br).copied().unwrap_or(tcx.lifetimes.re_static)
             });
             visit_interface_part(kind, self);
         }
-
-        self.defn_clauses.truncate(defn_clauses_len);
         self.interface_stack.pop();
     }
 }
@@ -656,22 +608,22 @@ where
             // either `'static` or a unique outlives region, and if one is
             // found, we just need to prove that that region is still live.
             // If one is not found, then we continue to walk through the alias.
-            ty::Alias(_, ty::AliasTy { kind, args, .. }) => {
+            ty::Alias(_, alias @ ty::AliasTy { kind, args, .. }) => {
                 let tcx = self.tcx;
+                let param_env = self.param_env;
 
                 // For aliases other than opaques, we have to consider two
                 // sources of information to identity potentially-live args:
                 // - Bounds on alias item itself
-                // - Outlives clauses that apply to the alias: the current function's, and
-                //   those of the definitions whose interface we're visiting
+                // - Outlives clauses on the current function that apply to the alias
                 //
                 // Each source of information *restricts* the set of potentially-live
                 // args independently: only the args that can be live for *every*
                 // source of information can be actually live, so we take the intersection.
                 let def_id = alias_def_id(kind);
-                let mut capturable = live_args_for_alias_from_outlives_bounds(tcx, kind);
+                let mut capturable = tcx.live_args_for_alias_from_outlives_bounds(kind).clone();
 
-                for clause in self.known_clauses() {
+                for clause in param_env.caller_bounds() {
                     let Some(outlives) = clause.as_type_outlives_clause() else {
                         continue;
                     };
@@ -688,7 +640,7 @@ where
                     }
                 }
 
-                self.visit_alias_interface(ty, def_id, args);
+                self.visit_alias_interface(ty, alias);
             }
 
             _ => ty.super_visit_with(self),

@@ -7,9 +7,10 @@
 
 // An alias whose interface contains a *bigger* instance of itself: the interface of
 // `X::A<&'a str>` is `Iterator<Item = X::A<Vec<&'a str>>>`, whose interface is
-// `Iterator<Item = X::A<Vec<Vec<&'a str>>>>`, and so on. The types never repeat, so walking
-// the interface has to stop on the alias's definition, not on the type. A visited set of
-// types overflowed the stack here.
+// `Iterator<Item = X::A<Vec<Vec<&'a str>>>>`, and so on. The types never repeat, so the walk
+// can't wait for an exact repeat to stop (a visited set of types overflowed the stack here).
+// It stops at the first instance of a definition it is already walking, and visits that
+// instance's args instead.
 //
 // The region has to be local to the body: liveness skips locals whose types only mention the
 // fn's own lifetime params.

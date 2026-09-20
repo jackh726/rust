@@ -2162,6 +2162,26 @@ rustc_queries! {
         desc { "listing captured lifetimes for opaque `{}`", tcx.def_path_str(def_id) }
     }
 
+    /// For an opaque type or trait associated type, return the indices of potentially live
+    /// generic args from the set of outlives bounds on that alias. Callers should use the
+    /// indices with the concrete args of the alias.
+    /// ```ignore (illustrative)
+    /// // Edition 2024: all args are captured
+    /// fn foo<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized + 'a {}
+    /// fn bar<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized + 'static {}
+    /// fn baz<'a, 'b, T: 'static>(&'a &'b T) -> impl Sized {}
+    /// ```
+    ///
+    /// In the above:
+    ///   - `foo` outlives `'a`, but we know that `'b: 'a` holds, so `'b` is *also* potentially live
+    ///     (and so is `T`, since `T: 'static` implies `T: 'a`)
+    ///   - `bar` outlives `'static`, so we know that no args are potentially live and we can return an empty set
+    ///   - `baz` has no outlives bound, so all args are potentially live
+    query live_args_for_alias_from_outlives_bounds(kind: ty::AliasTyKind<'tcx>) -> &'tcx rustc_index::bit_set::DenseBitSet<u32> {
+        arena_cache
+        desc { "identifying live args for alias `{:?}`", kind }
+    }
+
     /// For each region param of an alias, the indices of the identity args that are known to
     /// outlive it given only the alias's declared where-clauses. Used for liveness:
     /// these are the only args whose regions the underlying type of the alias

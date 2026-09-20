@@ -1,12 +1,40 @@
-error[E0515]: cannot return value referencing local variable `s`
-  --> $DIR/interface-cycle-permuted-args.rs:34:5
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-cycle-permuted-args.rs:30:21
    |
+LL |         let s = String::from("x");
+   |             - binding `s` declared here
 LL |         v = T::make(&s, "static");
-   |                     -- `s` is borrowed here
+   |                     ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     let inner = v.next().unwrap();
+   |                 - borrow later used here
+
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-cycle-permuted-args.rs:47:31
+   |
+LL |         let s = String::from("x");
+   |             - binding `s` declared here
 ...
-LL |     inner.into()
-   |     ^^^^^^^^^^^^ returns a value referencing data owned by the current function
+LL |         v = T::make("static", &s, "static");
+   |                               ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     let inner = v.next().unwrap().next().unwrap();
+   |                 - borrow later used here
 
-error: aborting due to 1 previous error
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-cycle-permuted-args.rs:68:21
+   |
+LL |         let s = String::from("x");
+   |             - binding `s` declared here
+LL |         v = T::make(&s, "static");
+   |                     ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     let inner = v.next().unwrap();
+   |                 - borrow later used here
 
-For more information about this error, try `rustc --explain E0515`.
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0597`.

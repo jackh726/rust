@@ -1,0 +1,15 @@
+error[E0597]: `s` does not live long enough
+  --> $DIR/interface-phantom-region-arg.rs:29:21
+   |
+LL |         let s = String::from("x");
+   |             - binding `s` declared here
+LL |         keep = make(&s);
+   |                     ^^ borrowed value does not live long enough
+LL |     }
+   |     - `s` dropped here while still borrowed
+LL |     drop(keep);
+   |          ---- borrow later used here
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.
