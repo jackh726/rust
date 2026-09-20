@@ -495,6 +495,51 @@ fn visit_interface_part<'tcx, V: TypeVisitor<TyCtxt<'tcx>>>(
     }
 }
 
+/// Do `def_id`'s item bounds *name* one of its params, or do they only carry the alias itself
+/// along? `trait Symbol: PartialEq<Self::Concrete>` names nothing: everything it exposes is
+/// built from `Self`, so whatever you obtain still mentions the alias and keeps the args its own
+/// bounds allow it to have captured live. `Iterator<Item = T::Item<'a>>` names `T` and `'a`,
+/// which is how a region gets out (the `interface-region-*.rs` tests).
+fn interface_names_params<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> bool {
+    struct Search<'tcx> {
+        def_id: DefId,
+        identity_args: ty::GenericArgsRef<'tcx>,
+        found: bool,
+    }
+    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for Search<'tcx> {
+        fn visit_ty(&mut self, ty: Ty<'tcx>) {
+            if self.found {
+                return;
+            }
+            // The alias itself: carried along, not named.
+            if let ty::Alias(_, alias) = *ty.kind()
+                && alias_def_id(alias.kind) == self.def_id
+                && alias.args == self.identity_args
+            {
+                return;
+            }
+            if matches!(ty.kind(), ty::Param(_)) {
+                self.found = true;
+                return;
+            }
+            ty.super_visit_with(self);
+        }
+
+        fn visit_region(&mut self, r: ty::Region<'tcx>) {
+            if matches!(r.kind(), ty::ReEarlyParam(_)) {
+                self.found = true;
+            }
+        }
+    }
+
+    let identity_args = ty::GenericArgs::identity_for_item(tcx, def_id);
+    let mut search = Search { def_id, identity_args, found: false };
+    for clause in tcx.item_bounds(def_id).instantiate_identity().skip_norm_wip() {
+        visit_interface_part(clause.kind().skip_binder(), &mut search);
+    }
+    search.found
+}
+
 /// Visits free regions in the type that are relevant for liveness computation.
 /// These regions are passed to `OP`.
 ///
@@ -525,40 +570,23 @@ impl<'tcx, OP: FnMut(ty::Region<'tcx>)> FreeRegionsVisitor<'tcx, OP> {
         if self.interface_stack.contains(&alias) {
             // Already being visited: `item_bounds` elaborates supertraits, so e.g.
             // `trait Observer: Future<Output = W<Self::Value>>` puts an opaque in its own
-            // interface.
+            // interface, and a param-env clause about an alias can mention that alias
+            // (`Yokeable<'a>` with `type Output: Yokeable<'a>`). Keeping every arg live here
+            // instead reproduces `flat` and breaks `some_local_executor`
+            // (`interface-supertrait-cycle.rs`).
             return;
         }
         if self.interface_stack.iter().any(|outer| alias_def_id(outer.kind) == def_id) {
             // The same alias with other args, which may never end: `type A<T>:
-            // Iterator<Item = Self::A<Vec<T>>>`. Everything below here would be built from
-            // `alias.args`, `'static` and the param-env, whose own free regions are always live,
-            // so visiting the args covers it. Unless a param-env clause can pull a region out of
-            // the middle of an arg.
-            if self.param_env.caller_bounds().any(|clause| match clause.kind().skip_binder() {
-                ty::ClauseKind::Trait(pred) => {
-                    pred.self_ty().has_escaping_bound_vars()
-                        && pred.trait_ref.args[1..].iter().any(|arg| arg.has_escaping_bound_vars())
-                }
-                ty::ClauseKind::Projection(pred) => {
-                    pred.self_ty().has_escaping_bound_vars()
-                        && (pred.projection_term.args[1..]
-                            .iter()
-                            .any(|arg| arg.has_escaping_bound_vars())
-                            || pred.term.has_escaping_bound_vars())
-                }
-                _ => false,
-            }) {
-                tcx.for_each_free_region(&ty, |r| (self.op)(r));
-            } else {
-                alias.args.visit_with(self);
-            }
+            // Iterator<Item = Self::A<Vec<T>>>`. Keep everything it mentions live.
+            tcx.for_each_free_region(&ty, |r| (self.op)(r));
             return;
         }
-
         self.interface_stack.push(alias);
-        for clause in tcx.item_bounds(def_id).instantiate(tcx, alias.args).skip_norm_wip() {
-            visit_interface_part(clause.kind().skip_binder(), self);
-        }
+
+        // A param-env clause about this alias exposes what it says, whether or not the alias's
+        // own bounds name anything: `T::Item` may have no item bounds at all, and
+        // `for<'x> T::Item<'x>: Into<&'x str>` still hands out `'a` data from a `T::Item<'a>`.
         for clause in self.param_env.caller_bounds() {
             let self_ty = clause.kind().map_bound(|kind| match kind {
                 ty::ClauseKind::Trait(pred) => Some(pred.self_ty()),
@@ -575,6 +603,15 @@ impl<'tcx, OP: FnMut(ty::Region<'tcx>)> FreeRegionsVisitor<'tcx, OP> {
             });
             visit_interface_part(kind, self);
         }
+
+        // Item bounds that name none of the alias's params can only hand out things built from
+        // the alias itself, whose types still mention it, so there is nothing more to visit.
+        if interface_names_params(tcx, def_id) {
+            for clause in tcx.item_bounds(def_id).instantiate(tcx, alias.args).skip_norm_wip() {
+                visit_interface_part(clause.kind().skip_binder(), self);
+            }
+        }
+
         self.interface_stack.pop();
     }
 }
