@@ -474,7 +474,8 @@ impl<'a, 'tcx> LoanReachability<'a, 'tcx> {
             let region_block = self.region_block(successor_region, block);
             let mut any_new = false;
             for (block_index, &loans) in block_loans.iter_enumerated() {
-                any_new |= self.region_blocks[region_block].insert_pending_loans(block_index, loans);
+                any_new |=
+                    self.region_blocks[region_block].insert_pending_loans(block_index, loans);
             }
             if any_new {
                 self.forward_queue.push(region_block, self.rpo_index[block]);
