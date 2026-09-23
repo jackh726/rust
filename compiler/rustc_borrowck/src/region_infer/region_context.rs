@@ -15,7 +15,6 @@ use rustc_middle::mir::{
 };
 use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeFoldable, UniverseIndex, fold_regions};
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_span::hygiene::DesugaringKind;
 use rustc_span::{DUMMY_SP, bug};
 use tracing::{debug, instrument, trace};
@@ -715,7 +714,6 @@ impl<'tcx> UnsolvedRegionInferenceContext<'tcx> {
         infcx: &BorrowckInferCtxt<'tcx>,
         lowered_constraints: LoweredConstraints<'tcx>,
         universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
-        location_map: Rc<DenseLocationMap>,
     ) -> Self {
         let universal_regions = &universal_region_relations.universal_regions;
 
@@ -741,8 +739,11 @@ impl<'tcx> UnsolvedRegionInferenceContext<'tcx> {
             sccs_info(infcx, &constraint_sccs);
         }
 
-        let mut scc_values =
-            RegionValues::new(location_map, universal_regions.len(), placeholder_indices);
+        let mut scc_values = RegionValues::new(
+            Rc::clone(liveness_constraints.location_map()),
+            universal_regions.len(),
+            placeholder_indices,
+        );
 
         // Initializes the region variables with their initial live points.
         for (region, definition) in definitions.iter_enumerated() {

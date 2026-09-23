@@ -6,7 +6,7 @@ use rustc_middle::mir::{Body, Local, Location, SourceInfo};
 use rustc_middle::ty::relate::Relate;
 use rustc_middle::ty::{GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable};
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::{DenseLocationMap, PointIndex};
+use rustc_mir_dataflow::points::PointIndex;
 use rustc_span::span_bug;
 use rustc_trait_selection::traits::outlives_for_liveness::FreeRegionsVisitor;
 use tracing::debug;
@@ -32,11 +32,7 @@ pub(crate) use trace::LivenessComputation;
 ///
 /// N.B., this computation requires normalization; therefore, it must be
 /// performed before
-pub(super) fn generate<'tcx>(
-    typeck: &mut TypeChecker<'_, 'tcx>,
-    location_map: &DenseLocationMap,
-    move_data: &MoveData<'tcx>,
-) {
+pub(super) fn generate<'tcx>(typeck: &mut TypeChecker<'_, 'tcx>, move_data: &MoveData<'tcx>) {
     debug!("liveness::generate");
     let _timer = typeck.tcx().prof.generic_activity("borrowck_liveness");
 
@@ -89,14 +85,7 @@ pub(super) fn generate<'tcx>(
         deferred
     };
 
-    trace::trace(
-        typeck,
-        location_map,
-        move_data,
-        &relevant_live_locals,
-        &boring_locals,
-        &deferred_locals,
-    );
+    trace::trace(typeck, move_data, &relevant_live_locals, &boring_locals, &deferred_locals);
 
     // Mark regions that should be live where they appear within rvalues or within a call: like
     // args, regions, and types.

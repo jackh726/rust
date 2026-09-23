@@ -108,7 +108,7 @@ pub(crate) fn type_check<'tcx>(
     let mut constraints = MirTypeckRegionConstraints {
         placeholder_indices: PlaceholderIndices::default(),
         placeholder_index_to_region: IndexVec::default(),
-        liveness_constraints: LivenessValues::with_specific_points(Rc::clone(&location_map)),
+        liveness_constraints: LivenessValues::with_specific_points(location_map),
         outlives_constraints: OutlivesConstraintSet::default(),
         type_tests: Vec::default(),
         universe_causes: FxIndexMap::default(),
@@ -167,7 +167,7 @@ pub(crate) fn type_check<'tcx>(
     typeck.equate_inputs_and_outputs(&normalized_inputs_and_output);
     typeck.check_signature_annotation();
 
-    liveness::generate(&mut typeck, &location_map, move_data);
+    liveness::generate(&mut typeck, move_data);
 
     let polonius_context = typeck.polonius_context;
 

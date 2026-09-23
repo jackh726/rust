@@ -2,7 +2,6 @@
 
 use std::io;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::str::FromStr;
 
 use polonius_engine::{Algorithm, AllFacts, Output};
@@ -14,7 +13,6 @@ use rustc_middle::mir::{Body, MirDumper, PassWhere, Promoted};
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_mir_dataflow::move_paths::MoveData;
-use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_session::config::MirIncludeSpans;
 use tracing::{debug, instrument};
 
@@ -85,7 +83,6 @@ pub(crate) fn replace_regions_in_mir<'tcx>(
 pub(crate) fn compute_closure_requirements_modulo_opaques<'tcx>(
     infcx: &BorrowckInferCtxt<'tcx>,
     body: &Body<'tcx>,
-    location_map: Rc<DenseLocationMap>,
     universal_region_relations: &Frozen<UniversalRegionRelations<'tcx>>,
     constraints: &MirTypeckRegionConstraints<'tcx>,
 ) -> Option<ClosureRegionRequirements<'tcx>> {
@@ -100,7 +97,6 @@ pub(crate) fn compute_closure_requirements_modulo_opaques<'tcx>(
         &infcx,
         lowered_constraints,
         universal_region_relations.clone(),
-        location_map,
     );
 
     let (_, closure_region_requirements, _nll_errors) = regioncx.solve(infcx, body, None, None);
@@ -117,7 +113,6 @@ pub(crate) fn compute_regions<'tcx>(
     location_table: &PoloniusLocationTable,
     move_data: &MoveData<'tcx>,
     borrow_set: &BorrowSet<'tcx>,
-    location_map: Rc<DenseLocationMap>,
     universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
     constraints: MirTypeckRegionConstraints<'tcx>,
     mut polonius_facts: Option<AllFacts<RustcFacts>>,
@@ -165,12 +160,8 @@ pub(crate) fn compute_regions<'tcx>(
         }
     });
 
-    let regioncx = UnsolvedRegionInferenceContext::new(
-        infcx,
-        lowered_constraints,
-        universal_region_relations,
-        location_map,
-    );
+    let regioncx =
+        UnsolvedRegionInferenceContext::new(infcx, lowered_constraints, universal_region_relations);
 
     // Solve the region constraints.
     let (regioncx, closure_region_requirements, nll_errors) = regioncx.solve(

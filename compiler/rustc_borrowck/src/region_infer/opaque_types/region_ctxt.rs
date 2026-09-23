@@ -4,7 +4,6 @@ use rustc_data_structures::frozen::Frozen;
 use rustc_index::IndexVec;
 use rustc_infer::infer::NllRegionVariableOrigin;
 use rustc_middle::ty::{RegionVid, UniverseIndex};
-use rustc_mir_dataflow::points::DenseLocationMap;
 
 use crate::BorrowckInferCtxt;
 use crate::constraints::ConstraintSccIndex;
@@ -38,7 +37,6 @@ impl<'a, 'tcx> RegionCtxt<'a, 'tcx> {
     pub(super) fn new(
         infcx: &'a BorrowckInferCtxt<'tcx>,
         universal_region_relations: &'a Frozen<UniversalRegionRelations<'tcx>>,
-        location_map: Rc<DenseLocationMap>,
         constraints: &MirTypeckRegionConstraints<'tcx>,
     ) -> RegionCtxt<'a, 'tcx> {
         let mut outlives_constraints = constraints.outlives_constraints.clone();
@@ -76,8 +74,11 @@ impl<'a, 'tcx> RegionCtxt<'a, 'tcx> {
         // Unlike the `RegionInferenceContext`, we only care about free regions
         // and fully ignore liveness and placeholders.
         let placeholder_indices = Default::default();
-        let mut scc_values =
-            RegionValues::new(location_map, universal_regions.len(), placeholder_indices);
+        let mut scc_values = RegionValues::new(
+            Rc::clone(constraints.liveness_constraints.location_map()),
+            universal_regions.len(),
+            placeholder_indices,
+        );
         for (variable, definition) in definitions.iter_enumerated() {
             let scc = constraint_sccs.scc(variable);
             match definition.origin {

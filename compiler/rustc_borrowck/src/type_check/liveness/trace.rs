@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use rustc_data_structures::fx::{FxIndexMap, FxIndexSet};
 use rustc_index::IndexVec;
 use rustc_index::bit_set::{DenseBitSet, MixedBitSet};
@@ -42,7 +44,6 @@ use crate::{BorrowckInferCtxt, polonius};
 /// this respects `#[may_dangle]` annotations).
 pub(super) fn trace<'tcx>(
     typeck: &mut TypeChecker<'_, 'tcx>,
-    location_map: &DenseLocationMap,
     move_data: &MoveData<'tcx>,
     relevant_live_locals: &[Local],
     boring_locals: &[Local],
@@ -53,11 +54,12 @@ pub(super) fn trace<'tcx>(
     // The use map must also cover the deferred locals: their liveness is computed later, from
     // this same map, when the loan liveness traversal first reaches one of their regions.
     let use_map_locals = relevant_live_locals.iter().chain(deferred).copied();
-    let local_use_map = LocalUseMap::build(use_map_locals, location_map, typeck.body);
+    let location_map = Rc::clone(typeck.constraints.liveness_constraints.location_map());
+    let local_use_map = LocalUseMap::build(use_map_locals, &location_map, typeck.body);
     let comp = LivenessComputation::new(
         typeck.infcx,
         typeck.body,
-        location_map,
+        &location_map,
         move_data,
         &local_use_map,
     );

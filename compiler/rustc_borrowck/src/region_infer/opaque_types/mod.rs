@@ -1,5 +1,4 @@
 use std::iter;
-use std::rc::Rc;
 
 use rustc_data_structures::frozen::Frozen;
 use rustc_data_structures::fx::FxIndexMap;
@@ -14,7 +13,6 @@ use rustc_middle::ty::{
     GenericArgsRef, OpaqueTypeKey, ProvisionalHiddenType, Region, RegionVid, Ty, TyCtxt,
     TypeFoldable, TypeSuperFoldable, TypeVisitableExt, Unnormalized, fold_regions,
 };
-use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_span::Span;
 use rustc_trait_selection::opaque_types::{
     NonDefiningUseReason, opaque_type_has_defining_use_args,
@@ -205,7 +203,6 @@ pub(crate) fn compute_definition_site_hidden_types<'tcx>(
     infcx: &BorrowckInferCtxt<'tcx>,
     universal_region_relations: &Frozen<UniversalRegionRelations<'tcx>>,
     constraints: &MirTypeckRegionConstraints<'tcx>,
-    location_map: Rc<DenseLocationMap>,
     hidden_types: &mut FxIndexMap<LocalDefId, ty::DefinitionSiteHiddenType<'tcx>>,
     unconstrained_hidden_type_errors: &mut Vec<UnexpectedHiddenRegion<'tcx>>,
     opaque_types: &[(OpaqueTypeKey<'tcx>, ProvisionalHiddenType<'tcx>)],
@@ -215,7 +212,7 @@ pub(crate) fn compute_definition_site_hidden_types<'tcx>(
     // We don't mutate the region graph used by `fn compute_regions` but instead
     // manually track region information via a `RegionCtxt`. We discard this
     // information at the end of this function.
-    let mut rcx = RegionCtxt::new(infcx, universal_region_relations, location_map, constraints);
+    let mut rcx = RegionCtxt::new(infcx, universal_region_relations, constraints);
 
     // We start by checking each use of an opaque type during type check and
     // check whether the generic arguments of the opaque type are fully

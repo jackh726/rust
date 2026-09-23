@@ -302,7 +302,6 @@ struct CollectRegionConstraintsResult<'tcx> {
     move_data: MoveData<'tcx>,
     borrow_set: BorrowSet<'tcx>,
     location_table: PoloniusLocationTable,
-    location_map: Rc<DenseLocationMap>,
     universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
     region_bound_pairs: Frozen<RegionBoundPairs<'tcx>>,
     known_type_outlives_obligations: Frozen<Vec<ty::PolyTypeOutlivesClause<'tcx>>>,
@@ -369,7 +368,7 @@ fn borrowck_collect_region_constraints<'tcx>(
         &borrow_set,
         &mut polonius_facts,
         &move_data,
-        Rc::clone(&location_map),
+        location_map,
     );
 
     CollectRegionConstraintsResult {
@@ -379,7 +378,6 @@ fn borrowck_collect_region_constraints<'tcx>(
         move_data,
         borrow_set,
         location_table,
-        location_map,
         universal_region_relations,
         region_bound_pairs,
         known_type_outlives_obligations,
@@ -404,7 +402,6 @@ fn borrowck_check_region_constraints<'diag, 'tcx>(
         move_data,
         borrow_set,
         location_table,
-        location_map,
         universal_region_relations,
         region_bound_pairs: _,
         known_type_outlives_obligations: _,
@@ -437,7 +434,6 @@ fn borrowck_check_region_constraints<'diag, 'tcx>(
         &location_table,
         &move_data,
         &borrow_set,
-        location_map,
         universal_region_relations,
         constraints,
         polonius_facts,
