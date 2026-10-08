@@ -1,12 +1,3 @@
-//@ check-pass
-//@ known-bug: #163886
-//@ edition: 2024
-
-// This test shows that aliases can end up in the hidden type of an impl Trait,
-// and that we currently don't properly consider generics live that *should* be.
-
-#![forbid(unsafe_code)]
-
 use std::fmt::Debug;
 
 trait Tr {
@@ -36,6 +27,7 @@ fn base() {
     {
         let v: Vec<u8> = vec![42];
         escaped = make(&v[0]);
+        //~^ ERROR `v` does not live long enough
     }
     let reused: Vec<u8> = vec![7];
     show(escaped, &reused);
@@ -65,6 +57,7 @@ mod item_bounds {
         {
             let v: Vec<u8> = vec![42];
             escaped = make(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -94,6 +87,7 @@ mod lifetime_arg {
             <T as Tr<'c>>::Assoc: 'a + 'b,
         {
             t.get(x)
+            //~^ ERROR hidden type
         }
     }
 
@@ -117,6 +111,8 @@ mod lifetime_arg {
             T::Assoc<'z>: 'a + 'b,
         {
             t.get(x)
+            //~^ ERROR the associated type
+            //~| ERROR the associated type
         }
     }
 
@@ -163,6 +159,7 @@ mod nested {
         {
             let v: Vec<u8> = vec![42];
             escaped = outer(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -192,6 +189,7 @@ mod rpitit {
         {
             let v: Vec<u8> = vec![42];
             escaped = <() as Make>::make(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -213,6 +211,7 @@ mod three_bounds {
         {
             let v: Vec<u8> = vec![42];
             escaped = make(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);

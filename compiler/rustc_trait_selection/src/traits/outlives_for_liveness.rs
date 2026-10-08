@@ -5,6 +5,7 @@ use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::bit_set::DenseBitSet;
 use rustc_infer::infer::{SubregionOrigin, TypeOutlivesConstraint};
+use rustc_middle::ty::outlives::{Component, push_outlives_components};
 use rustc_middle::ty::{
     self, Flags, ImplTraitInTraitData, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
     TypeVisitableExt, TypeVisitor,
@@ -122,6 +123,7 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
     let args_known_to_outlive = tcx.args_known_to_outlive_alias_params(def_id);
     tracing::debug!(?args_known_to_outlive);
     let mut live_args = DenseBitSet::new_filled(self_identity_args.len());
+
     for outlives_region in outlives_regions {
         let Some(outlives_params) = args_known_to_outlive
             .iter()
@@ -131,7 +133,154 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
         };
         live_args.intersect(&outlives_params.1);
     }
+
+    // Indirect appearance. An arg's regions can also reach the underlying type inside a
+    // *projection* of it, and then `hidden: 'b` is discharged by a clause about that projection
+    // and never mentions the arg at all. Such a clause names the arg in its subject, so keep
+    // every arg named in the subject of an outlives clause we can see here.
+    //
+    // Only `TypeOutlives` clauses can discharge an outlives bound this way. Keeping the args of
+    // *trait* clauses too would be `flat`, which is far too coarse.
+    let mut named_in_outlives_subject = DenseBitSet::new_empty(self_identity_args.len());
+    for clause in tcx.clauses_of(def_id).instantiate_identity(tcx).clauses {
+        let Some(outlives) = clause.skip_norm_wip().as_type_outlives_clause() else {
+            continue;
+        };
+        let subject = outlives.skip_binder().0;
+        // The alias's own declared bounds are handled above; they say nothing about which args
+        // the underlying type holds.
+        if subject == alias_ty {
+            continue;
+        }
+        subject.visit_with(&mut ArgPositionCollector {
+            tcx,
+            def_id,
+            positions: &mut named_in_outlives_subject,
+        });
+    }
+
+    // The same, for the outlives clauses the definition gets *implied*. A parameter of type
+    // `&'a mut Option<T::IntoIter>` implies `T::IntoIter: 'a`, which can discharge an outlives
+    // bound on a hidden type built from `T` without `T: 'a` ever being known. So any alias
+    // appearing in a type the definition assumes well-formed names args we have to keep.
+    if let DefKind::OpaqueTy = tcx.def_kind(def_id) {
+        let (rustc_hir::OpaqueTyOrigin::FnReturn { parent, .. }
+        | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, .. }
+        | rustc_hir::OpaqueTyOrigin::TyAlias { parent, .. }) = tcx.opaque_ty_origin(def_id);
+        // The implied bounds come from the signature's types. `assumed_wf_types` is local-only
+        // and this query is computed for foreign aliases too, so take them from `fn_sig`.
+        let wf_tys = if matches!(tcx.def_kind(parent), DefKind::Fn | DefKind::AssocFn) {
+            let sig = tcx.fn_sig(parent).instantiate_identity().skip_norm_wip();
+            tcx.liberate_late_bound_regions(parent, sig).inputs_and_output
+        } else {
+            ty::List::empty()
+        };
+        for wf_ty in wf_tys {
+            let mut components = smallvec::SmallVec::<[_; 4]>::new();
+            push_outlives_components(tcx, wf_ty, &mut components);
+            for component in components {
+                let Component::Alias(is_rigid, alias) = component else {
+                    continue;
+                };
+                let component_ty = Ty::new_alias(tcx, is_rigid, alias);
+                // A clause about the alias itself is one of its declared bounds, which says
+                // nothing about which args the underlying type holds. The signature's return
+                // type is the alias, so this skip is what keeps the walk from marking every
+                // captured arg.
+                let component_def_id = match alias.kind {
+                    ty::AliasTyKind::Projection { def_id }
+                    | ty::AliasTyKind::Inherent { def_id }
+                    | ty::AliasTyKind::Opaque { def_id }
+                    | ty::AliasTyKind::Free { def_id } => def_id,
+                };
+                if component_def_id == def_id {
+                    continue;
+                }
+                component_ty.visit_with(&mut ArgPositionCollector {
+                    tcx,
+                    def_id,
+                    positions: &mut named_in_outlives_subject,
+                });
+            }
+        }
+    }
+
+    // And for the outlives clauses that come from a *trait* the args are bounded by: `T: Tr` with
+    // `trait Tr { type Assoc: 'a; }` discharges an outlives bound on a hidden type built from `T`
+    // the same way, with no clause written at the definition at all.
+    for clause in tcx.clauses_of(def_id).instantiate_identity(tcx).clauses {
+        let Some(trait_clause) = clause.skip_norm_wip().as_trait_clause() else {
+            continue;
+        };
+        let trait_ref = trait_clause.skip_binder().trait_ref;
+        let has_outlives_item_bound =
+            tcx.associated_items(trait_ref.def_id)
+                .in_definition_order()
+                .filter(|item| item.is_type())
+                .any(|item| {
+                    tcx.explicit_item_bounds(item.def_id).skip_binder().iter().any(|(c, _)| {
+                        matches!(c.kind().skip_binder(), ty::ClauseKind::TypeOutlives(_))
+                    })
+                });
+        if has_outlives_item_bound {
+            trait_ref.visit_with(&mut ArgPositionCollector {
+                tcx,
+                def_id,
+                positions: &mut named_in_outlives_subject,
+            });
+        }
+    }
+    tracing::debug!(?named_in_outlives_subject);
+
+    live_args.union(&named_in_outlives_subject);
     live_args
+}
+
+/// Collects the identity-arg positions of `def_id` that a type names, for use on a clause
+/// subject. The clauses are written in terms of the alias's *parent* generics, while an opaque
+/// duplicates each captured lifetime as an own param, so a parent lifetime has to be mapped to
+/// the duplicate the alias's args actually use.
+struct ArgPositionCollector<'a, 'tcx> {
+    tcx: TyCtxt<'tcx>,
+    def_id: DefId,
+    positions: &'a mut DenseBitSet<u32>,
+}
+
+impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ArgPositionCollector<'_, 'tcx> {
+    fn visit_region(&mut self, r: ty::Region<'tcx>) {
+        // Regions bound inside the subject are not args of the alias.
+        if r.is_bound() {
+            return;
+        }
+        if let ty::ReEarlyParam(param) = r.kind() {
+            self.positions.insert(param.index);
+        }
+
+        // A late-bound region of the definition is an arg of the alias too, as one of the
+        // duplicates below, so don't stop at the early-bound ones.
+        let generics = self.tcx.generics_of(self.def_id);
+        let self_identity_args = ty::GenericArgs::identity_for_item(self.tcx, self.def_id);
+        for (idx, arg) in self_identity_args.iter().enumerate().skip(generics.parent_count) {
+            let Some(own_region) = arg.as_region() else { continue };
+            let ty::ReEarlyParam(own) = own_region.kind() else { continue };
+            let Some(own_def_id) =
+                generics.param_at(own.index as usize, self.tcx).def_id.as_local()
+            else {
+                continue;
+            };
+            let parent = self.tcx.map_opaque_lifetime_to_parent_lifetime(own_def_id);
+            if parent == r {
+                self.positions.insert(idx as u32);
+            }
+        }
+    }
+
+    fn visit_ty(&mut self, t: Ty<'tcx>) {
+        if let ty::Param(param) = *t.kind() {
+            self.positions.insert(param.index);
+        }
+        t.super_visit_with(self);
+    }
 }
 
 /// For each region param of this alias compute the indices of the identity args

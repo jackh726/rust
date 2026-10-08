@@ -1,0 +1,112 @@
+error[E0700]: hidden type for `impl Debug + 'a + 'b` captures lifetime that does not appear in bounds
+  --> $DIR/unrelated-bounds-liveness.rs:89:13
+   |
+LL |         pub fn make<'a, 'b, 'c, T: Tr<'c>>(t: T, x: &'c u8) -> impl Debug + 'a + 'b
+   |                             --                                 -------------------- opaque type defined here
+   |                             |
+   |                             hidden type `<T as trait_arg::Tr<'c>>::Assoc` captures the lifetime `'c` as defined here
+...
+LL |             t.get(x)
+   |             ^^^^^^^^
+   |
+help: add a `use<...>` bound to explicitly capture `'c`
+   |
+LL |         pub fn make<'a, 'b, 'c, T: Tr<'c>>(t: T, x: &'c u8) -> impl Debug + 'a + 'b + use<'a, 'b, 'c, T>
+   |                                                                                     ++++++++++++++++++++
+
+error[E0309]: the associated type `<T as gat_arg::Tr>::Assoc<'_>` may not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:113:13
+   |
+LL |         pub fn make<'a, 'b, 'z, T: Tr>(t: T, x: &'z u8) -> impl Debug + 'a + 'b
+   |                     -- the associated type `<T as gat_arg::Tr>::Assoc<'_>` must be valid for the lifetime `'a` as defined here...
+...
+LL |             t.get(x)
+   |             ^^^^^^^^ ...so that the type `<T as gat_arg::Tr>::Assoc<'_>` will meet its required lifetime bounds
+   |
+   = help: consider adding an explicit lifetime bound `<T as gat_arg::Tr>::Assoc<'_>: 'a`...
+
+error[E0309]: the associated type `<T as gat_arg::Tr>::Assoc<'_>` may not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:113:13
+   |
+LL |         pub fn make<'a, 'b, 'z, T: Tr>(t: T, x: &'z u8) -> impl Debug + 'a + 'b
+   |                         -- the associated type `<T as gat_arg::Tr>::Assoc<'_>` must be valid for the lifetime `'b` as defined here...
+...
+LL |             t.get(x)
+   |             ^^^^^^^^ ...so that the type `<T as gat_arg::Tr>::Assoc<'_>` will meet its required lifetime bounds
+   |
+   = help: consider adding an explicit lifetime bound `<T as gat_arg::Tr>::Assoc<'_>: 'b`...
+
+error[E0597]: `v` does not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:29:25
+   |
+LL |         let v: Vec<u8> = vec![42];
+   |             - binding `v` declared here
+LL |         escaped = make(&v[0]);
+   |                         ^ borrowed value does not live long enough
+LL |
+LL |     }
+   |     - `v` dropped here while still borrowed
+LL |     let reused: Vec<u8> = vec![7];
+LL |     show(escaped, &reused);
+   |          ------- borrow later used here
+
+error[E0597]: `v` does not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:59:29
+   |
+LL |             let v: Vec<u8> = vec![42];
+   |                 - binding `v` declared here
+LL |             escaped = make(&v[0]);
+   |                             ^ borrowed value does not live long enough
+LL |
+LL |         }
+   |         - `v` dropped here while still borrowed
+LL |         let reused: Vec<u8> = vec![7];
+LL |         show(escaped, &reused);
+   |              ------- borrow later used here
+
+error[E0597]: `v` does not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:161:30
+   |
+LL |             let v: Vec<u8> = vec![42];
+   |                 - binding `v` declared here
+LL |             escaped = outer(&v[0]);
+   |                              ^ borrowed value does not live long enough
+LL |
+LL |         }
+   |         - `v` dropped here while still borrowed
+LL |         let reused: Vec<u8> = vec![7];
+LL |         show(escaped, &reused);
+   |              ------- borrow later used here
+
+error[E0597]: `v` does not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:191:43
+   |
+LL |             let v: Vec<u8> = vec![42];
+   |                 - binding `v` declared here
+LL |             escaped = <() as Make>::make(&v[0]);
+   |                                           ^ borrowed value does not live long enough
+LL |
+LL |         }
+   |         - `v` dropped here while still borrowed
+LL |         let reused: Vec<u8> = vec![7];
+LL |         show(escaped, &reused);
+   |              ------- borrow later used here
+
+error[E0597]: `v` does not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:213:29
+   |
+LL |             let v: Vec<u8> = vec![42];
+   |                 - binding `v` declared here
+LL |             escaped = make(&v[0]);
+   |                             ^ borrowed value does not live long enough
+LL |
+LL |         }
+   |         - `v` dropped here while still borrowed
+LL |         let reused: Vec<u8> = vec![7];
+LL |         show(escaped, &reused);
+   |              ------- borrow later used here
+
+error: aborting due to 8 previous errors
+
+Some errors have detailed explanations: E0309, E0597, E0700.
+For more information about an error, try `rustc --explain E0309`.
