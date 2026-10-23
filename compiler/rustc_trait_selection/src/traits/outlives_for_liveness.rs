@@ -1,44 +1,16 @@
-use std::debug_assert_matches;
-
-use rustc_data_structures::fx::FxIndexSet;
+use rustc_data_structures::fx::{FxHashSet, FxIndexSet};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::bit_set::DenseBitSet;
-use rustc_infer::infer::{SubregionOrigin, TypeOutlivesConstraint};
 use rustc_middle::ty::{
     self, Flags, ImplTraitInTraitData, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable,
     TypeVisitableExt, TypeVisitor,
 };
-use rustc_span::{DUMMY_SP, bug};
+use rustc_span::bug;
 
 use crate::infer::outlives::test_type_match;
 use crate::infer::region_constraints::VerifyIfEq;
-use crate::regions::{region_known_to_outlive, test_region_obligations};
-
-/// Given a known `param_env` and a set of well formed types, can we prove that
-/// `ty` outlives `region`.
-///
-/// Copied from `ty_known_to_outlive` without normalization for `ty` because we
-/// don't want trait solving in liveness queries.
-fn param_known_to_outlive<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    id: LocalDefId,
-    param_env: ty::ParamEnv<'tcx>,
-    wf_tys: &FxIndexSet<Ty<'tcx>>,
-    ty: Ty<'tcx>,
-    region: ty::Region<'tcx>,
-) -> bool {
-    debug_assert_matches!(ty.kind(), ty::Param(_));
-
-    test_region_obligations(tcx, id, param_env, wf_tys, |infcx| {
-        infcx.register_type_outlives_constraint_inner(TypeOutlivesConstraint {
-            sub_region: region,
-            sup_type: ty,
-            origin: SubregionOrigin::RelateParamBound(DUMMY_SP, ty, None),
-        });
-        Ok(())
-    })
-}
+use crate::regions::region_known_to_outlive;
 
 /// For a given alias type, this returns the set of indices into the identity generic args that
 /// are relevant for liveness, that can be inferred from outlives bounds on the
@@ -122,6 +94,7 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
     let args_known_to_outlive = tcx.args_known_to_outlive_alias_params(def_id);
     tracing::debug!(?args_known_to_outlive);
     let mut live_args = DenseBitSet::new_filled(self_identity_args.len());
+    let mut bound_args = DenseBitSet::new_empty(self_identity_args.len());
     for outlives_region in outlives_regions {
         let Some(outlives_params) = args_known_to_outlive
             .iter()
@@ -130,7 +103,14 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
             continue;
         };
         live_args.intersect(&outlives_params.1);
+        bound_args.insert(outlives_params.0 as u32);
     }
+    // The bounds themselves are live, and are not subject to the intersection: with two
+    // unrelated bounds neither outlives the other, so intersecting would drop both. Everything
+    // the underlying type holds outlives every one of them, so a constraint `R: 'bound` carries
+    // liveness from the bound to `R` without us having to work out which args `R` reaches --
+    // which is what catches `where T::Assoc<'z>: 'a + 'b` in unrelated-bounds-liveness.rs.
+    live_args.union(&bound_args);
     live_args
 }
 
@@ -257,14 +237,17 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
                 ty::GenericArgKind::Const(_) => continue,
                 // Lifetimes should be captured
                 ty::GenericArgKind::Lifetime(_) => continue,
-                ty::GenericArgKind::Type(t) => param_known_to_outlive(
-                    tcx,
-                    def_id,
-                    parent_param_env,
-                    &wf_tys,
-                    t,
-                    *parent_outlived_region,
-                ),
+                // A region reached through a *type* argument is always kept. Asking whether
+                // the argument outlives the bound is not a sound test: proving the underlying
+                // type outlives it decomposes that type into components, and an *alias*
+                // component can be discharged by a declared bound on the projection, which
+                // says nothing about the arguments it was applied to. So `T: 'b` failing does
+                // not mean `T`'s regions are absent from the underlying type -- see
+                // projection-hide-one-bound-153215.rs.
+                //
+                // A lifetime argument can only reach the underlying type as a region
+                // component, where the decomposition is complete, so that test stays below.
+                ty::GenericArgKind::Type(_) => true,
             };
             if !type_outlives {
                 continue;
@@ -317,9 +300,8 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
                 ty::GenericArgKind::Lifetime(r) => {
                     region_known_to_outlive(tcx, def_id, param_env, &wf_tys, r, outlived_region)
                 }
-                ty::GenericArgKind::Type(t) => {
-                    param_known_to_outlive(tcx, def_id, param_env, &wf_tys, t, outlived_region)
-                }
+                // See `args_known_to_outlive_opaque_params`: a type argument is not tested.
+                ty::GenericArgKind::Type(_) => true,
                 ty::GenericArgKind::Const(_) => false,
             };
             if outlives {
@@ -502,6 +484,17 @@ fn live_args_for_outlives_clause<'tcx>(
 pub struct FreeRegionsVisitor<'tcx, OP: FnMut(ty::Region<'tcx>)> {
     pub tcx: TyCtxt<'tcx>,
     pub param_env: ty::ParamEnv<'tcx>,
+    /// The aliases whose bounds we have already walked.
+    ///
+    /// Walking an alias's *arguments* always terminates, since each is smaller than the type
+    /// containing it. Walking its bounds does not: a bound may name `Self`, which puts the alias
+    /// back at the same size. `core`'s `Try`/`Residual` pair does exactly that --
+    /// `type Residual: Residual<Self::Output, TryType = Self>` against
+    /// `type TryType: Try<Output = O, Residual = Self>` -- and unfolds forever.
+    ///
+    /// Revisiting is only ever redundant: the second visit marks the same regions live as the
+    /// first, so skipping it loses nothing.
+    pub seen: FxHashSet<ty::AliasTy<'tcx>>,
     pub op: OP,
 }
 
@@ -534,7 +527,10 @@ where
             // either `'static` or a unique outlives region, and if one is
             // found, we just need to prove that that region is still live.
             // If one is not found, then we continue to walk through the alias.
-            ty::Alias(_, ty::AliasTy { kind, args, .. }) => {
+            ty::Alias(_, alias_ty @ ty::AliasTy { kind, args, .. }) => {
+                if !self.seen.insert(alias_ty) {
+                    return;
+                }
                 let tcx = self.tcx;
                 let param_env = self.param_env;
 
@@ -568,6 +564,27 @@ where
                 for idx in capturable.iter() {
                     if variances.map(|variances| variances[idx as usize]) != Some(ty::Bivariant) {
                         args[idx as usize].visit_with(self);
+                    }
+                }
+
+                // The regions the alias's *trait and projection* bounds name are live on top of
+                // those, whatever the underlying type is: a caller holding the alias can use
+                // those bounds at those regions, and read an associated type whose value
+                // mentions them. Such a region need not outlive the alias's bounds at all --
+                // that is the whole shape of `impl Produce<'r> + 'b`.
+                //
+                // The self type of every bound is the alias itself, so only a bound's arguments
+                // count; walking the self type would name every arg the alias takes.
+                for clause in tcx.item_bounds(def_id).instantiate(tcx, args).skip_norm_wip() {
+                    match clause.kind().skip_binder() {
+                        ty::ClauseKind::Trait(trait_clause) => {
+                            trait_clause.trait_ref.args[1..].visit_with(self);
+                        }
+                        ty::ClauseKind::Projection(proj_clause) => {
+                            proj_clause.projection_term.args[1..].visit_with(self);
+                            proj_clause.term.visit_with(self);
+                        }
+                        _ => {}
                     }
                 }
             }

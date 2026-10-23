@@ -1,5 +1,3 @@
-//@ check-pass
-//@ known-bug: #163886
 //@ edition: 2024
 
 // This test shows that aliases can end up in the hidden type of an impl Trait,
@@ -37,6 +35,7 @@ fn base() {
     {
         let v: Vec<u8> = vec![42];
         escaped = make(&v[0]);
+        //~^ ERROR `v` does not live long enough
     }
     let reused: Vec<u8> = vec![7];
     show(escaped, &reused);
@@ -66,6 +65,7 @@ mod item_bounds {
         {
             let v: Vec<u8> = vec![42];
             escaped = make(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -126,6 +126,7 @@ mod lifetime_arg {
         {
             let v: Vec<u8> = vec![42];
             escaped = trait_arg::make((), &v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -136,6 +137,7 @@ mod lifetime_arg {
         {
             let v: Vec<u8> = vec![42];
             escaped = gat_arg::make((), &v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -164,6 +166,7 @@ mod nested {
         {
             let v: Vec<u8> = vec![42];
             escaped = outer(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -193,6 +196,7 @@ mod rpitit {
         {
             let v: Vec<u8> = vec![42];
             escaped = <() as Make>::make(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
@@ -214,11 +218,13 @@ mod three_bounds {
         {
             let v: Vec<u8> = vec![42];
             escaped = make(&v[0]);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);
     }
 }
+
 
 // As the base case, but the clause that discharges the opaque's bounds is neither written nor an
 // item bound -- it is an *implied* bound, from the WF of the parameters.
@@ -248,6 +254,7 @@ mod implied_bounds {
         {
             let v: Vec<u8> = vec![42];
             escaped = make(&v[0], PhantomData, PhantomData);
+            //~^ ERROR `v` does not live long enough
         }
         let reused: Vec<u8> = vec![7];
         show(escaped, &reused);

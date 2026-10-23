@@ -1,11 +1,11 @@
-//@ check-pass
-
 // The underlying type of the opaque is `T::Assoc`, and `T::Assoc: 'static` is known, so it holds
 // no borrows at all and no region of `T` can occur in it. `T` therefore need not be live, and
-// the caller's borrow need not outlive the opaque.
+// the caller's borrow need not outlive the opaque. This program is sound, and is rejected.
 //
-// This is the precision side of keeping a type argument's regions live: that is only needed if
-// the projection's value can hold a borrow in the first place. It started compiling in 1.99.
+// FIXME(alias-liveness): a region reached through a *type* argument is kept live without asking
+// whether it can occur in the underlying type. Asking would mean knowing which projections of
+// the argument that type was built from, which needs the subject normalized. This started
+// compiling in 1.99 and is given up for now.
 
 #![forbid(unsafe_code)]
 
@@ -39,6 +39,7 @@ fn main() {
     {
         let v: Vec<u8> = vec![42];
         escaped = make(&v[0]);
+        //~^ ERROR `v` does not live long enough
     }
     let reused: Vec<u8> = vec![7];
     show(escaped, &reused);

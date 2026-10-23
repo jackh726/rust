@@ -1,6 +1,3 @@
-//@ known-bug: #151861
-//@ check-pass
-
 // Lifetimes in the bounds of an opaque type must be considered live, even if they don't appear
 // in the outlives bounds, because they can be "recreated" later through the trait's bounds.
 //
@@ -49,6 +46,7 @@ fn main() {
     {
         let s = String::from("hi");
         let p = make(&s, &b);
+        //~^ ERROR `s` does not live long enough
         out = p.produce();
     }
     // requires `&'r str: 'static`

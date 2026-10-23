@@ -1,8 +1,9 @@
-//@ check-pass
-
 // `T::Assoc` keeps only `'q` of `T`'s two lifetimes, so only `'q` can occur in the underlying
-// type and `'r` need not be live. Telling the two apart needs the clause's subject normalized:
-// `<(&'q u8, &'r u8) as Tr>::Assoc` is `&'q u8`, which names `'q` and not `'r`.
+// type and `'r` need not be live. This program is sound, and is rejected.
+//
+// FIXME(alias-liveness): same gap as assoc-type-discards-lifetime.rs -- both of `T`'s regions
+// are reached through a type argument and are kept, and telling them apart needs
+// `<(&'q u8, &'r u8) as Tr>::Assoc` normalized to `&'q u8`.
 
 #![forbid(unsafe_code)]
 
@@ -37,6 +38,7 @@ fn main() {
     {
         let v: Vec<u8> = vec![42];
         escaped = make((&keep[0], &v[0]));
+        //~^ ERROR `v` does not live long enough
     }
     let reused: Vec<u8> = vec![7];
     show(escaped, &reused);

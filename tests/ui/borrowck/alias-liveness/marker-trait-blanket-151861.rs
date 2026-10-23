@@ -1,10 +1,3 @@
-//@ ignore-compare-mode-polonius (explicit revisions)
-//@ revisions: nll polonius
-//@ [nll] compile-flags: -Zpolonius=off
-//@ [polonius] compile-flags: -Zpolonius=next
-//@ [polonius] check-pass
-//@ [polonius] known-bug: #151861
-
 // This shows that it is not sound to treat lifetimes within trait bounds of
 // aliases as not live. Lifetimes within the trait bounds can be used to create
 // shorter lifetimes than the data within (for example, here, when the inner
@@ -32,7 +25,7 @@ fn main() {
     let o;
     {
         let s = String::from("hi");
-        let r: &str = &s; //[nll]~ ERROR `s` does not live long enough
+        let r: &str = &s; //~ ERROR `s` does not live long enough
         o = foo(r);
     }
     let out: &str = o.get();
