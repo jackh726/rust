@@ -220,6 +220,40 @@ mod three_bounds {
     }
 }
 
+// As the base case, but the clause that discharges the opaque's bounds is neither written nor an
+// item bound -- it is an *implied* bound, from the WF of the parameters.
+//
+// The `PhantomData` matters: it yields `T::Assoc: 'a` while costing the caller no borrow, so `'a`
+// and `'b` stay free inference regions at the call, exactly as a where-clause leaves them. A
+// `&'a mut Option<T::Assoc>` parameter would give the same implied bound but pin `'a` to a real
+// borrow, and then the opaque could not be used past that borrow at all.
+//
+// Moving the opaque into `show` matters too: left to be dropped at the end of the function,
+// dropck requires it to be live there and catches this independently.
+mod implied_bounds {
+    use std::marker::PhantomData;
+
+    use super::{Debug, Tr, show};
+
+    fn make<'a, 'b, T: Tr>(
+        t: T,
+        _s: PhantomData<&'a Option<T::Assoc>>,
+        _u: PhantomData<&'b Option<T::Assoc>>,
+    ) -> impl Debug + 'a + 'b {
+        t.get()
+    }
+
+    pub fn run() {
+        let escaped;
+        {
+            let v: Vec<u8> = vec![42];
+            escaped = make(&v[0], PhantomData, PhantomData);
+        }
+        let reused: Vec<u8> = vec![7];
+        show(escaped, &reused);
+    }
+}
+
 fn main() {
     base();
     item_bounds::run();
@@ -228,4 +262,5 @@ fn main() {
     nested::run();
     rpitit::run();
     three_bounds::run();
+    implied_bounds::run();
 }
