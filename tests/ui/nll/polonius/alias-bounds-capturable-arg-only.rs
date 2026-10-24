@@ -3,8 +3,7 @@
 // fails on the non-captured `'z`. Proving the alias outlives `'x` through the live args alone would
 // accept it; emitting that constraint *and* the type test keeps it rejected, as it is today.
 //
-// So this is the test that pins down the difference between emitting the live-arg constraints
-// instead of the type test and emitting both.
+// This ensures that the loan edges supplement rather than replace the type test.
 
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ edition: 2024

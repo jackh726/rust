@@ -1,33 +1,18 @@
-// Proving that an alias outlives a lifetime is not always straightforward. If
-// there is a single outlives bound, then we can simply register an outlives
-// constraint. However, if there are multiple bounds, then *any* of them ca be
-// used to prove the outlives relationship; so, we register a type test instead.
-//
-// Under NLL, this is not a problem. The bounds used to prove the type test will
-// have been implied through some other point in the program; and because NLL
-// is location-insensitive, the outlives relationship will be implied at the
-// point of the type test.
-//
-// Under Polonius Alpha, the outlives relationship is location-sensitive, it is
-// not enough for the outlives relationship to be implied at some other point
-// in the program. Rather, we need to register this constraint *at the point of
-// the type test*.
+// Multiple alias outlives bounds form a disjunction represented by a type test. A type test checks
+// that the alias outlives a region, but does not create a localized edge for loan propagation.
 
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ edition: 2024
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Z polonius=off
 //@ [polonius] compile-flags: -Z polonius=next
-//@ [polonius] check-pass
-// FIXME(-Zpolonius=next): accepted, and this printed freed memory --
-// the bounds that prove the type test are not where the loans are.
 #![forbid(unsafe_code)]
 
 fn require_static<T: 'static>(_: T) {}
 
 // If there are two outlives bounds on an alias, then we can't simply register
 // an outlives constraint. Instead, a `AnyBound` type test is registered. This
-// test shows observable UB.
+// test is a safe-code use-after-free if accepted.
 mod observable_ub {
     use std::fmt::Debug;
 
@@ -41,7 +26,7 @@ mod observable_ub {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             escaped = Box::new(y);
         }
         println!("{escaped:?}");
@@ -62,14 +47,13 @@ mod ordered_bounds {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require_static(y);
         }
     }
 }
 
-// Unlike the previous two (which has a direct outlives relationship between
-// `'a` and `'b`), this test doesn't and so a type test *must* be used.
+// Here the alias bounds are unrelated, so the type-outlives relation necessarily uses a type test.
 mod unrelated_bounds {
     use super::require_static;
 
@@ -86,7 +70,7 @@ mod unrelated_bounds {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require_static(y);
         }
     }
@@ -105,7 +89,7 @@ mod universal_param {
         {
             let x = 42u8;
             y = make(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require::<'p, _>(y);
         }
     }
@@ -125,16 +109,15 @@ mod projection {
         {
             let x = 42u8;
             y = <T as Tr<'_, '_>>::mk(&x);
-            //[nll]~^ ERROR `x` does not live long enough
+            //~^ ERROR `x` does not live long enough
             require_static(y);
         }
     }
 }
 
 
-// Like `ordered_bounds`, but doesn't actually *require* that the alias outlives
-// `'static`. NLL fails here, but polonius can pass because of location-sensitive
-// outlives bounds.
+// Control case with no type-outlives use. It has no type test; Alpha can accept after the old loan
+// is dead even though NLL's location-insensitive constraints reject it.
 mod no_bounds {
     fn make<'a: 'b, 'b>(x: &'a u8) -> impl Copy + 'a + 'b {
         x

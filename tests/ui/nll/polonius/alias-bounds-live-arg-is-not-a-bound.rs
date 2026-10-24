@@ -17,9 +17,6 @@
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Z polonius=off
 //@ [polonius] compile-flags: -Z polonius=next
-//@ [polonius] check-pass
-// FIXME(-Zpolonius=next): accepted, and this printed freed memory --
-// the loan is in the alias's only live arg, which is not one of its bounds.
 #![forbid(unsafe_code)]
 
 use std::fmt::Debug;
@@ -40,7 +37,7 @@ fn test() {
     {
         let x = Box::new(42u8);
         y = make(&*x, &zl);
-        //[nll]~^ ERROR `*x` does not live long enough
+        //~^ ERROR `*x` does not live long enough
         escaped = Box::new(y);
     }
     let _spray: Vec<Box<u8>> = (0..64).map(|i| Box::new(200 + (i % 50) as u8)).collect();

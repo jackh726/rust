@@ -1,0 +1,17 @@
+error[E0597]: `*local` does not live long enough
+  --> $DIR/alias-bounds-nested-type-arg.rs:30:27
+   |
+LL |     let mut value = make::<'static, 'static, Wrap<&'static u8>>(Wrap(&0));
+   |                     ----------------------------------------------------- assignment requires that `*local` is borrowed for `'static`
+LL |     {
+LL |         let local = Box::new(1u8);
+   |             ----- binding `local` declared here
+LL |         value = make(Wrap(&*local));
+   |                           ^^^^^^^ borrowed value does not live long enough
+...
+LL |     }
+   |     - `*local` dropped here while still borrowed
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0597`.

@@ -12,9 +12,6 @@
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Z polonius=off
 //@ [polonius] compile-flags: -Z polonius=next
-//@ [polonius] check-pass
-// FIXME(-Zpolonius=next): accepted, and this printed freed memory --
-// the loan is in one of two live args, and neither bound is live.
 #![forbid(unsafe_code)]
 use std::fmt::Debug;
 fn make<'a, 'b, 'c, 'd, 'z>(x: &'c u8, y: &'d u8, _z: &'z u8) -> impl Debug + Copy + 'a + 'b
@@ -31,7 +28,7 @@ pub fn test() {
     {
         let d = Box::new(42u8);
         v = make(&0, &*d, &zl);
-        //[nll]~^ ERROR `*d` does not live long enough
+        //~^ ERROR `*d` does not live long enough
         escaped = Box::new(v);
     }
     let _spray: Vec<Box<u8>> = (0..64).map(|i| Box::new(200 + (i % 50) as u8)).collect();

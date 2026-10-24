@@ -1,5 +1,5 @@
 error[E0597]: `*x` does not live long enough
-  --> $DIR/alias-bounds-live-arg-is-not-a-bound.rs:42:18
+  --> $DIR/alias-bounds-live-arg-is-not-a-bound.rs:39:18
    |
 LL |     let mut y = make::<'static, 'static, 'static, '_>(&0, &zl);
    |                 ---------------------------------------------- assignment requires that `*x` is borrowed for `'static`

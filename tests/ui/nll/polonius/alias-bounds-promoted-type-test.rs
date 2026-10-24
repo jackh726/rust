@@ -11,9 +11,6 @@
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Z polonius=off
 //@ [polonius] compile-flags: -Z polonius=next
-//@ [polonius] check-pass
-// FIXME(-Zpolonius=next): accepted, and this printed freed memory --
-// the type test is promoted to the closure's creator, so the closure body gets no edge.
 #![forbid(unsafe_code)]
 
 use std::fmt::Debug;
@@ -32,7 +29,7 @@ fn test<'p, 'q>(seed: &'p u8, slot: &mut Option<Box<dyn Debug + 'q>>, _implied: 
         {
             let x = Box::new(42u8);
             y = make(&*x);
-            //[nll]~^ ERROR `*x` does not live long enough
+            //~^ ERROR `*x` does not live long enough
             stash(slot, y);
         }
     };

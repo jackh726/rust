@@ -1,5 +1,5 @@
 error[E0597]: `x` does not live long enough
-  --> $DIR/alias-bounds-loan-escapes.rs:43:22
+  --> $DIR/alias-bounds-loan-escapes.rs:28:22
    |
 LL |         let mut y = make::<'static, 'static>(&0);
    |                     ---------------------------- assignment requires that `x` is borrowed for `'static`
@@ -13,7 +13,7 @@ LL |         }
    |         - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/alias-bounds-loan-escapes.rs:64:22
+  --> $DIR/alias-bounds-loan-escapes.rs:49:22
    |
 LL |         let mut y = make::<'static, 'static>(&0);
    |                     ---------------------------- assignment requires that `x` is borrowed for `'static`
@@ -27,7 +27,7 @@ LL |         }
    |         - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/alias-bounds-loan-escapes.rs:88:22
+  --> $DIR/alias-bounds-loan-escapes.rs:72:22
    |
 LL |         let mut y = make::<'static, 'static, 'static>(&0);
    |                     ------------------------------------- assignment requires that `x` is borrowed for `'static`
@@ -41,7 +41,7 @@ LL |         }
    |         - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/alias-bounds-loan-escapes.rs:107:22
+  --> $DIR/alias-bounds-loan-escapes.rs:91:22
    |
 LL |     pub fn test<'p>(seed: &'p u8) {
    |                 -- lifetime `'p` defined here
@@ -57,7 +57,7 @@ LL |         }
    |         - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/alias-bounds-loan-escapes.rs:127:39
+  --> $DIR/alias-bounds-loan-escapes.rs:111:39
    |
 LL |         let mut y = <T as Tr<'static, 'static>>::mk(&0);
    |                     ----------------------------------- assignment requires that `x` is borrowed for `'static`
@@ -71,7 +71,7 @@ LL |         }
    |         - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/alias-bounds-loan-escapes.rs:147:22
+  --> $DIR/alias-bounds-loan-escapes.rs:130:22
    |
 LL |         let mut y = make::<'static, 'static>(&0);
    |                     ---------------------------- assignment requires that `x` is borrowed for `'static`

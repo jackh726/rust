@@ -1,5 +1,5 @@
 error[E0505]: cannot move out of `x` because it is borrowed
-  --> $DIR/alias-bounds-reassignment-drop.rs:36:10
+  --> $DIR/alias-bounds-reassignment-drop.rs:22:10
    |
 LL |     let x = String::new();
    |         - binding `x` declared here

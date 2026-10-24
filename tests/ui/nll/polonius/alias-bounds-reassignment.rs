@@ -1,8 +1,5 @@
-// Similarly to `alias-bounds-loan-escapes`, the alias here has two outlives
-// bounds, so we must register a type test rather than an outlives constraint.
-// However, in this case, we never actually require that the alias live longer
-// than it does. So, we make the liveness of the outlives args longer than
-// necessary.
+// Control for moving Alpha loan-liveness computation after region solving. This body creates no
+// type tests, and overwriting `o` must end the loan from `x`.
 
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ edition: 2024

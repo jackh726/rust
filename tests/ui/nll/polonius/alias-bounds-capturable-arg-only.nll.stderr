@@ -1,5 +1,5 @@
 error[E0309]: the opaque type `make<'a, 'b, 'c, 'z>::{opaque#0}<'a, 'b, 'c, 'z>` may not live long enough
-  --> $DIR/alias-bounds-capturable-arg-only.rs:32:5
+  --> $DIR/alias-bounds-capturable-arg-only.rs:31:5
    |
 LL | fn f<'x, 'a, 'b, 'c, 'z>(c: &'c u8, z: &'z u8)
    |      -- the opaque type `make<'a, 'b, 'c, 'z>::{opaque#0}<'a, 'b, 'c, 'z>` must be valid for the lifetime `'x` as defined here...
