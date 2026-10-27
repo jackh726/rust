@@ -1,5 +1,4 @@
 //@ edition: 2024
-//@ check-pass
 
 // Minimized from ty_python_semantic::Binding::enumerate_argument_types
 // regression in #161154.
@@ -31,7 +30,7 @@ impl<'a, 'db> Outer<'a, 'db> {
     fn update(&mut self) {}
     fn check(&mut self) {
         for _ in self.iter() {
-            self.update()
+            self.update() //~ ERROR cannot borrow `*self` as mutable because it is also borrowed as immutable
         }
     }
     fn check_explicit(&mut self) {

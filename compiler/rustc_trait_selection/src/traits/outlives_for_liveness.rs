@@ -1,4 +1,4 @@
-use rustc_data_structures::fx::FxIndexSet;
+use rustc_data_structures::fx::{FxHashSet, FxIndexSet};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_index::bit_set::DenseBitSet;
@@ -7,6 +7,7 @@ use rustc_middle::ty::{
     TypeVisitable, TypeVisitableExt, TypeVisitor,
 };
 use rustc_span::bug;
+use smallvec::SmallVec;
 
 use crate::infer::outlives::test_type_match;
 use crate::infer::region_constraints::VerifyIfEq;
@@ -479,6 +480,10 @@ fn live_args_for_outlives_clause<'tcx>(
 pub struct FreeRegionsVisitor<'tcx, OP: FnMut(ty::Region<'tcx>)> {
     pub tcx: TyCtxt<'tcx>,
     pub param_env: ty::ParamEnv<'tcx>,
+    /// The current set of aliases being visited (to avoid cycles)
+    pub stack: SmallVec<[DefId; 4]>,
+    /// The full set of aliases that have been visited (to avoid repeated work)
+    pub visited: FxHashSet<(DefId, ty::GenericArgs<'tcx>)>,
     pub op: OP,
 }
 
@@ -514,6 +519,30 @@ where
             ty::Alias(_, ty::AliasTy { kind, args, .. }) => {
                 let tcx = self.tcx;
                 let param_env = self.param_env;
+                let def_id = match kind {
+                    ty::AliasTyKind::Projection { def_id }
+                    | ty::AliasTyKind::Inherent { def_id }
+                    | ty::AliasTyKind::Opaque { def_id }
+                    | ty::AliasTyKind::Free { def_id } => def_id,
+                };
+
+                // If we've seen this exact alias already (even if not in a cycle),
+                // then we don't need to visit it again.
+                // Importantly, we key on `(def_id, args)` rather than `ty`,
+                // because we can get cycles that different in rigidness.
+                if !self.visited.insert((def_id, args)) {
+                    return;
+                }
+
+                // We can sometimes encounter cyclic alias types (see the `alias-liveness/cycles.rs` test).
+                // If we've already seen this alias, then we just pessimistically mark all free regions as
+                // live. We could actually be more precise here: for example, we could only mark the args
+                // that are *different* as live, but this is the conservative approach.
+                if self.stack.contains(&def_id) {
+                    tcx.for_each_free_region(&args, |outer_r| self.visit_region(outer_r));
+                    return;
+                }
+                self.stack.push(def_id);
 
                 // For aliases other than opaques, we have to consider two
                 // sources of information to identity potentially-live args:
@@ -523,12 +552,6 @@ where
                 // Each source of information *restricts* the set of potentially-live
                 // args independently: only the args that can be live for *every*
                 // source of information can be actually live, so we take the intersection.
-                let def_id = match kind {
-                    ty::AliasTyKind::Projection { def_id }
-                    | ty::AliasTyKind::Inherent { def_id }
-                    | ty::AliasTyKind::Opaque { def_id }
-                    | ty::AliasTyKind::Free { def_id } => def_id,
-                };
                 let mut capturable = tcx.live_args_for_alias_from_outlives_bounds(kind).clone();
 
                 for clause in param_env.caller_bounds().non_trait_clauses().iter() {
@@ -547,6 +570,24 @@ where
                         args[idx as usize].visit_with(self);
                     }
                 }
+
+                // This causes us to recurse into the args of alias bounds like
+                // `impl Captures<'a>` and `type Alias: Capture<a'>` and treat
+                // them as live.
+                for clause in tcx.item_bounds(def_id).instantiate(tcx, args).skip_norm_wip() {
+                    match clause.kind().skip_binder() {
+                        ty::ClauseKind::Trait(trait_clause) => {
+                            trait_clause.trait_ref.args.as_slice()[1..].visit_with(self);
+                        }
+                        ty::ClauseKind::Projection(proj_clause) => {
+                            proj_clause.projection_term.args.as_slice()[1..].visit_with(self);
+                            proj_clause.term.visit_with(self);
+                        }
+                        _ => {}
+                    }
+                }
+
+                self.stack.pop();
             }
 
             _ => ty.super_visit_with(self),

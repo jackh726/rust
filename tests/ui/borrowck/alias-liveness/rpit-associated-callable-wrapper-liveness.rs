@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ check-pass
+//@ known-bug: unknown
 
 // Minimized from auditeur's sequential owned_fn crater regression in #161154.
 

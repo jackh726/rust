@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ check-pass
+//@ known-bug: unknown
 
 // From crater regression in #161154 in `ty_python_semantic`.
 

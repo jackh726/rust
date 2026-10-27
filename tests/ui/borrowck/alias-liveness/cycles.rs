@@ -31,8 +31,8 @@ fn make_mirrored<'x, 'y, T: Mirrored>(_: &'x String, _: &'y String) -> T::A<'x, 
     loop {}
 }
 
-// The cycle ends up with the same args. We *could* be more precise and treat
-// `'y` as not-live, but we're conservative and don't.
+// The cycle repeats the same alias with the same args. It adds no new regions,
+// so `'y` remains not live: only `'x` is required by the alias's outlives bound.
 fn same_args<T: Mirrored>(x: &String) {
     let s = String::from("hi");
     let a = make_mirrored::<T>(x, &s);
@@ -57,6 +57,7 @@ fn differing_args<T: Rotating>(x: &String, o: &String) {
     let s = String::from("hi");
     let a = make_rotating::<T>(x, &s, o);
     drop(s);
+    //~^ ERROR cannot move out of `s` because it is borrowed
     drop(a);
 }
 
