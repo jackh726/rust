@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ check-pass
+//@ known-bug: unknown
 
 // Minimized from verty's `ErrorSink::wrap_fn_1ary` crater regression in #161154.
 

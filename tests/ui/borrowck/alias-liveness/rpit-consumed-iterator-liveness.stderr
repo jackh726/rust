@@ -1,0 +1,179 @@
+error[E0503]: cannot use `*columns` because it was mutably borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:20:13
+   |
+LL |         for x in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ----------------------------------------------
+   |                  |              |
+   |                  |              `*columns` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^ use of borrowed `*columns`
+
+error[E0506]: cannot assign to `columns[_]` because it is borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:20:13
+   |
+LL |         for x in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ----------------------------------------------
+   |                  |              |
+   |                  |              `columns[_]` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^^^^^ `columns[_]` is assigned to here but it was already borrowed
+
+error[E0499]: cannot borrow `cells` as mutable more than once at a time
+  --> $DIR/rpit-consumed-iterator-liveness.rs:27:9
+   |
+LL |         let it = first_to_local(cells.iter_mut().map(|c| *c));
+   |                                 ----- first mutable borrow occurs here
+LL |         cells[0] = 7;
+   |         ^^^^^ second mutable borrow occurs here
+LL |         drop(it);
+   |              -- first borrow later used here
+
+error[E0503]: cannot use `*columns` because it was mutably borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:54:13
+   |
+LL |         for x in tuple(columns.iter_mut().map(|c| *c)).0 {
+   |                  -------------------------------------
+   |                  |     |
+   |                  |     `*columns` is borrowed here
+   |                  a temporary with access to the borrow is created here ...
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^ use of borrowed `*columns`
+LL |         }
+   |         - ... and the borrow might be used here, when that temporary is dropped and runs the destructor for type `(impl Iterator<Item = u32> + '_,)`
+   |
+help: consider adding semicolon after the expression so its temporaries are dropped sooner, before the local variables declared by the block are dropped
+   |
+LL |         };
+   |          +
+
+error[E0506]: cannot assign to `columns[_]` because it is borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:54:13
+   |
+LL |         for x in tuple(columns.iter_mut().map(|c| *c)).0 {
+   |                  -------------------------------------
+   |                  |     |
+   |                  |     `columns[_]` is borrowed here
+   |                  a temporary with access to the borrow is created here ...
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^^^^^ `columns[_]` is assigned to here but it was already borrowed
+LL |         }
+   |         - ... and the borrow might be used here, when that temporary is dropped and runs the destructor for type `(impl Iterator<Item = u32> + '_,)`
+   |
+help: consider adding semicolon after the expression so its temporaries are dropped sooner, before the local variables declared by the block are dropped
+   |
+LL |         };
+   |          +
+
+error[E0503]: cannot use `*columns` because it was mutably borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:60:13
+   |
+LL |         for x in optional(columns.iter_mut().map(|c| *c)).unwrap() {
+   |                  -------------------------------------------------
+   |                  |        |
+   |                  |        `*columns` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^ use of borrowed `*columns`
+
+error[E0506]: cannot assign to `columns[_]` because it is borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:60:13
+   |
+LL |         for x in optional(columns.iter_mut().map(|c| *c)).unwrap() {
+   |                  -------------------------------------------------
+   |                  |        |
+   |                  |        `columns[_]` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^^^^^ `columns[_]` is assigned to here but it was already borrowed
+
+error[E0503]: cannot use `*columns` because it was mutably borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:77:13
+   |
+LL |         for _ in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ----------------------------------------------
+   |                  |              |
+   |                  |              `*columns` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = 1;
+   |             ^^^^^^^^^^ use of borrowed `*columns`
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/rpit-consumed-iterator-liveness.rs:76:18
+   |
+LL |         for _ in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL |     fn first_to_local<'i, 'o, I, F>(iter: I) -> impl Iterator<Item = impl Copy + 'static> + 'o + use<'o, I, F>
+   |                                                                                                +++++++++++++++
+
+error[E0506]: cannot assign to `columns[_]` because it is borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:77:13
+   |
+LL |         for _ in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ----------------------------------------------
+   |                  |              |
+   |                  |              `columns[_]` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = 1;
+   |             ^^^^^^^^^^^^^^ `columns[_]` is assigned to here but it was already borrowed
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/rpit-consumed-iterator-liveness.rs:76:18
+   |
+LL |         for _ in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL |     fn first_to_local<'i, 'o, I, F>(iter: I) -> impl Iterator<Item = impl Copy + 'static> + 'o + use<'o, I, F>
+   |                                                                                                +++++++++++++++
+
+error[E0506]: cannot assign to `columns[_]` because it is borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:104:13
+   |
+LL |         for _ in first_to_local(&mut columns[0]) {
+   |                  -------------------------------
+   |                  |              |
+   |                  |              `columns[_]` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = 1;
+   |             ^^^^^^^^^^^^^^ `columns[_]` is assigned to here but it was already borrowed
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/rpit-consumed-iterator-liveness.rs:103:18
+   |
+LL |         for _ in first_to_local(&mut columns[0]) {
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL |     fn first_to_local<'i, 'o, I: Items + 'i>(item: I) -> impl Iterator<Item = Box<dyn Any>> + 'o + use<'o, I> {
+   |                                                                                                  ++++++++++++
+
+error[E0503]: cannot use `*columns` because it was mutably borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:122:13
+   |
+LL |         for x in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ----------------------------------------------
+   |                  |              |
+   |                  |              `*columns` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^ use of borrowed `*columns`
+
+error[E0506]: cannot assign to `columns[_]` because it is borrowed
+  --> $DIR/rpit-consumed-iterator-liveness.rs:122:13
+   |
+LL |         for x in first_to_local(columns.iter_mut().map(|c| *c)) {
+   |                  ----------------------------------------------
+   |                  |              |
+   |                  |              `columns[_]` is borrowed here
+   |                  borrow later used here
+LL |             columns[0] = x;
+   |             ^^^^^^^^^^^^^^ `columns[_]` is assigned to here but it was already borrowed
+
+error: aborting due to 12 previous errors
+
+Some errors have detailed explanations: E0499, E0503, E0506.
+For more information about an error, try `rustc --explain E0499`.

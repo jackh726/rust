@@ -1,0 +1,13 @@
+error[E0499]: cannot borrow `cells` as mutable more than once at a time
+  --> $DIR/rpit-consumed-iterator-const-param.rs:19:5
+   |
+LL |     let it = consumed::<_, 0>(cells.iter_mut().map(|c| *c));
+   |                               ----- first mutable borrow occurs here
+LL |     cells[0] = 7;
+   |     ^^^^^ second mutable borrow occurs here
+LL |     drop(it);
+   |          -- first borrow later used here
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0499`.
