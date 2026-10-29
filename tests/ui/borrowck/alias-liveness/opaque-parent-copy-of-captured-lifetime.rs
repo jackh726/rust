@@ -3,7 +3,6 @@
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Zpolonius=off
 //@ [polonius] compile-flags: -Zpolonius=next
-//@ [polonius] check-pass
 
 // For an opaque type, we duplicate captured lifetimes (the parent args and the
 // opaque's own args). Although the parent args are marked as *bivariant*, in an
@@ -35,7 +34,7 @@ fn dangle() -> &'static [i32; 3] {
     let long = Rc::new(RefCell::new(&[4, 5, 6]));
     let x = [1, 2, 3];
     let short = Rc::new(RefCell::new(&x));
-    //[nll]~^ ERROR `x` does not live long enough
+    //~^ ERROR `x` does not live long enough
     hide(long.clone()).swap((|a| a)(hide(short)));
     let res: &'static [i32; 3] = *long.borrow();
     res

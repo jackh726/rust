@@ -3,7 +3,6 @@
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Zpolonius=off
 //@ [polonius] compile-flags: -Zpolonius=next
-//@ [polonius] check-pass
 
 // For an opaque type, we duplicate captured lifetimes (the parent args and the
 // opaque's own args). Although the parent args are marked as *bivariant*, in an
@@ -33,7 +32,7 @@ fn through_closure() {
     let mut x = 0;
     let a = (|| f(&x))();
     x = 1;
-    //[nll]~^ ERROR cannot assign to `x` because it is borrowed
+    //~^ ERROR cannot assign to `x` because it is borrowed
     println!("{a}");
 }
 
@@ -46,7 +45,7 @@ fn through_closure_async() {
     let b = 44u8;
     let future = (|| multiple_named_lifetimes(&a, &b))();
     a += 1;
-    //[nll]~^ ERROR cannot assign to `a` because it is borrowed
+    //~^ ERROR cannot assign to `a` because it is borrowed
     let mut fut = pin!(future);
     let mut cx = Context::from_waker(Waker::noop());
     if let Poll::Ready(r) = fut.as_mut().poll(&mut cx) {

@@ -1,5 +1,5 @@
 error[E0597]: `x` does not live long enough
-  --> $DIR/opaque-parent-copy-of-captured-lifetime.rs:37:38
+  --> $DIR/opaque-parent-copy-of-captured-lifetime.rs:36:38
    |
 LL |     let x = [1, 2, 3];
    |         - binding `x` declared here
