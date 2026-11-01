@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ known-bug: unknown
+//@ check-pass
 
 // Minimized from polars-async's `parallelize_first_to_local` and polars-stream's
 // `rechunk_par` crater regressions in #161154.
