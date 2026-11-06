@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ known-bug: unknown
+//@ check-pass
 //@ ignore-compare-mode-polonius (explicit revisions)
 //@ revisions: nll polonius
 //@ [nll] compile-flags: -Zpolonius=off
