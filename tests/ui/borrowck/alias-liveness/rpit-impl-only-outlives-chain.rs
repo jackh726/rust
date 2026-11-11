@@ -48,6 +48,26 @@ fn dangle() -> &'static [i32; 3] {
     res
 }
 
+// `T: 'm` must compose with the same impl-dependent `'m: 'b`. Treating
+// `T: 'm` only as a target-specific fact loses loans nested in `T`.
+fn hide_type<'m, 'b, T: Swap + 'm>(x: T) -> impl Swap + 'b
+where
+    (): Shorten<'m, 'b>,
+{
+    <() as Shorten<'m, 'b>>::shorten(x)
+}
+
+fn dangle_type() -> &'static [i32; 3] {
+    let long = Rc::new(RefCell::new(&[4, 5, 6]));
+    let x = [1, 2, 3];
+    let short = Rc::new(RefCell::new(&x));
+    //[nll,polonius]~^ ERROR `x` does not live long enough
+    hide_type(long.clone()).swap((|a| a)(hide_type(short)));
+    let res: &'static [i32; 3] = *long.borrow();
+    res
+}
+
 fn main() {
     println!("{:?}", dangle());
+    println!("{:?}", dangle_type());
 }

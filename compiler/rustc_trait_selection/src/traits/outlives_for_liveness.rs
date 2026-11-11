@@ -510,22 +510,33 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     let outlives_env =
         OutlivesEnvironment::new(&infcx, def_id, parent_param_env, wf_tys.iter().copied());
 
+    let parent_region_can_outlive_non_static_region: Vec<_> = parent_outlives_regions
+        .iter()
+        .map(|&(region, _)| {
+            arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, region.into())
+        })
+        .collect();
+
+    let indirectly_outlived_parent_regions: Vec<_> = parent_outlives_regions
+        .iter()
+        .zip(&parent_region_can_outlive_non_static_region)
+        .filter_map(|(&(region, _), &can_outlive)| can_outlive.then_some(region))
+        .collect();
+
     // Compute once since these don't depend on the outlives regions.
     let parent_type_params: Vec<_> = self_identity_args.as_slice()[..generics.parent_count]
         .iter()
         .enumerate()
         .filter_map(|(idx, arg)| {
             let ty = arg.as_type()?;
-            let projection_can_outlive =
-                arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, ty.into());
-            Some((idx, ty, projection_can_outlive))
-        })
-        .collect();
-
-    let parent_region_can_outlive_non_static_region: Vec<_> = parent_outlives_regions
-        .iter()
-        .map(|&(region, _)| {
-            arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, region.into())
+            let can_outlive_non_static_region =
+                arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, ty.into())
+                    || indirectly_outlived_parent_regions.iter().any(|&region| {
+                        // `T: 'm` is handled precisely by `param_known_to_outlive`,
+                        // but must also compose with an impl-only `'m: 'b`.
+                        param_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty, region)
+                    });
+            Some((idx, ty, can_outlive_non_static_region))
         })
         .collect();
 
@@ -536,8 +547,8 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     // In both cases, we need to check known outlives for the *parent* region, because that's where the param_env and wf_tys are.
     for (parent_outlived_region, opaque_outlived_arg_idx) in parent_outlives_regions.iter() {
         let mut opaque_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
-        for &(parent_outlived_arg_idx, ty, projection_can_outlive) in &parent_type_params {
-            let type_outlives = projection_can_outlive
+        for &(parent_outlived_arg_idx, ty, can_outlive_non_static_region) in &parent_type_params {
+            let type_outlives = can_outlive_non_static_region
                 || param_known_to_outlive(
                     tcx,
                     def_id,
@@ -608,6 +619,25 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
     let mut indirect_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
     for (idx, arg) in self_identity_args.iter().enumerate() {
         if arg_can_outlive_non_static_region(tcx, param_env, &outlives_env, arg) {
+            indirect_outlives_args.insert(idx as u32);
+        }
+    }
+
+    let indirectly_outlived_regions: Vec<_> = self_identity_args
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, arg)| {
+            let region = arg.as_region()?;
+            indirect_outlives_args.contains(idx as u32).then_some(region)
+        })
+        .collect();
+    for (idx, arg) in self_identity_args.iter().enumerate() {
+        let Some(ty) = arg.as_type() else { continue };
+        if indirectly_outlived_regions.iter().any(|&region| {
+            // `T: 'm` is handled precisely by `param_known_to_outlive`,
+            // but must also compose with an impl-only `'m: 'b`.
+            param_known_to_outlive(tcx, def_id, param_env, &wf_tys, ty, region)
+        }) {
             indirect_outlives_args.insert(idx as u32);
         }
     }
