@@ -1,0 +1,51 @@
+error[E0597]: `x` does not live long enough
+  --> $DIR/rpit-projection-outlives-chain.rs:67:38
+   |
+LL |     let x = [1, 2, 3];
+   |         - binding `x` declared here
+LL |     let short = Rc::new(RefCell::new(&x));
+   |                                      ^^ borrowed value does not live long enough
+LL |
+LL |     hide::<()>(long.clone()).swap((|a| a)(hide::<()>(short)));
+   |                                        - returning this value requires that `x` is borrowed for `'static`
+...
+LL | }
+   | - `x` dropped here while still borrowed
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/rpit-projection-outlives-chain.rs:69:43
+   |
+LL |     hide::<()>(long.clone()).swap((|a| a)(hide::<()>(short)));
+   |                                           ^^^^^^^^^^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL | fn hide<'a, 'm, 'b, G: Family>(x: Rc<RefCell<&'a [i32; 3]>>) -> impl Swap + 'b + use<'b, G>
+   |                                                                                ++++++++++++
+
+error[E0597]: `x` does not live long enough
+  --> $DIR/rpit-projection-outlives-chain.rs:77:38
+   |
+LL |     let x = [1, 2, 3];
+   |         - binding `x` declared here
+LL |     let short = Rc::new(RefCell::new(&x));
+   |                                      ^^ borrowed value does not live long enough
+LL |
+LL |     hide_implied::<()>(long.clone(), None).swap((|a| a)(hide_implied::<()>(short, None)));
+   |                                                      - returning this value requires that `x` is borrowed for `'static`
+...
+LL | }
+   | - `x` dropped here while still borrowed
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/rpit-projection-outlives-chain.rs:79:57
+   |
+LL |     hide_implied::<()>(long.clone(), None).swap((|a| a)(hide_implied::<()>(short, None)));
+   |                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL | ) -> impl Swap + 'b + use<'b, G>
+   |                     ++++++++++++
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0597`.
