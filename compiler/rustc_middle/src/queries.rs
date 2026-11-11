@@ -2195,10 +2195,9 @@ rustc_queries! {
         separate_provide_extern
     }
 
-    /// For each region param of an alias, the indices of the identity args that are known to
-    /// outlive it given only the alias's declared where-clauses. Used for liveness:
-    /// these are the only args whose regions the underlying type of the alias
-    /// could capture while satisfying an outlives bound on that param.
+    /// For each region parameter of an alias, conservatively computes the
+    /// identity arguments which may occur in an underlying type that outlives
+    /// that region. Used to avoid making loans in irrelevant arguments live.
     query args_known_to_outlive_alias_params(def_id: DefId) -> &'tcx Vec<(usize, rustc_index::bit_set::DenseBitSet<u32>)> {
         arena_cache
         desc { "computing the args known to outlive each region param of alias `{}`", tcx.def_path_str(def_id) }

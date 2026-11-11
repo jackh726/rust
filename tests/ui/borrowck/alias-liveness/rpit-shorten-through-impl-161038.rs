@@ -4,10 +4,8 @@
 //@ [nll] compile-flags: -Zpolonius=off
 //@ [polonius] compile-flags: -Zpolonius=next
 
-// Two different variations of #161038: one with a trait with a method taking
-// a reference and one taking an impl Trait. Fundamentally, both exploit the
-// fact that we don't treat `'a` as live in `Produce<'a>` bound in the return
-// type.
+// Variations of #161038 using a trait method input, an RPITIT input, and a
+// concrete associated projection. Each selected impl can require `'a: 'b`.
 
 #![forbid(unsafe_code)]
 

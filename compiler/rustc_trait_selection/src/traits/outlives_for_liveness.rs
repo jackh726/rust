@@ -46,7 +46,7 @@ fn param_known_to_outlive<'tcx>(
 }
 
 // `bound` contributes an outlives region without being searched for `arg`.
-fn has_arg_and_non_static_region<'tcx>(
+fn value_connects_arg_to_non_static_region<'tcx>(
     tcx: TyCtxt<'tcx>,
     env: &OutlivesEnvironment<'tcx>,
     arg: ty::GenericArg<'tcx>,
@@ -94,93 +94,33 @@ fn has_arg_and_non_static_region<'tcx>(
     visitor.contains_arg && visitor.has_region
 }
 
-/// Okay, so the logic here is pretty "oh, I guess that works". The core idea is
-/// that we need to know if a param can end up in an alias (and therefore must be
-/// live). *Conservatively*, we could say that any *captured* param must be live,
-/// but that is imprecise and results in some breakage (see the
-/// `rpit-consumed-iterator-liveness` test, for example).
+/// Whether `arg` may participate in an impl-only outlives relationship.
 ///
-/// The simple case (handled elsewhere) is if the param outlives the *outlives
-/// bounds* of the alias itself. In that case, then it is obviously *okay* for
-/// it to end up in the hidden type and therefore must be live.
+/// Direct facts such as `T: 'a` and `'b: 'a` are checked separately for each
+/// alias outlives bound. Trait and projection selection can also introduce
+/// outlives requirements that are not present in this definition's `ParamEnv`.
+/// This metadata is computed once and encoded cross-crate, so it cannot inspect
+/// the impl selected at a particular use. We therefore retain an argument when
+/// a clause connects it to any non-static region.
 ///
-/// However, there is a more complicated case: aliases (and namely, projections).
-/// If we have a projection like `<T as Trait>::Assoc`, we can have a where
-/// clause like `T::Assoc: 'a`; then, that projection can end up in the hidden
-/// type of an alias that outlives `'a`. And because of that, `T` must be live,
-/// since loans within `T` can end up in the projection (and we don't have a
-/// way to say that `T::Assoc` is live directly):
+/// For region arguments, also match regions that the argument is known to
+/// outlive. This covers `'a: 'm` combined with an impl-only `'m: 'b`.
+/// `T: 'm` is propagated through such regions after this scan; treating it as
+/// relevant by itself would regress consumed-input RPITs.
 ///
-/// ```ignore (illustrative)
-/// trait Trait { type Assoc; }
-/// impl<'q> Trait for &'q u8 { type Assoc = &'q u8; }
-/// ```
-///
-/// Naively, we could try to try to enumerate through all projections reachable
-/// through `T` and ask if we know if that projection outlives the alias bounds,
-/// and then mark `T` as live. That seems...difficult to get right. Instead, we
-/// do something a little bit more clever, but also less precise.
-///
-/// The first thing to recognize: a bound like `T::Assoc: 'static` *does not*
-/// mean that `T` must be live (even though that `T` lives longer than than some
-/// defined alias outlives bound), because `T::Assoc` cannot carry any loans). So,
-/// we can ignore `'static`.
-///
-/// Second, while we *could* further restrict lifetimes we care about to only
-/// those that *actually* be captured in the alias (like we do for captured
-/// regions), we can be a bit imprecise and just consider if the param outlives
-/// *any* non-static region.
-///
-/// Next, we can divide the cases we need to consider into three cases:
-/// 1) we can deduce that a projection from `T` outlives some lifetime `'a` from
-///    the ParamEnv directly (either because we have something like `T::Assoc:'a`
-///    in the bounds exactly, or this is implied from something like a
-///    `Struct<T::Assoc>: 'a` bound).
-/// 2) we can deduce that a projection from `T` outlives some lifetime `'a` from
-///    implied bounds from WF tys (you can think of this as a special case of the
-///    above)
-/// 3) some *unknown* projection from `T` outlives some lifetime `'a` -
-///    importantly, we know that projection must come from some some trait bound
-///    that *is* in the ParamEnv (even if indirectly). For example:
-///
-/// ```ignore (illustrative)
-/// trait Trait<'a> {
-///   type Assoc1: 'a; // Lifetime is present in the trait signature
-///   type Assoc2: 'static; // Contains no loans
-///   type Assoc3<'a>: 'a; // Present in alias signature
-/// }
-///
-/// trait Outer<'a> { type Assoc: Inner<'a>; }
-/// trait Inner<'a> { type Assoc: 'a; }
-/// ```
-///
-/// So, if we have a bound like `T: Trait<'a>`, then that can be used to deduce
-/// that `<T as Trait<'a>>::Assoc1: 'a`. We could do that by enumerating the
-/// type aliases on `Trait`, but we would need to be recursive (for the
-/// `Inner/Outer` example above) and that's not fun. You can also possibly
-/// imagine that `T` doesn't directly have to implement a trait that contains the
-/// alias outliving `'a` (though, I haven't tried really to come up with an
-/// example here).
-///
-/// So instead, we have a simple heuristic: if we have a trait bound that
-/// mentions both the param we're asking about and *any* non-static lifetime,
-/// then conservatively treat the param as live. We're actually a bit more
-/// conservative, see below comments for details.
-///
-/// For a region argument, a clause can likewise hide an impl's outlives bound.
-/// Match regions it is known to outlive as well, so `'a: 'm` followed by
-/// `(): Shorten<'m, 'b>` also keeps `'a` live.
-fn arg_can_outlive_non_static_region<'tcx>(
+/// Full specialization can select a more specific associated type even when no
+/// relevant predicate appears here. That limitation is recorded by
+/// `specialized-projection-unmentioned-type-arg.rs`.
+fn arg_may_participate_in_impl_outlives<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     env: &OutlivesEnvironment<'tcx>,
     arg: ty::GenericArg<'tcx>,
 ) -> bool {
-    // This is for case (3)
+    // Approximate impl-only relationships from the clauses visible here.
     param_env.caller_bounds().all_clauses(tcx).iter().any(|clause| {
         match clause.kind().skip_binder() {
-        // The param outliving the pertinent alias bounds is already handled
-        // elsewhere more precisely and anything else is not relevant.
+        // An exact `T: 'r` needs a target; it is handled after this scan.
         ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, _))
             if Some(subject) == arg.as_type() => false,
         // Known region outlives relationships are handled separately.
@@ -190,17 +130,17 @@ fn arg_can_outlive_non_static_region<'tcx>(
         ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, bound)) => {
             // Match the argument only in the subject: `I: 'i` does not mean
             // that `'i` itself can occur in the opaque's hidden type.
-            has_arg_and_non_static_region(tcx, env, arg, subject, Some(bound))
+            value_connects_arg_to_non_static_region(tcx, env, arg, subject, Some(bound))
         }
         ty::ClauseKind::Trait(_)
         // Something like `<T as Trait>::Assoc<'a> = &'a u8`
         | ty::ClauseKind::Projection(_)
-        // Needed to support const params
+        // A const's declared type can mention type and region parameters.
         | ty::ClauseKind::ConstArgHasType(..)
         | ty::ClauseKind::WellFormed(..)
         | ty::ClauseKind::ConstEvaluatable(..)
         | ty::ClauseKind::HostEffect(..) => {
-            has_arg_and_non_static_region(tcx, env, arg, clause, None)
+            value_connects_arg_to_non_static_region(tcx, env, arg, clause, None)
         }
         ty::ClauseKind::UnstableFeature(..) => false,
     }
@@ -208,7 +148,7 @@ fn arg_can_outlive_non_static_region<'tcx>(
         // This covers cases (1) and (2) generally; while the above
         // `TypeOutlives` arm covers ParamEnv clauses, it does not cover WF tys
         if let GenericKind::Alias(alias) = bound.0 {
-            has_arg_and_non_static_region(tcx, env, arg, alias, Some(bound.1))
+            value_connects_arg_to_non_static_region(tcx, env, arg, alias, Some(bound.1))
         } else {
             false
         }
@@ -244,7 +184,7 @@ pub(crate) fn captured_args_for_opaque<'tcx>(
     let generics = tcx.generics_of(def_id);
     let mut live_args = DenseBitSet::new_empty(self_identity_args.len());
 
-    // All of the opaques *own* args are obviously captured, so mark them as live
+    // All of the opaque's own arguments are captured.
     live_args.insert_range((generics.parent_count as u32)..(self_identity_args.len() as u32));
 
     for opaque_arg in self_identity_args.iter().skip(generics.parent_count) {
@@ -281,10 +221,11 @@ pub(crate) fn captured_args_for_opaque<'tcx>(
     live_args
 }
 
-/// For a given alias type, this returns the set of indices into the identity generic args that
-/// are relevant for liveness, that can be inferred from outlives bounds on the
-/// alias itself, and the explicit and implicit outlives clauses of the alias.
-/// Callers should use the indices with the concrete args of the alias.
+/// Returns the identity arguments whose concrete regions must be visited for
+/// liveness, based on the alias's declared outlives bounds.
+///
+/// For soundness, this must include every argument whose regions could occur
+/// in any legal underlying type consistent with the alias's public declaration.
 ///
 /// There are three cases to consider:
 /// 1. If there are *no* outlives bounds, then all args are potentially live.
@@ -352,29 +293,16 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
         };
     }
 
-    // If any of the outlives bounds are `'static`, then we know the alias
-    // doesn't capture *any* regions, so we can skip visiting any regions at all.
-    //
-    // I was originally a bit concerned about something like `'a: 'static`, and
-    // whether or not we need to mark `'a` as live. I don't think that we do.
-    //
-    // To dig in a bit: Think about the function using this alias. For the alias
-    // to be well-formed, then it must be proven that the arg (`'a` in this case)
-    // outlives `'static`. Well, if that is proven *once*, then it must be true
-    // across the entire function (because `'static` is free).
-    //
-    // I think this similarly applies to any other free region, like `'a: 'b`
-    // where `'b` is *also* free. Though, we of course can't know *here* which
-    // regions are going to be instantiated with free regions.
+    // A type that outlives `'static` cannot contain a loan. Any argument needed
+    // to prove this bound must already be valid for the entire body because
+    // `'static` is free, so it does not create a liveness requirement.
     if outlives_regions.contains(&tcx.lifetimes.re_static) {
         tracing::debug!("alias has a 'static outlives bound, so skipping visiting any regions");
         return DenseBitSet::new_empty(self_identity_args.len());
     }
 
-    // Okay, so we know we have some outlives bounds, and that none of them are `'static`.
-    // Now, we need to find all other potentially-live args, those that outlive
-    // an outlives-bound region. `args_known_to_outlive_alias_params` does this
-    // for us, and in the case of opaques only includes *captured* regions, too.
+    // Retain the arguments conservatively treated as able to outlive every
+    // non-static bound. For opaques, only captured lifetime arguments are candidates.
 
     let args_known_to_outlive = tcx.args_known_to_outlive_alias_params(def_id);
     tracing::debug!(?args_known_to_outlive);
@@ -395,12 +323,12 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
     live_args
 }
 
-/// For each region param of this alias compute the indices of the identity args
-/// that are known to outlive it, given only the alias's declared where-clauses.
+/// For each region parameter, conservatively compute the identity arguments
+/// that may occur in an underlying type which outlives that region.
 ///
-/// Note: for opaques (including synthetic associated types from RPITITs),
-/// the outlives relationships are identified in the context of the *parent*,
-/// since bounds and well-formed types are not lowered.
+/// For opaques, including RPITIT synthetic associated types, this is computed
+/// in the parent's environment because the opaque's lowered environment does
+/// not contain the parent's implied bounds.
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
 pub(crate) fn args_known_to_outlive_alias_params<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -422,7 +350,7 @@ pub(crate) fn args_known_to_outlive_alias_params<'tcx>(
 }
 
 /// For each *captured* region of this alias, compute the *captured* identity
-/// args that are known to outlive it, given the definition of the opaque type
+/// arguments that may outlive it, given the definition of the opaque type
 /// in the the *parent* context.
 ///
 /// Some examples:
@@ -472,19 +400,13 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     let parent_param_env = tcx.param_env(parent_def_id);
     tracing::debug!(?parent_param_env);
 
-    // Map the outlives regions to the parent regions.
+    // Map each captured opaque lifetime to its parent lifetime.
     // If we have `fn foo<'a>() -> impl Sized + 'a`, then this gets lowered as
     // ```ignore (illustrative)
     // opaque foo_opaque<'a0>: Sized + 'a0;
     // fn foo<'a>() -> foo::<'a>::foo_opaque<'a> { ... }
     // ```
-    // This maps `'a0` to `'a`, because that is what will be used to get the
-    // explicit and implied outlives relations.
-    //
-    // I suppose, an alternative way to do this would be iterate through all the
-    // *parent* regions and then find those that are captured. This should be
-    // basically equivalent (except with the added frustration of needing to
-    // build a `Region` from the opaque region's `LocalDefId`).
+    // The parent lifetime is used to query explicit and implied relationships.
     let generics = tcx.generics_of(def_id);
     let mut parent_outlives_regions = Vec::with_capacity(generics.own_params.len());
     for (opaque_arg_idx, opaque_arg) in
@@ -510,16 +432,21 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     let outlives_env =
         OutlivesEnvironment::new(&infcx, def_id, parent_param_env, wf_tys.iter().copied());
 
-    let parent_region_can_outlive_non_static_region: Vec<_> = parent_outlives_regions
+    let parent_region_may_have_impl_outlives: Vec<_> = parent_outlives_regions
         .iter()
         .map(|&(region, _)| {
-            arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, region.into())
+            arg_may_participate_in_impl_outlives(
+                tcx,
+                parent_param_env,
+                &outlives_env,
+                region.into(),
+            )
         })
         .collect();
 
     let indirectly_outlived_parent_regions: Vec<_> = parent_outlives_regions
         .iter()
-        .zip(&parent_region_can_outlive_non_static_region)
+        .zip(&parent_region_may_have_impl_outlives)
         .filter_map(|(&(region, _), &can_outlive)| can_outlive.then_some(region))
         .collect();
 
@@ -529,14 +456,18 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
         .enumerate()
         .filter_map(|(idx, arg)| {
             let ty = arg.as_type()?;
-            let can_outlive_non_static_region =
-                arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, ty.into())
-                    || indirectly_outlived_parent_regions.iter().any(|&region| {
-                        // `T: 'm` is handled precisely by `param_known_to_outlive`,
-                        // but must also compose with an impl-only `'m: 'b`.
-                        param_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty, region)
-                    });
-            Some((idx, ty, can_outlive_non_static_region))
+            let may_have_impl_outlives =
+                arg_may_participate_in_impl_outlives(
+                    tcx,
+                    parent_param_env,
+                    &outlives_env,
+                    ty.into(),
+                ) || indirectly_outlived_parent_regions.iter().any(|&region| {
+                    // `T: 'm` is handled precisely by `param_known_to_outlive`,
+                    // but must also compose with an impl-only `'m: 'b`.
+                    param_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty, region)
+                });
+            Some((idx, ty, may_have_impl_outlives))
         })
         .collect();
 
@@ -547,8 +478,8 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     // In both cases, we need to check known outlives for the *parent* region, because that's where the param_env and wf_tys are.
     for (parent_outlived_region, opaque_outlived_arg_idx) in parent_outlives_regions.iter() {
         let mut opaque_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
-        for &(parent_outlived_arg_idx, ty, can_outlive_non_static_region) in &parent_type_params {
-            let type_outlives = can_outlive_non_static_region
+        for &(parent_outlived_arg_idx, ty, may_have_impl_outlives) in &parent_type_params {
+            let type_outlives = may_have_impl_outlives
                 || param_known_to_outlive(
                     tcx,
                     def_id,
@@ -565,10 +496,10 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
             opaque_outlives_args.insert(parent_outlived_arg_idx as u32);
         }
 
-        for (&(parent_outlives_region, opaque_arg_idx), &can_outlive_non_static_region) in
-            parent_outlives_regions.iter().zip(&parent_region_can_outlive_non_static_region)
+        for (&(parent_outlives_region, opaque_arg_idx), &may_have_impl_outlives) in
+            parent_outlives_regions.iter().zip(&parent_region_may_have_impl_outlives)
         {
-            let region_outlives = can_outlive_non_static_region
+            let region_outlives = may_have_impl_outlives
                 || parent_outlives_region == *parent_outlived_region
                 || region_known_to_outlive(
                     tcx,
@@ -618,7 +549,7 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
     // Compute this once per argument, rather than once per outlived region.
     let mut indirect_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
     for (idx, arg) in self_identity_args.iter().enumerate() {
-        if arg_can_outlive_non_static_region(tcx, param_env, &outlives_env, arg) {
+        if arg_may_participate_in_impl_outlives(tcx, param_env, &outlives_env, arg) {
             indirect_outlives_args.insert(idx as u32);
         }
     }
@@ -668,40 +599,10 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
     result
 }
 
-/// For a param-env clause `for<'v..> <T as Trait>::Assoc<..>: 'bound` that
-/// applies to `ty` (an alias with `alias_def_id`), returns the set of indices into the
-/// identity args that the underlying type could possibly capture, as restricted by this clause.
-///
-/// As an example, let's imagine we had the following associated type definition:
-/// ```ignore (illustrative)
-/// type Assoc<'a, 'b, 'c: 'a> = (&'a &'c (), &'b ());
-/// ```
-///
-/// the following clause:
-/// ```ignore (illustrative)
-/// for<'x, 'y> T::Assoc<'x, 'x, 'y>: 'x
-/// ```
-///
-/// We know from the clause alone that *given some substitution of `T:Assoc`*,
-/// we know that it can capture either the first or the second region. However,
-/// the bounds on the associated type itself additionally imply that the
-/// third region can *also* be captured, because it outlives the first.
-///
-/// Now, let's assume we had this clause:
-/// ```ignore (illustrative)
-/// for<'x, 'y> T::Assoc<'x, 'y, 'x>: 'x
-/// ```
-///
-/// Here, we know that `'a` and `'c` could be captured, but there is no outlives
-/// relationship to `'b` for either of those, so the underlying type can't
-/// capture any arg containing `'b`.
-///
-/// Note: because higher-ranked bounds don't have implications, there will be
-/// some cases (like `for<'x, 'y, 'z> T::Assoc<'x, 'y, 'z>: 'x`) that won't
-/// be satisfiable today, but the logic here should hold whenever there *is*.
-///
-/// Returns a filled set if the clause doesn't apply to `ty` or gives us no
-/// information.
+/// Restricts the live identity arguments using an applicable caller outlives
+/// clause. A bound placeholder can constrain the positions where it occurs in
+/// the alias; nested placeholders and free outlived regions give no safe
+/// restriction. Returning a filled set therefore means "no restriction".
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
 fn live_args_for_outlives_clause<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -712,8 +613,8 @@ fn live_args_for_outlives_clause<'tcx>(
     let clause_identity_args = ty::GenericArgs::identity_for_item(tcx, alias_def_id);
     let no_restriction = || DenseBitSet::new_filled(clause_identity_args.len());
 
-    // N.B. it's okay to skip the binder here (and in the rest of the function),
-    // because all variables under binders do not escape
+    // Bound variables are only used to identify identity argument positions;
+    // they are never reported as live regions.
     let ty::Alias(_, ty::AliasTy { kind: clause_alias_kind, args: clause_args, .. }) =
         *outlives.skip_binder().0.kind()
     else {
@@ -743,15 +644,12 @@ fn live_args_for_outlives_clause<'tcx>(
 
     let outlived_region = outlives.skip_binder().1;
     match outlived_region.kind() {
-        // The underlying type must outlive `'static`, so it can't capture any of the args at all.
-        //
-        // Of course, you may ask: "what if the function has a `'a: 'static` bound?" See the corresponding
-        // comment in `live_args_for_alias_from_outlives_bounds` for why we don't need to worry about that.
+        // The underlying type must outlive `'static`, so it cannot capture a loan.
         ty::ReStatic => DenseBitSet::new_empty(clause_identity_args.len()),
         ty::ReBound(_, br) => {
             // The bound is one of the clause's higher-ranked vars. Find the arg
             // positions it occupies, then (at the alias's identity level) find
-            // all args that are known to outlive one of those positions given
+            // all args treated as able to outlive one of those positions given
             // the alias's declared bounds -- only those can be captured by the
             // underlying type.
             let mut outlived_regions = Vec::new();
@@ -779,13 +677,12 @@ fn live_args_for_outlives_clause<'tcx>(
                 }
             }
             if outlived_regions.is_empty() {
-                // The bound var doesn't appear in the args at all, so the clause
-                // requires the underlying type to outlive *every* region, which
-                // is equivalent to a `'static` bound.
+                // With no occurrence in the alias, the bound ranges over every
+                // region, which is equivalent to a `'static` bound.
                 return DenseBitSet::new_empty(clause_identity_args.len());
             }
 
-            // The underlying type can capture any arg that's known to outlive one
+            // The underlying type can capture any arg treated as able to outlive one
             // of the bound var's positions (they're all instantiated to the same
             // region at any use site this clause applies to).
             let args_known_to_outlive = tcx.args_known_to_outlive_alias_params(alias_def_id);
@@ -800,27 +697,8 @@ fn live_args_for_outlives_clause<'tcx>(
             }
             capturable_args
         }
-        // A free region (e.g. `for<a> T::Assoc<'a, 'x>: 'x`, where `'x` is free).
-        // This is effectively the same as `for<'a, 'b> T::Assoc<'a, 'b>: 'b`,
-        // but that only is sound if we either know that the second substituted
-        // lifetime equals `'x` or if we *constrain* that lifetime to be `'x`.
-        //
-        // In either case, something like this doesn't work today:
-        // ```ignore (illustrative)
-        //  fn bar<'a, 'b>(a: &'a mut (), b: &'b ()) -> <Foo as MyTrait>::Assoc<'a, 'b> { b }
-        //  fn foo<'x>()
-        //  where
-        //      for<'h> <Foo as MyTrait>::Assoc<'h, 'x>: 'x,
-        //  {
-        //      let a = &mut ();
-        //      let b: &'x () = &();
-        //      let val1 = rpit(a, b);
-        //      let val2 = rpit(a, b);
-        //      drop(val1);
-        //      drop(val32);
-        //  }
-        // ```
-        // So, we conservatively treat this as giving no restriction on which args can be captured.
+        // A free outlived region does not identify an alias argument position.
+        // Conservatively impose no restriction.
         ty::ReEarlyParam(..) => no_restriction(),
         // Don't know that we actually hit this (maybe `ReError`), go ahead and be conservative.
         _ => no_restriction(),
@@ -866,15 +744,6 @@ where
         }
 
         match *ty.kind() {
-            // We can prove that an alias is live two ways:
-            // 1. All the components are live.
-            // 2. There is a known outlives bound or where-clause, and that
-            //    region is live.
-            //
-            // We search through the item bounds and where clauses for
-            // either `'static` or a unique outlives region, and if one is
-            // found, we just need to prove that that region is still live.
-            // If one is not found, then we continue to walk through the alias.
             ty::Alias(_, ty::AliasTy { kind, args, .. }) => {
                 let tcx = self.tcx;
                 let param_env = self.param_env;
@@ -893,24 +762,15 @@ where
                     return;
                 }
 
-                // We can sometimes encounter cyclic alias types (see the `alias-liveness/cycles.rs` test).
-                // If we've already seen this alias, then we just pessimistically mark all free regions as
-                // live. We could actually be more precise here: for example, we could only mark the args
-                // that are *different* as live, but this is the conservative approach.
+                // A cycle with different arguments provides no safe restriction.
                 if self.stack.contains(&def_id) {
                     tcx.for_each_free_region(&args, |outer_r| self.visit_region(outer_r));
                     return;
                 }
                 self.stack.push(def_id);
 
-                // For aliases other than opaques, we have to consider two
-                // sources of information to identity potentially-live args:
-                // - Bounds on alias item itself
-                // - Outlives clauses on the current function that apply to the alias
-                //
-                // Each source of information *restricts* the set of potentially-live
-                // args independently: only the args that can be live for *every*
-                // source of information can be actually live, so we take the intersection.
+                // Every applicable outlives bound constrains the underlying
+                // type, so only arguments allowed by all bounds remain live.
                 let mut capturable = tcx.live_args_for_alias_from_outlives_bounds(kind).clone();
 
                 for clause in param_env.caller_bounds().non_trait_clauses().iter() {

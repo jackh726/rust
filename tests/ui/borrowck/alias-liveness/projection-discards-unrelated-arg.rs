@@ -1,9 +1,9 @@
 //@ known-bug: unknown
 //@ edition: 2024
 
-// This is another test for precision of lifetimes held within an associated
-// type. Here, because we are returning an associated type directly, we can
-// enumerate the bounds to discard unrelated lifetimes.
+// Precision goal: the associated type has no declared reason to retain `'c`,
+// so a solver without conditional associated types could discard it. The
+// definition-level liveness query cannot currently prove that restriction.
 
 #![forbid(unsafe_code)]
 
