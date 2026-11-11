@@ -45,20 +45,26 @@ fn param_known_to_outlive<'tcx>(
     })
 }
 
-fn has_param_and_non_static_region<'tcx>(
-    param: Ty<'tcx>,
+// `bound` contributes an outlives region without being searched for `arg`.
+fn has_arg_and_non_static_region<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    env: &OutlivesEnvironment<'tcx>,
+    arg: ty::GenericArg<'tcx>,
     value: impl TypeVisitable<TyCtxt<'tcx>>,
+    bound: Option<ty::Region<'tcx>>,
 ) -> bool {
-    struct ContainsParamAndRegionVisitor<'tcx> {
-        param: Ty<'tcx>,
-        contains_param: bool,
+    struct ContainsArgAndRegionVisitor<'a, 'tcx> {
+        tcx: TyCtxt<'tcx>,
+        env: &'a OutlivesEnvironment<'tcx>,
+        arg: ty::GenericArg<'tcx>,
+        contains_arg: bool,
         has_region: bool,
     }
 
-    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ContainsParamAndRegionVisitor<'tcx> {
+    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ContainsArgAndRegionVisitor<'_, 'tcx> {
         fn visit_ty(&mut self, t: Ty<'tcx>) {
-            if t == self.param {
-                self.contains_param = true;
+            if Some(t) == self.arg.as_type() {
+                self.contains_arg = true;
             }
             t.super_visit_with(self);
         }
@@ -67,13 +73,25 @@ fn has_param_and_non_static_region<'tcx>(
             if !matches!(r.kind(), ty::ReStatic) {
                 self.has_region = true;
             }
+            if let Some(source) = self.arg.as_region()
+                && source.is_free()
+                && r.is_free()
+                && self.env.free_region_map().sub_free_regions(self.tcx, r, source)
+            {
+                self.contains_arg = true;
+            }
         }
     }
 
-    let mut visitor =
-        ContainsParamAndRegionVisitor { param, contains_param: false, has_region: false };
+    let mut visitor = ContainsArgAndRegionVisitor {
+        tcx,
+        env,
+        arg,
+        contains_arg: false,
+        has_region: bound.is_some_and(|r| r != tcx.lifetimes.re_static),
+    };
     value.visit_with(&mut visitor);
-    visitor.contains_param && visitor.has_region
+    visitor.contains_arg && visitor.has_region
 }
 
 /// Okay, so the logic here is pretty "oh, I guess that works". The core idea is
@@ -148,40 +166,49 @@ fn has_param_and_non_static_region<'tcx>(
 /// mentions both the param we're asking about and *any* non-static lifetime,
 /// then conservatively treat the param as live. We're actually a bit more
 /// conservative, see below comments for details.
-fn param_projection_can_outlive_non_static_region<'tcx>(
+///
+/// For a region argument, a clause can likewise hide an impl's outlives bound.
+/// Match regions it is known to outlive as well, so `'a: 'm` followed by
+/// `(): Shorten<'m, 'b>` also keeps `'a` live.
+fn arg_can_outlive_non_static_region<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     env: &OutlivesEnvironment<'tcx>,
-    ty: Ty<'tcx>,
+    arg: ty::GenericArg<'tcx>,
 ) -> bool {
     // This is for case (3)
     param_env.caller_bounds().all_clauses(tcx).iter().any(|clause| {
         match clause.kind().skip_binder() {
         // The param outliving the pertinent alias bounds is already handled
         // elsewhere more precisely and anything else is not relevant.
-        ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, _)) if subject == ty => false,
-        // No param here
+        ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, _))
+            if Some(subject) == arg.as_type() => false,
+        // Known region outlives relationships are handled separately.
         ty::ClauseKind::RegionOutlives(_) => false,
         // Covers things like `Struct<T::Assoc>: 'a` (though, this would get
         // covered by the `OutlivesEnvironment` below)
-        ty::ClauseKind::TypeOutlives(_)
-        | ty::ClauseKind::Trait(_)
+        ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, bound)) => {
+            // Match the argument only in the subject: `I: 'i` does not mean
+            // that `'i` itself can occur in the opaque's hidden type.
+            has_arg_and_non_static_region(tcx, env, arg, subject, Some(bound))
+        }
+        ty::ClauseKind::Trait(_)
         // Something like `<T as Trait>::Assoc<'a> = &'a u8`
         | ty::ClauseKind::Projection(_)
         // Needed to support const params
-        | ty::ClauseKind::ConstArgHasType(..) => has_param_and_non_static_region(ty, clause),
-
-        // In practice, I don't think these really come up, but we can be conservative.
-        ty::ClauseKind::WellFormed(..)
+        | ty::ClauseKind::ConstArgHasType(..)
+        | ty::ClauseKind::WellFormed(..)
         | ty::ClauseKind::ConstEvaluatable(..)
-        | ty::ClauseKind::HostEffect(..)
-        | ty::ClauseKind::UnstableFeature(..) => true,
+        | ty::ClauseKind::HostEffect(..) => {
+            has_arg_and_non_static_region(tcx, env, arg, clause, None)
+        }
+        ty::ClauseKind::UnstableFeature(..) => false,
     }
     }) || env.region_bound_pairs().iter().any(|bound| {
         // This covers cases (1) and (2) generally; while the above
         // `TypeOutlives` arm covers ParamEnv clauses, it does not cover WF tys
         if let GenericKind::Alias(alias) = bound.0 {
-            has_param_and_non_static_region(ty, (alias, bound.1))
+            has_arg_and_non_static_region(tcx, env, arg, alias, Some(bound.1))
         } else {
             false
         }
@@ -483,19 +510,22 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     let outlives_env =
         OutlivesEnvironment::new(&infcx, def_id, parent_param_env, wf_tys.iter().copied());
 
-    // Compute once since these don't depend on the outlives regions
+    // Compute once since these don't depend on the outlives regions.
     let parent_type_params: Vec<_> = self_identity_args.as_slice()[..generics.parent_count]
         .iter()
         .enumerate()
         .filter_map(|(idx, arg)| {
             let ty = arg.as_type()?;
-            let projection_can_outlive = param_projection_can_outlive_non_static_region(
-                tcx,
-                parent_param_env,
-                &outlives_env,
-                ty,
-            );
+            let projection_can_outlive =
+                arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, ty.into());
             Some((idx, ty, projection_can_outlive))
+        })
+        .collect();
+
+    let parent_region_can_outlive_non_static_region: Vec<_> = parent_outlives_regions
+        .iter()
+        .map(|&(region, _)| {
+            arg_can_outlive_non_static_region(tcx, parent_param_env, &outlives_env, region.into())
         })
         .collect();
 
@@ -524,8 +554,11 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
             opaque_outlives_args.insert(parent_outlived_arg_idx as u32);
         }
 
-        for &(parent_outlives_region, opaque_arg_idx) in parent_outlives_regions.iter() {
-            let region_outlives = parent_outlives_region == *parent_outlived_region
+        for (&(parent_outlives_region, opaque_arg_idx), &can_outlive_non_static_region) in
+            parent_outlives_regions.iter().zip(&parent_region_can_outlive_non_static_region)
+        {
+            let region_outlives = can_outlive_non_static_region
+                || parent_outlives_region == *parent_outlived_region
                 || region_known_to_outlive(
                     tcx,
                     def_id,
@@ -571,13 +604,11 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
     extend_wf_tys(&mut wf_tys);
     let outlives_env = OutlivesEnvironment::new(&infcx, def_id, param_env, wf_tys.iter().copied());
 
-    // Compute this once per type parameter, rather than once per region.
-    let mut projection_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
+    // Compute this once per argument, rather than once per outlived region.
+    let mut indirect_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
     for (idx, arg) in self_identity_args.iter().enumerate() {
-        if let Some(ty) = arg.as_type()
-            && param_projection_can_outlive_non_static_region(tcx, param_env, &outlives_env, ty)
-        {
-            projection_outlives_args.insert(idx as u32);
+        if arg_can_outlive_non_static_region(tcx, param_env, &outlives_env, arg) {
+            indirect_outlives_args.insert(idx as u32);
         }
     }
 
@@ -588,23 +619,16 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
         };
         let mut outliving_args = DenseBitSet::new_empty(self_identity_args.len());
         for (arg_idx, arg) in self_identity_args.iter().enumerate() {
-            let outlives = match arg.kind() {
-                ty::GenericArgKind::Lifetime(r) => {
-                    region_known_to_outlive(tcx, def_id, param_env, &wf_tys, r, outlived_region)
-                }
-                ty::GenericArgKind::Type(t) => {
-                    projection_outlives_args.contains(arg_idx as u32)
-                        || param_known_to_outlive(
-                            tcx,
-                            def_id,
-                            param_env,
-                            &wf_tys,
-                            t,
-                            outlived_region,
-                        )
-                }
-                ty::GenericArgKind::Const(_) => false,
-            };
+            let outlives = indirect_outlives_args.contains(arg_idx as u32)
+                || match arg.kind() {
+                    ty::GenericArgKind::Lifetime(r) => {
+                        region_known_to_outlive(tcx, def_id, param_env, &wf_tys, r, outlived_region)
+                    }
+                    ty::GenericArgKind::Type(t) => {
+                        param_known_to_outlive(tcx, def_id, param_env, &wf_tys, t, outlived_region)
+                    }
+                    ty::GenericArgKind::Const(_) => false,
+                };
             if outlives {
                 outliving_args.insert(arg_idx as u32);
             }

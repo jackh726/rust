@@ -124,4 +124,24 @@ mod static_region_in_trait_bound {
     }
 }
 
+// A predicate relating other lifetimes does not make the input borrow live.
+mod unrelated_lifetime_predicate {
+    trait Pair<'a, 'b> {}
+    impl<'a, 'b> Pair<'a, 'b> for () {}
+
+    fn first_to_local<'i, 'o, 'a, 'b, I>(iter: I) -> impl Iterator<Item = u32> + 'o
+    where
+        I: Iterator<Item = u32> + 'i,
+        (): Pair<'a, 'b>,
+    {
+        iter.collect::<Vec<_>>().into_iter()
+    }
+
+    pub fn through_a_slice(columns: &mut [u32]) {
+        for x in first_to_local(columns.iter_mut().map(|c| *c)) {
+            columns[0] = x;
+        }
+    }
+}
+
 fn main() {}

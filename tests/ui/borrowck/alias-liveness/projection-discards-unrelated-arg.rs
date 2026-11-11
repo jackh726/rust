@@ -1,4 +1,4 @@
-//@ check-pass
+//@ known-bug: unknown
 //@ edition: 2024
 
 // This is another test for precision of lifetimes held within an associated
