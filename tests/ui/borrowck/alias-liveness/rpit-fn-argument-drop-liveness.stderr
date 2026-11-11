@@ -5,6 +5,7 @@ LL |     let x = 10u32;
    |         - binding `x` declared here
 LL |     let _ = call(&x);
    |                  ^^ borrowed value does not live long enough
+LL |
 LL | }
    | -
    | |
@@ -14,12 +15,13 @@ LL | }
    = note: values in a scope are dropped in the opposite order they are defined
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/rpit-fn-argument-drop-liveness.rs:25:22
+  --> $DIR/rpit-fn-argument-drop-liveness.rs:26:22
    |
 LL |     let x = 10u32;
    |         - binding `x` declared here
 LL |     let _ = (call.0)(&x);
    |                      ^^ borrowed value does not live long enough
+LL |
 LL | }
    | -
    | |
@@ -29,12 +31,13 @@ LL | }
    = note: values in a scope are dropped in the opposite order they are defined
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/rpit-fn-argument-drop-liveness.rs:31:21
+  --> $DIR/rpit-fn-argument-drop-liveness.rs:33:21
    |
 LL |     let x = 10u32;
    |         - binding `x` declared here
 LL |     let _ = call[0](&x);
    |                     ^^ borrowed value does not live long enough
+LL |
 LL | }
    | -
    | |

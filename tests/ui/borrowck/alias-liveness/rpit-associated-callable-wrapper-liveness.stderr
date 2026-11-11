@@ -6,6 +6,7 @@ LL |     (before.owned_fn)(owned);
 LL |     let after = after.into_inner().into_parts();
 LL |     (after.owned_fn)(owned);
    |                      ^^^^^ second mutable borrow occurs here
+LL |
 LL | }
    | - first borrow might be used here, when `before` is dropped and runs the destructor for type `Parts<<impl Inner<'_> as Inner<'_>>::OwnedFn>`
 

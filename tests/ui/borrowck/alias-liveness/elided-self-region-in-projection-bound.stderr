@@ -9,6 +9,7 @@ LL |       for (_i, _a) in checker.enumerate() {
    | |
 LL | |         checker.bump();
    | |         ^^^^^^^^^^^^^^ mutable borrow occurs here
+LL | |
 LL | |     }
    | |_____- this for loop borrows `checker` immutably, preventing mutation within its body
    |

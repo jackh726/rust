@@ -5,6 +5,7 @@ LL |         let v: Vec<u8> = vec![42];
    |             - binding `v` declared here
 LL |         escaped = run::<'_, '_, '_, T>(&v[0]);
    |                                         ^ borrowed value does not live long enough
+LL |
 LL |     }
    |     - `v` dropped here while still borrowed
 LL |     let reused: Vec<u8> = vec![7];

@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ known-bug: unknown
+//@ check-fail
 
 // From crater regression in #161154 in `ty_python_semantic`.
 
@@ -35,6 +35,7 @@ fn elided() {
     let mut checker = Checker { args: &args, count: 0 };
     for (_i, _a) in checker.enumerate() {
         checker.bump();
+        //~^ ERROR cannot borrow `checker` as mutable because it is also borrowed as immutable
     }
 }
 

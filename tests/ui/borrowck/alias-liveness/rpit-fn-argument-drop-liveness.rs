@@ -1,5 +1,5 @@
 //@ edition: 2024
-//@ known-bug: unknown
+//@ check-fail
 
 // Minimized from verty's `ErrorSink::wrap_fn_1ary` crater regression in #161154.
 
@@ -17,18 +17,21 @@ fn dropped_after_the_borrow() {
     let call = wrap(lit);
     let x = 10u32;
     let _ = call(&x);
+    //~^ ERROR `x` does not live long enough
 }
 
 fn wrapped_in_tuple() {
     let call = (wrap(lit),);
     let x = 10u32;
     let _ = (call.0)(&x);
+    //~^ ERROR `x` does not live long enough
 }
 
 fn wrapped_in_vec() {
     let call = vec![wrap(lit)];
     let x = 10u32;
     let _ = call[0](&x);
+    //~^ ERROR `x` does not live long enough
 }
 
 fn main() {}

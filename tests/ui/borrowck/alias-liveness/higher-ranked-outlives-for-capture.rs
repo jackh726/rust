@@ -1,4 +1,4 @@
-//@ known-bug: #42940
+//@ check-fail
 
 trait Captures<'a> {}
 impl<T> Captures<'_> for T {}
@@ -11,6 +11,7 @@ fn test<'o>(v: &'o Vec<i32>) -> impl Captures<'o> + for<'a> Outlives<'a> {}
 
 fn statik() -> impl Sized {
     test(&vec![])
+    //~^ ERROR temporary value dropped while borrowed
 }
 
 fn main() {}
