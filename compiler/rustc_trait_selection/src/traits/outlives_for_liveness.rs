@@ -45,6 +45,27 @@ fn param_known_to_outlive<'tcx>(
     })
 }
 
+/// Given the declared relationships, can we prove that `arg` outlives
+/// `region`? Const arguments cannot carry a loan.
+fn arg_known_to_outlive<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    id: LocalDefId,
+    param_env: ty::ParamEnv<'tcx>,
+    wf_tys: &FxIndexSet<Ty<'tcx>>,
+    arg: ty::GenericArg<'tcx>,
+    region: ty::Region<'tcx>,
+) -> bool {
+    match arg.kind() {
+        ty::GenericArgKind::Lifetime(r) => {
+            r == region || region_known_to_outlive(tcx, id, param_env, wf_tys, r, region)
+        }
+        ty::GenericArgKind::Type(t) => {
+            param_known_to_outlive(tcx, id, param_env, wf_tys, t, region)
+        }
+        ty::GenericArgKind::Const(_) => false,
+    }
+}
+
 // `bound` contributes an outlives region without being searched for `arg`.
 fn value_connects_arg_to_non_static_region<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -450,26 +471,41 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
         .filter_map(|(&(region, _), &can_outlive)| can_outlive.then_some(region))
         .collect();
 
-    // Compute once since these don't depend on the outlives regions.
+    // Compute the bound-independent set once. It is included for every
+    // outlived region below.
+    let mut impl_sensitive_args = DenseBitSet::new_empty(self_identity_args.len());
     let parent_type_params: Vec<_> = self_identity_args.as_slice()[..generics.parent_count]
         .iter()
         .enumerate()
         .filter_map(|(idx, arg)| {
             let ty = arg.as_type()?;
-            let may_have_impl_outlives =
-                arg_may_participate_in_impl_outlives(
-                    tcx,
-                    parent_param_env,
-                    &outlives_env,
-                    ty.into(),
-                ) || indirectly_outlived_parent_regions.iter().any(|&region| {
-                    // `T: 'm` is handled precisely by `param_known_to_outlive`,
-                    // but must also compose with an impl-only `'m: 'b`.
-                    param_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty, region)
-                });
-            Some((idx, ty, may_have_impl_outlives))
+            let impl_sensitive = arg_may_participate_in_impl_outlives(
+                tcx,
+                parent_param_env,
+                &outlives_env,
+                ty.into(),
+            ) || indirectly_outlived_parent_regions.iter().any(|&region| {
+                // `T: 'm` is handled precisely by `param_known_to_outlive`,
+                // but must also compose with an impl-only `'m: 'b`.
+                param_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty, region)
+            });
+            if impl_sensitive {
+                impl_sensitive_args.insert(idx as u32);
+            }
+            Some((idx, ty))
         })
         .collect();
+    for (&(parent_region, opaque_arg_idx), &impl_sensitive) in
+        parent_outlives_regions.iter().zip(&parent_region_may_have_impl_outlives)
+    {
+        if !impl_sensitive {
+            continue;
+        }
+        impl_sensitive_args.insert(opaque_arg_idx as u32);
+        if let ty::ReEarlyParam(ebr) = parent_region.kind() {
+            impl_sensitive_args.insert(ebr.index);
+        }
+    }
 
     // For every captured region, we want to consider outlived args from two sources:
     // 1) *Types*: These come from *parent* generics (and are not duplicated to the opaque)
@@ -477,49 +513,37 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     //
     // In both cases, we need to check known outlives for the *parent* region, because that's where the param_env and wf_tys are.
     for (parent_outlived_region, opaque_outlived_arg_idx) in parent_outlives_regions.iter() {
-        let mut opaque_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
-        for &(parent_outlived_arg_idx, ty, may_have_impl_outlives) in &parent_type_params {
-            let type_outlives = may_have_impl_outlives
-                || param_known_to_outlive(
-                    tcx,
-                    def_id,
-                    parent_param_env,
-                    &wf_tys,
-                    ty,
-                    *parent_outlived_region,
-                );
-            if !type_outlives {
-                continue;
+        let mut opaque_outlives_args = impl_sensitive_args.clone();
+        for &(parent_outlived_arg_idx, ty) in &parent_type_params {
+            if arg_known_to_outlive(
+                tcx,
+                def_id,
+                parent_param_env,
+                &wf_tys,
+                ty.into(),
+                *parent_outlived_region,
+            ) {
+                // Types aren't captured, so don't need to map to the opaque.
+                opaque_outlives_args.insert(parent_outlived_arg_idx as u32);
             }
-
-            // Types aren't captured, so don't need to map to the opaque
-            opaque_outlives_args.insert(parent_outlived_arg_idx as u32);
         }
 
-        for (&(parent_outlives_region, opaque_arg_idx), &may_have_impl_outlives) in
-            parent_outlives_regions.iter().zip(&parent_region_may_have_impl_outlives)
-        {
-            let region_outlives = may_have_impl_outlives
-                || parent_outlives_region == *parent_outlived_region
-                || region_known_to_outlive(
-                    tcx,
-                    def_id,
-                    parent_param_env,
-                    &wf_tys,
-                    parent_outlives_region,
-                    *parent_outlived_region,
-                );
-            if !region_outlives {
-                continue;
-            }
+        for &(parent_outlives_region, opaque_arg_idx) in &parent_outlives_regions {
+            if arg_known_to_outlive(
+                tcx,
+                def_id,
+                parent_param_env,
+                &wf_tys,
+                parent_outlives_region.into(),
+                *parent_outlived_region,
+            ) {
+                opaque_outlives_args.insert(opaque_arg_idx as u32);
 
-            opaque_outlives_args.insert(opaque_arg_idx as u32);
-
-            // Although the parent arg is bivariant, it still participates in
-            // (invariant) outlives relationships. So, we include it in the set
-            // of outlives args.
-            if let ty::ReEarlyParam(ebr) = parent_outlives_region.kind() {
-                opaque_outlives_args.insert(ebr.index);
+                // Although the parent arg is bivariant, it still participates
+                // in (invariant) outlives relationships.
+                if let ty::ReEarlyParam(ebr) = parent_outlives_region.kind() {
+                    opaque_outlives_args.insert(ebr.index);
+                }
             }
         }
 
@@ -547,10 +571,10 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
     let outlives_env = OutlivesEnvironment::new(&infcx, def_id, param_env, wf_tys.iter().copied());
 
     // Compute this once per argument, rather than once per outlived region.
-    let mut indirect_outlives_args = DenseBitSet::new_empty(self_identity_args.len());
+    let mut impl_sensitive_args = DenseBitSet::new_empty(self_identity_args.len());
     for (idx, arg) in self_identity_args.iter().enumerate() {
         if arg_may_participate_in_impl_outlives(tcx, param_env, &outlives_env, arg) {
-            indirect_outlives_args.insert(idx as u32);
+            impl_sensitive_args.insert(idx as u32);
         }
     }
 
@@ -559,7 +583,7 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
         .enumerate()
         .filter_map(|(idx, arg)| {
             let region = arg.as_region()?;
-            indirect_outlives_args.contains(idx as u32).then_some(region)
+            impl_sensitive_args.contains(idx as u32).then_some(region)
         })
         .collect();
     for (idx, arg) in self_identity_args.iter().enumerate() {
@@ -569,7 +593,7 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
             // but must also compose with an impl-only `'m: 'b`.
             param_known_to_outlive(tcx, def_id, param_env, &wf_tys, ty, region)
         }) {
-            indirect_outlives_args.insert(idx as u32);
+            impl_sensitive_args.insert(idx as u32);
         }
     }
 
@@ -578,19 +602,9 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
         let Some(outlived_region) = outlived_arg.as_region() else {
             continue;
         };
-        let mut outliving_args = DenseBitSet::new_empty(self_identity_args.len());
+        let mut outliving_args = impl_sensitive_args.clone();
         for (arg_idx, arg) in self_identity_args.iter().enumerate() {
-            let outlives = indirect_outlives_args.contains(arg_idx as u32)
-                || match arg.kind() {
-                    ty::GenericArgKind::Lifetime(r) => {
-                        region_known_to_outlive(tcx, def_id, param_env, &wf_tys, r, outlived_region)
-                    }
-                    ty::GenericArgKind::Type(t) => {
-                        param_known_to_outlive(tcx, def_id, param_env, &wf_tys, t, outlived_region)
-                    }
-                    ty::GenericArgKind::Const(_) => false,
-                };
-            if outlives {
+            if arg_known_to_outlive(tcx, def_id, param_env, &wf_tys, arg, outlived_region) {
                 outliving_args.insert(arg_idx as u32);
             }
         }
@@ -705,6 +719,31 @@ fn live_args_for_outlives_clause<'tcx>(
     }
 }
 
+/// Returns the live arguments for this alias occurrence in `param_env`.
+pub fn live_args_for_alias<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    ty: Ty<'tcx>,
+) -> DenseBitSet<u32> {
+    let ty::Alias(_, ty::AliasTy { kind, .. }) = *ty.kind() else {
+        bug!("expected an alias, got `{ty}`")
+    };
+    let def_id = match kind {
+        ty::AliasTyKind::Projection { def_id }
+        | ty::AliasTyKind::Inherent { def_id }
+        | ty::AliasTyKind::Opaque { def_id }
+        | ty::AliasTyKind::Free { def_id } => def_id,
+    };
+    let mut capturable = tcx.live_args_for_alias_from_outlives_bounds(kind).clone();
+    for clause in param_env.caller_bounds().non_trait_clauses().iter() {
+        let Some(outlives) = clause.as_type_outlives_clause() else {
+            continue;
+        };
+        capturable.intersect(&live_args_for_outlives_clause(tcx, def_id, ty, outlives));
+    }
+    capturable
+}
+
 /// Visits free regions in the type that are relevant for liveness computation.
 /// These regions are passed to `OP`.
 ///
@@ -771,14 +810,7 @@ where
 
                 // Every applicable outlives bound constrains the underlying
                 // type, so only arguments allowed by all bounds remain live.
-                let mut capturable = tcx.live_args_for_alias_from_outlives_bounds(kind).clone();
-
-                for clause in param_env.caller_bounds().non_trait_clauses().iter() {
-                    let Some(outlives) = clause.as_type_outlives_clause() else {
-                        continue;
-                    };
-                    capturable.intersect(&live_args_for_outlives_clause(tcx, def_id, ty, outlives));
-                }
+                let capturable = live_args_for_alias(tcx, param_env, ty);
                 tracing::debug!(?capturable);
 
                 // Skip lifetime parameters that are not captured, since they do
