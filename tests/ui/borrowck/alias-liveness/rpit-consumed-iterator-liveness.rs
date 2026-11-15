@@ -144,4 +144,25 @@ mod unrelated_lifetime_predicate {
     }
 }
 
+// A structural type outlives bound does not make the input type live for every
+// output lifetime.
+mod structural_type_outlives {
+    struct Holder<T>(T);
+
+    fn first_to_local<'i, 'o, I>(iter: I, _: &'i ()) -> impl Iterator<Item = u32> + 'o
+    where
+        I: Iterator<Item = u32>,
+        Holder<I>: 'i,
+    {
+        iter.collect::<Vec<_>>().into_iter()
+    }
+
+    pub fn through_a_slice(columns: &mut [u32]) {
+        let token = ();
+        for x in first_to_local(columns.iter_mut().map(|c| *c), &token) {
+            columns[0] = x;
+        }
+    }
+}
+
 fn main() {}

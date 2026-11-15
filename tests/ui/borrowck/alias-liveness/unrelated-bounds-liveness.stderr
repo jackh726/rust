@@ -110,8 +110,32 @@ LL |         let reused: Vec<u8> = vec![7];
 LL |         show(escaped, &reused);
    |              ------- borrow later used here
 
+error[E0597]: `local` does not live long enough
+  --> $DIR/unrelated-bounds-liveness.rs:319:59
+   |
+LL |             let local = 0;
+   |                 ----- binding `local` declared here
+LL |             escaped = outer::<()>(<()>::make(&0, &local), &local);
+   |                                                           ^^^^^^ borrowed value does not live long enough
+LL |
+LL |         }
+   |         - `local` dropped here while still borrowed
+LL |         let reused = vec![7];
+LL |         show(escaped, &reused);
+   |              ------- borrow later used here
+   |
+note: this call may capture more lifetimes than intended, because Rust 2024 has adjusted the `impl Trait` lifetime capture rules
+  --> $DIR/unrelated-bounds-liveness.rs:319:23
+   |
+LL |             escaped = outer::<()>(<()>::make(&0, &local), &local);
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: use the precise capturing `use<...>` syntax to make the captures explicit
+   |
+LL |     fn outer<'x, 'y, 'm, 'b, G: Family>(value: G::Out<'x, 'y>, _: &'y u8) -> impl Debug + 'b + use<'b, G>
+   |                                                                                              ++++++++++++
+
 error[E0597]: `v` does not live long enough
-  --> $DIR/unrelated-bounds-liveness.rs:307:29
+  --> $DIR/unrelated-bounds-liveness.rs:346:29
    |
 LL |             let v: Vec<u8> = vec![42];
    |                 - binding `v` declared here
@@ -124,6 +148,6 @@ LL |         let reused: Vec<u8> = vec![7];
 LL |         show(escaped, &reused);
    |              ------- borrow later used here
 
-error: aborting due to 9 previous errors
+error: aborting due to 10 previous errors
 
 For more information about this error, try `rustc --explain E0597`.

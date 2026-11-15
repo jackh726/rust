@@ -285,6 +285,45 @@ mod one_lifetime {
 
 }
 
+// In principle, an alias outlives fact only needs to retain arguments which
+// are live for that alias. `Out<'x, 'y>: 'x` makes `'y` irrelevant here, but
+// the known-alias scan currently visits every syntactic argument.
+mod dead_gat_arg {
+    use super::{Debug, show};
+
+    trait Family {
+        type Out<'x, 'y>: Debug + 'x;
+        fn make<'x, 'y>(x: &'x u8, y: &'y u8) -> Self::Out<'x, 'y>;
+    }
+
+    impl Family for () {
+        type Out<'x, 'y> = &'x u8;
+
+        fn make<'x, 'y>(x: &'x u8, _: &'y u8) -> Self::Out<'x, 'y> {
+            x
+        }
+    }
+
+    fn outer<'x, 'y, 'm, 'b, G: Family>(value: G::Out<'x, 'y>, _: &'y u8) -> impl Debug + 'b
+    where
+        G::Out<'x, 'y>: 'm,
+        'm: 'b,
+    {
+        value
+    }
+
+    pub fn run() {
+        let escaped;
+        {
+            let local = 0;
+            escaped = outer::<()>(<()>::make(&0, &local), &local);
+            //~^ ERROR `local` does not live long enough
+        }
+        let reused = vec![7];
+        show(escaped, &reused);
+    }
+}
+
 // The function signature for the RPIT can in theory be used to provide implied
 // bounds as to the lifetimes that can be contained within an associated type.
 mod implied_bounds {
@@ -322,5 +361,6 @@ fn main() {
     three_bounds::run();
     static_associated_type::run();
     one_lifetime::run();
+    dead_gat_arg::run();
     implied_bounds::run();
 }

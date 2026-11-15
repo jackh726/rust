@@ -61,6 +61,15 @@ where
     <() as Shorten<'m, 'b>>::shorten(G::make(x))
 }
 
+// A declared region outlives relationship can complete the same chain.
+fn hide_declared<'a, 'm, 'b, G: Family>(x: Rc<RefCell<&'a [i32; 3]>>) -> impl Swap + 'b
+where
+    G::Out<'a>: 'm,
+    'm: 'b,
+{
+    G::make(x)
+}
+
 fn dangle() -> &'static [i32; 3] {
     let long = Rc::new(RefCell::new(&[4, 5, 6]));
     let x = [1, 2, 3];
@@ -81,7 +90,18 @@ fn dangle_implied() -> &'static [i32; 3] {
     res
 }
 
+fn dangle_declared() -> &'static [i32; 3] {
+    let long = Rc::new(RefCell::new(&[4, 5, 6]));
+    let x = [1, 2, 3];
+    let short = Rc::new(RefCell::new(&x));
+    //[nll,polonius]~^ ERROR `x` does not live long enough
+    hide_declared::<()>(long.clone()).swap((|a| a)(hide_declared::<()>(short)));
+    let res: &'static [i32; 3] = *long.borrow();
+    res
+}
+
 fn main() {
     println!("{:?}", dangle());
     println!("{:?}", dangle_implied());
+    println!("{:?}", dangle_declared());
 }

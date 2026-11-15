@@ -66,114 +66,106 @@ fn arg_known_to_outlive<'tcx>(
     }
 }
 
-// `bound` contributes an outlives region without being searched for `arg`.
-fn value_connects_arg_to_non_static_region<'tcx>(
+/// Collect generic arguments from trait and projection clauses involving a
+/// non-static region.
+fn args_in_trait_selection_assumptions<'tcx>(
     tcx: TyCtxt<'tcx>,
-    env: &OutlivesEnvironment<'tcx>,
-    arg: ty::GenericArg<'tcx>,
-    value: impl TypeVisitable<TyCtxt<'tcx>>,
-    bound: Option<ty::Region<'tcx>>,
-) -> bool {
-    struct ContainsArgAndRegionVisitor<'a, 'tcx> {
-        tcx: TyCtxt<'tcx>,
-        env: &'a OutlivesEnvironment<'tcx>,
-        arg: ty::GenericArg<'tcx>,
-        contains_arg: bool,
-        has_region: bool,
+    param_env: ty::ParamEnv<'tcx>,
+) -> FxHashSet<ty::GenericArg<'tcx>> {
+    struct Visitor<'tcx> {
+        args: FxHashSet<ty::GenericArg<'tcx>>,
+        contains_non_static_region: bool,
     }
 
-    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ContainsArgAndRegionVisitor<'_, 'tcx> {
+    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for Visitor<'tcx> {
         fn visit_ty(&mut self, t: Ty<'tcx>) {
-            if Some(t) == self.arg.as_type() {
-                self.contains_arg = true;
+            if matches!(t.kind(), ty::Param(_)) {
+                self.args.insert(t.into());
             }
             t.super_visit_with(self);
         }
 
         fn visit_region(&mut self, r: ty::Region<'tcx>) {
             if !matches!(r.kind(), ty::ReStatic) {
-                self.has_region = true;
-            }
-            if let Some(source) = self.arg.as_region()
-                && source.is_free()
-                && r.is_free()
-                && self.env.free_region_map().sub_free_regions(self.tcx, r, source)
-            {
-                self.contains_arg = true;
+                self.contains_non_static_region = true;
+                self.args.insert(r.into());
             }
         }
     }
 
-    let mut visitor = ContainsArgAndRegionVisitor {
-        tcx,
-        env,
-        arg,
-        contains_arg: false,
-        has_region: bound.is_some_and(|r| r != tcx.lifetimes.re_static),
-    };
-    value.visit_with(&mut visitor);
-    visitor.contains_arg && visitor.has_region
+    let mut args = FxHashSet::default();
+    for clause in param_env.caller_bounds().all_clauses(tcx).iter() {
+        if !matches!(
+            clause.kind().skip_binder(),
+            ty::ClauseKind::Trait(_) | ty::ClauseKind::Projection(_)
+        ) {
+            continue;
+        }
+
+        let mut visitor = Visitor { args: FxHashSet::default(), contains_non_static_region: false };
+        clause.visit_with(&mut visitor);
+        if visitor.contains_non_static_region {
+            args.extend(visitor.args);
+        }
+    }
+    args
 }
 
-/// Whether `arg` may participate in an impl-only outlives relationship.
+/// Collect the generic arguments that occur in aliases known to outlive a
+/// non-static region.
 ///
-/// Direct facts such as `T: 'a` and `'b: 'a` are checked separately for each
-/// alias outlives bound. Trait and projection selection can also introduce
-/// outlives requirements that are not present in this definition's `ParamEnv`.
-/// This metadata is computed once and encoded cross-crate, so it cannot inspect
-/// the impl selected at a particular use. We therefore retain an argument when
-/// a clause connects it to any non-static region.
-///
-/// For region arguments, also match regions that the argument is known to
-/// outlive. This covers `'a: 'm` combined with an impl-only `'m: 'b`.
-/// `T: 'm` is propagated through such regions after this scan; treating it as
-/// relevant by itself would regress consumed-input RPITs.
+/// In principle, only arguments that can occur in each alias's underlying type
+/// are relevant. Computing that set uses `args_known_to_outlive_alias_params`,
+/// which is the query being built from this information. Walking every
+/// syntactic argument is the conservative fallback for that recursion.
+fn args_in_known_alias_outlives<'tcx>(
+    env: &OutlivesEnvironment<'tcx>,
+) -> FxHashSet<ty::GenericArg<'tcx>> {
+    struct Visitor<'tcx> {
+        args: FxHashSet<ty::GenericArg<'tcx>>,
+    }
+
+    impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for Visitor<'tcx> {
+        fn visit_ty(&mut self, t: Ty<'tcx>) {
+            if matches!(t.kind(), ty::Param(_)) {
+                self.args.insert(t.into());
+            }
+            t.super_visit_with(self);
+        }
+
+        fn visit_region(&mut self, r: ty::Region<'tcx>) {
+            if !matches!(r.kind(), ty::ReStatic) {
+                self.args.insert(r.into());
+            }
+        }
+    }
+
+    let mut visitor = Visitor { args: FxHashSet::default() };
+    for &ty::OutlivesClause(kind, region) in env.region_bound_pairs() {
+        let GenericKind::Alias(alias) = kind else { continue };
+        if matches!(region.kind(), ty::ReStatic) {
+            continue;
+        }
+        alias.visit_with(&mut visitor);
+    }
+    visitor.args
+}
+
+/// Collect arguments directly present in information that can make an alias
+/// depend on impl selection. Callers close this set over declared outlives
+/// relationships.
 ///
 /// Full specialization can select a more specific associated type even when no
 /// relevant predicate appears here. That limitation is recorded by
 /// `specialized-projection-unmentioned-type-arg.rs`.
-fn arg_may_participate_in_impl_outlives<'tcx>(
+fn impl_sensitive_seed_args<'tcx>(
     tcx: TyCtxt<'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     env: &OutlivesEnvironment<'tcx>,
-    arg: ty::GenericArg<'tcx>,
-) -> bool {
-    // Approximate impl-only relationships from the clauses visible here.
-    param_env.caller_bounds().all_clauses(tcx).iter().any(|clause| {
-        match clause.kind().skip_binder() {
-        // An exact `T: 'r` needs a target; it is handled after this scan.
-        ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, _))
-            if Some(subject) == arg.as_type() => false,
-        // Known region outlives relationships are handled separately.
-        ty::ClauseKind::RegionOutlives(_) => false,
-        // Covers things like `Struct<T::Assoc>: 'a` (though, this would get
-        // covered by the `OutlivesEnvironment` below)
-        ty::ClauseKind::TypeOutlives(ty::OutlivesClause(subject, bound)) => {
-            // Match the argument only in the subject: `I: 'i` does not mean
-            // that `'i` itself can occur in the opaque's hidden type.
-            value_connects_arg_to_non_static_region(tcx, env, arg, subject, Some(bound))
-        }
-        ty::ClauseKind::Trait(_)
-        // Something like `<T as Trait>::Assoc<'a> = &'a u8`
-        | ty::ClauseKind::Projection(_)
-        // A const's declared type can mention type and region parameters.
-        | ty::ClauseKind::ConstArgHasType(..)
-        | ty::ClauseKind::WellFormed(..)
-        | ty::ClauseKind::ConstEvaluatable(..)
-        | ty::ClauseKind::HostEffect(..) => {
-            value_connects_arg_to_non_static_region(tcx, env, arg, clause, None)
-        }
-        ty::ClauseKind::UnstableFeature(..) => false,
-    }
-    }) || env.region_bound_pairs().iter().any(|bound| {
-        // This covers cases (1) and (2) generally; while the above
-        // `TypeOutlives` arm covers ParamEnv clauses, it does not cover WF tys
-        if let GenericKind::Alias(alias) = bound.0 {
-            value_connects_arg_to_non_static_region(tcx, env, arg, alias, Some(bound.1))
-        } else {
-            false
-        }
-    })
+) -> FxHashSet<ty::GenericArg<'tcx>> {
+    let mut args = args_in_trait_selection_assumptions(tcx, param_env);
+    args.extend(args_in_known_alias_outlives(env));
+    args
 }
 
 /// This is more a technical limitation than a logical one. In the implied
@@ -452,23 +444,11 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
     let infcx = tcx.infer_ctxt().build(ty::TypingMode::non_body_analysis());
     let outlives_env =
         OutlivesEnvironment::new(&infcx, def_id, parent_param_env, wf_tys.iter().copied());
+    let impl_sensitive_seeds = impl_sensitive_seed_args(tcx, parent_param_env, &outlives_env);
 
-    let parent_region_may_have_impl_outlives: Vec<_> = parent_outlives_regions
+    let directly_sensitive_parent_regions: Vec<_> = parent_outlives_regions
         .iter()
-        .map(|&(region, _)| {
-            arg_may_participate_in_impl_outlives(
-                tcx,
-                parent_param_env,
-                &outlives_env,
-                region.into(),
-            )
-        })
-        .collect();
-
-    let indirectly_outlived_parent_regions: Vec<_> = parent_outlives_regions
-        .iter()
-        .zip(&parent_region_may_have_impl_outlives)
-        .filter_map(|(&(region, _), &can_outlive)| can_outlive.then_some(region))
+        .filter_map(|&(region, _)| impl_sensitive_seeds.contains(&region.into()).then_some(region))
         .collect();
 
     // Compute the bound-independent set once. It is included for every
@@ -479,25 +459,29 @@ pub(crate) fn args_known_to_outlive_opaque_params<'tcx>(
         .enumerate()
         .filter_map(|(idx, arg)| {
             let ty = arg.as_type()?;
-            let impl_sensitive = arg_may_participate_in_impl_outlives(
-                tcx,
-                parent_param_env,
-                &outlives_env,
-                ty.into(),
-            ) || indirectly_outlived_parent_regions.iter().any(|&region| {
-                // `T: 'm` is handled precisely by `param_known_to_outlive`,
-                // but must also compose with an impl-only `'m: 'b`.
-                param_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty, region)
-            });
+            let impl_sensitive = impl_sensitive_seeds.contains(&ty.into())
+                || directly_sensitive_parent_regions.iter().any(|&region| {
+                    // `T: 'm` is handled precisely by `param_known_to_outlive`,
+                    // but must also compose with an impl-only `'m: 'b`.
+                    arg_known_to_outlive(tcx, def_id, parent_param_env, &wf_tys, ty.into(), region)
+                });
             if impl_sensitive {
                 impl_sensitive_args.insert(idx as u32);
             }
             Some((idx, ty))
         })
         .collect();
-    for (&(parent_region, opaque_arg_idx), &impl_sensitive) in
-        parent_outlives_regions.iter().zip(&parent_region_may_have_impl_outlives)
-    {
+    for &(parent_region, opaque_arg_idx) in &parent_outlives_regions {
+        let impl_sensitive = directly_sensitive_parent_regions.iter().any(|&region| {
+            arg_known_to_outlive(
+                tcx,
+                def_id,
+                parent_param_env,
+                &wf_tys,
+                parent_region.into(),
+                region,
+            )
+        });
         if !impl_sensitive {
             continue;
         }
@@ -569,16 +553,16 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
         tcx.assumed_wf_types(def_id).iter().map(|(ty, _)| *ty).collect();
     extend_wf_tys(&mut wf_tys);
     let outlives_env = OutlivesEnvironment::new(&infcx, def_id, param_env, wf_tys.iter().copied());
+    let impl_sensitive_seeds = impl_sensitive_seed_args(tcx, param_env, &outlives_env);
 
-    // Compute this once per argument, rather than once per outlived region.
     let mut impl_sensitive_args = DenseBitSet::new_empty(self_identity_args.len());
     for (idx, arg) in self_identity_args.iter().enumerate() {
-        if arg_may_participate_in_impl_outlives(tcx, param_env, &outlives_env, arg) {
+        if impl_sensitive_seeds.contains(&arg) {
             impl_sensitive_args.insert(idx as u32);
         }
     }
 
-    let indirectly_outlived_regions: Vec<_> = self_identity_args
+    let impl_sensitive_regions: Vec<_> = self_identity_args
         .iter()
         .enumerate()
         .filter_map(|(idx, arg)| {
@@ -587,11 +571,10 @@ pub(crate) fn args_known_to_outlive_non_opaque_params<'tcx>(
         })
         .collect();
     for (idx, arg) in self_identity_args.iter().enumerate() {
-        let Some(ty) = arg.as_type() else { continue };
-        if indirectly_outlived_regions.iter().any(|&region| {
-            // `T: 'm` is handled precisely by `param_known_to_outlive`,
-            // but must also compose with an impl-only `'m: 'b`.
-            param_known_to_outlive(tcx, def_id, param_env, &wf_tys, ty, region)
+        if impl_sensitive_regions.iter().any(|&region| {
+            // Declared outlives relationships must compose with an impl-only
+            // relationship.
+            arg_known_to_outlive(tcx, def_id, param_env, &wf_tys, arg, region)
         }) {
             impl_sensitive_args.insert(idx as u32);
         }
