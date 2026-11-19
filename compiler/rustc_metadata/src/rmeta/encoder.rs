@@ -1703,10 +1703,8 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
                         tcx.explicit_implied_const_bounds(def_id).skip_binder(),
                     );
                 }
-                self.table_writer().live_args_for_alias_params(
-                    local_id,
-                    tcx.live_args_for_alias_params(def_id),
-                );
+                self.table_writer()
+                    .live_args_for_alias_params(local_id, tcx.live_args_for_alias_params(def_id));
                 self.table_writer()
                     .captured_args_for_opaque(local_id, tcx.captured_args_for_opaque(def_id));
             }

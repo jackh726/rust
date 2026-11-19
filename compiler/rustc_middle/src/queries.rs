@@ -2204,7 +2204,7 @@ rustc_queries! {
     /// may be live given only the alias's declared where-clauses. Used for liveness:
     /// these are the only args whose regions the underlying type of the alias
     /// could capture while satisfying an outlives bound on that param.
-    query live_args_for_alias_params(def_id: DefId) -> &'tcx (Vec<(usize, rustc_index::bit_set::DenseBitSet<u32>)>, rustc_index::bit_set::DenseBitSet<u32>) {
+    query live_args_for_alias_params(def_id: DefId) -> &'tcx Vec<(usize, rustc_index::bit_set::DenseBitSet<u32>)> {
         arena_cache
         desc { "computing the args known to outlive each region param of alias `{}`", tcx.def_path_str(def_id) }
         separate_provide_extern

@@ -165,4 +165,33 @@ mod structural_type_outlives {
     }
 }
 
+// An alias outlives clause is precise to the outlives region. Here, `I::Out: 'i`
+// only means that `I` needs to be live if `'i` is also live in the alias.
+mod unrelated_alias_outlives {
+    trait Family {
+        type Out;
+    }
+    impl<T> Family for T {
+        type Out = ();
+    }
+
+    fn first_to_local<'i, 'o, I>(
+        iter: I,
+        _: &'i I::Out,
+    ) -> impl Iterator<Item = u32> + 'o
+    where
+        I: Iterator<Item = u32> + Family,
+        I::Out: 'i,
+    {
+        iter.collect::<Vec<_>>().into_iter()
+    }
+
+    pub fn through_a_slice(columns: &mut [u32]) {
+        let token = ();
+        for x in first_to_local(columns.iter_mut().map(|c| *c), &token) {
+            columns[0] = x;
+        }
+    }
+}
+
 fn main() {}

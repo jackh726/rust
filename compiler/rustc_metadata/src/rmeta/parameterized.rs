@@ -286,7 +286,6 @@ lazy_encode_from! {
     std::option::Option<rustc_middle::ty::EarlyBinder<'static, rustc_middle::ty::Const<'static>>>,
     std::string::String,
     std::vec::Vec<(usize, rustc_index::bit_set::DenseBitSet<u32>)>,
-    (std::vec::Vec<(usize, rustc_index::bit_set::DenseBitSet<u32>)>, rustc_index::bit_set::DenseBitSet<u32>),
     // tidy-alphabetical-end
 }
 

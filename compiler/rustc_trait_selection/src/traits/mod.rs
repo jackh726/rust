@@ -998,8 +998,7 @@ pub fn provide(providers: &mut Providers) {
         live_args_for_alias_from_outlives_bounds:
             outlives_for_liveness::live_args_for_alias_from_outlives_bounds,
         captured_args_for_opaque: outlives_for_liveness::captured_args_for_opaque,
-        live_args_for_alias_params:
-            outlives_for_liveness::live_args_for_alias_params,
+        live_args_for_alias_params: outlives_for_liveness::live_args_for_alias_params,
         ..*providers
     };
 }
