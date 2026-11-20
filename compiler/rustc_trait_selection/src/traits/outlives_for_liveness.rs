@@ -57,24 +57,6 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for GenericArgCollector<'_, 'tcx> {
     }
 }
 
-/// Previous analysis only included in `live_by_outlives` *direct* liveness
-/// requirements. So, having `where T::Assoc: 'a, 'a: 'b` would *not* yet require
-/// that `T` is live if `'b` is an outlives region. Then expands that set.
-fn expand_live_args(
-    live_by_outlives: &[(usize, DenseBitSet<u32>)],
-    live_args: &mut DenseBitSet<u32>,
-) {
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (outlived_arg_idx, outliving_args) in live_by_outlives {
-            if live_args.contains(*outlived_arg_idx as u32) {
-                changed |= live_args.union(outliving_args);
-            }
-        }
-    }
-}
-
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
 pub(crate) fn captured_args_for_opaque<'tcx>(
     tcx: TyCtxt<'tcx>,
@@ -200,12 +182,13 @@ pub(crate) fn live_args_for_alias_from_outlives_bounds<'tcx>(
         else {
             continue;
         };
-        let mut outlives_args = outlives_params.1.clone();
-        expand_live_args(&args_known_to_outlive_by_arg, &mut outlives_args);
-        live_args.intersect(&outlives_args);
+        live_args.intersect(&outlives_params.1);
         bound_args.insert(outlives_params.0 as u32);
     }
     // The outlives lifetimes themselves must always be considered live.
+    // FIXME: this actually isn't true for correctness - but it currently is
+    // true for precision. See this `bound_lifetimes` case in the
+    // `unrelated-bounds-liveness` test.
     live_args.union(&bound_args);
     live_args
 }
@@ -238,9 +221,11 @@ pub(crate) fn live_args_for_alias_params<'tcx>(
 }
 
 /// Computes what args must be live for each captured region (if they are in the)
-/// outlives bound of an alias. For each captured regionm, this is the set of args
-/// that are known to outlive that region in addition to any args in aliases
-/// that are known to outlive that region.
+/// outlives bound of an alias. For each captured region:
+/// - First compute the set of known args that outlive that region
+/// - Then add any args in aliases that are known to outlive that region
+/// - Then add any args in the trait and projection bounds on the alias
+/// - Then compute the transitive set
 fn live_args_for_alias_params_inner<'tcx>(
     tcx: TyCtxt<'tcx>,
     def_id: LocalDefId,
@@ -277,6 +262,23 @@ fn live_args_for_alias_params_inner<'tcx>(
     let infcx = tcx.infer_ctxt().build(ty::TypingMode::non_body_analysis());
     let outlives_env = OutlivesEnvironment::new(&infcx, def_id, param_env, wf_tys.iter().copied());
 
+    // Compute captured args found in trait or projection bounds
+    let mut args_in_bounds = FxIndexSet::default();
+    for clause in param_env.caller_bounds().all_clauses(tcx).iter() {
+        if matches!(
+            clause.kind().skip_binder(),
+            ty::ClauseKind::Trait(_) | ty::ClauseKind::Projection(_)
+        ) && clause
+            .has_type_flags(ty::TypeFlags::HAS_FREE_LOCAL_REGIONS | ty::TypeFlags::HAS_RE_BOUND)
+        {
+            clause.visit_with(&mut GenericArgCollector(&mut args_in_bounds));
+        }
+    }
+    let args_in_bounds: FxIndexSet<_> = captured_args
+        .iter()
+        .filter_map(|(arg, arg_idx)| args_in_bounds.contains(arg).then_some(*arg_idx as u32))
+        .collect();
+
     let mut live_by_outlives = Vec::new();
     for &(outlived_region, outlived_arg_idx) in outlived_regions {
         let mut outliving_args = DenseBitSet::new_empty(arg_count);
@@ -305,37 +307,29 @@ fn live_args_for_alias_params_inner<'tcx>(
             }
         }
 
+        // Add the args found in trait and projection bounds
+        for &arg_idx in args_in_bounds.iter() {
+            outliving_args.insert(arg_idx);
+        }
+
         live_by_outlives.push((outlived_arg_idx, outliving_args));
     }
 
-    live_by_outlives
-}
-
-/// For a given alias, adds any captured args found in trait or projection bounds as live.
-fn add_live_args_from_alias_bounds<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    param_env: ty::ParamEnv<'tcx>,
-    captured_args: &[(ty::GenericArg<'tcx>, usize)],
-    live_by_outlives: &mut [(usize, DenseBitSet<u32>)],
-) {
-    let mut args_in_bounds = FxIndexSet::default();
-    for clause in param_env.caller_bounds().all_clauses(tcx).iter() {
-        if matches!(
-            clause.kind().skip_binder(),
-            ty::ClauseKind::Trait(_) | ty::ClauseKind::Projection(_)
-        ) && clause
-            .has_type_flags(ty::TypeFlags::HAS_FREE_LOCAL_REGIONS | ty::TypeFlags::HAS_RE_BOUND)
-        {
-            clause.visit_with(&mut GenericArgCollector(&mut args_in_bounds));
-        }
-    }
-    for &(arg, arg_idx) in captured_args {
-        if args_in_bounds.contains(&arg) {
-            for (_, live_args) in live_by_outlives.iter_mut() {
-                live_args.insert(arg_idx as u32);
+    // Finally, extend live args transitively
+    let direct_live_by_outlives = live_by_outlives.clone();
+    for (_, live_args) in &mut live_by_outlives {
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (outlived_arg_idx, outliving_args) in &direct_live_by_outlives {
+                if live_args.contains(*outlived_arg_idx as u32) {
+                    changed |= live_args.union(outliving_args);
+                }
             }
         }
     }
+
+    live_by_outlives
 }
 
 /// For each *captured* region of this alias, compute the *captured* identity
@@ -429,7 +423,7 @@ fn live_args_for_opaque_params<'tcx>(
         }
     }
 
-    let mut live_by_outlives = live_args_for_alias_params_inner(
+    live_args_for_alias_params_inner(
         tcx,
         def_id,
         parent_param_env,
@@ -437,9 +431,7 @@ fn live_args_for_opaque_params<'tcx>(
         self_identity_args.len(),
         &parent_outlives_regions,
         &args,
-    );
-    add_live_args_from_alias_bounds(tcx, parent_param_env, &args, &mut live_by_outlives);
-    live_by_outlives
+    )
 }
 
 #[tracing::instrument(level = "debug", skip(tcx), ret)]
@@ -458,7 +450,7 @@ fn live_args_for_non_opaque_params<'tcx>(
         .collect();
     let args: Vec<_> = self_identity_args.iter().enumerate().map(|(idx, arg)| (arg, idx)).collect();
 
-    let mut live_by_outlives = live_args_for_alias_params_inner(
+    live_args_for_alias_params_inner(
         tcx,
         def_id,
         param_env,
@@ -466,9 +458,7 @@ fn live_args_for_non_opaque_params<'tcx>(
         self_identity_args.len(),
         &outlived_regions,
         &args,
-    );
-    add_live_args_from_alias_bounds(tcx, param_env, &args, &mut live_by_outlives);
-    live_by_outlives
+    )
 }
 
 /// Restricts the live identity arguments using an applicable caller outlives
@@ -567,7 +557,6 @@ fn live_args_for_outlives_clause<'tcx>(
                     .unwrap();
                 capturable_args.union(outliving_args);
             }
-            expand_live_args(&args_known_to_outlive_by_arg, &mut capturable_args);
             capturable_args
         }
         // A free outlived region does not identify an alias argument position.

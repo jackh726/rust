@@ -351,6 +351,43 @@ mod implied_bounds {
     }
 }
 
+// Both of these cases *should* compile, because neither `'a` nor `'b` outlive
+// each other (and nothing outlives both of them), so neither lifetime should be
+// live.
+mod bound_lifetimes {
+    use super::Debug;
+
+    struct Captured<'a> {
+        _value: &'a u8,
+    }
+
+    fn no_common_outliving_arg<'a, 'b, T>(_: T) -> impl Debug + 'a + 'b {
+        ()
+    }
+
+    fn bounds_are_not_contents<'a, 'b>(_: &'a u8, _: &'b u8) -> impl Debug + 'a + 'b {
+        ()
+    }
+
+    pub fn run() {
+        let escaped;
+        {
+            let short = 0;
+            escaped = no_common_outliving_arg(Captured { _value: &short });
+        }
+        println!("escaped = {escaped:?}");
+
+        let long = 0;
+        let escaped;
+        {
+            let short = 0;
+            escaped = bounds_are_not_contents(&long, &short);
+            //~^ ERROR `short` does not live long enough
+        }
+        println!("escaped = {escaped:?}");
+    }
+}
+
 fn main() {
     base();
     item_bounds::run();
@@ -360,6 +397,7 @@ fn main() {
     rpitit::run();
     three_bounds::run();
     static_associated_type::run();
+    bound_lifetimes::run();
     one_lifetime::run();
     dead_gat_arg::run();
     implied_bounds::run();
