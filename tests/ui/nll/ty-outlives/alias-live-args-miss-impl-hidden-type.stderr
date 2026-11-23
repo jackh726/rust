@@ -1,0 +1,17 @@
+error[E0309]: the associated type `<T as Anything<'b, 'c, 'd>>::Assoc` may not live long enough
+  --> $DIR/alias-live-args-miss-impl-hidden-type.rs:43:5
+   |
+LL | fn launder<'r, 'b, 'c, 'd, T>(v: T::Assoc) -> Box<dyn Debug + 'r>
+   |            -- the associated type `<T as Anything<'b, 'c, 'd>>::Assoc` must be valid for the lifetime `'r` as defined here...
+...
+LL |     Box::new(v)
+   |     ^^^^^^^^^^^ ...so that the type `<T as Anything<'b, 'c, 'd>>::Assoc` will meet its required lifetime bounds
+   |
+help: consider adding an explicit lifetime bound
+   |
+LL |     'd: 'r, <T as Anything<'b, 'c, 'd>>::Assoc: 'r
+   |             ++++++++++++++++++++++++++++++++++++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0309`.

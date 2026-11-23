@@ -1,0 +1,17 @@
+error[E0309]: the associated type `<T as Anything<'b, 'c>>::AssocType` may not live long enough
+  --> $DIR/alias-components-cover-all-args.rs:31:5
+   |
+LL | fn launder<'r, 'b, 'c, T>(v: T::AssocType) -> Box<dyn Debug + 'r>
+   |            -- the associated type `<T as Anything<'b, 'c>>::AssocType` must be valid for the lifetime `'r` as defined here...
+...
+LL |     Box::new(v)
+   |     ^^^^^^^^^^^ ...so that the type `<T as Anything<'b, 'c>>::AssocType` will meet its required lifetime bounds
+   |
+help: consider adding an explicit lifetime bound
+   |
+LL |     T::AssocType: Debug, <T as Anything<'b, 'c>>::AssocType: 'r
+   |                          ++++++++++++++++++++++++++++++++++++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0309`.
